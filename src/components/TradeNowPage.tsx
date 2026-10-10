@@ -1390,6 +1390,20 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
                 <>
                   {(() => {
                     const activeTrade = openTrades.find(t => t.symbol === symbol);
+                    // Determine whether the dynamic trailing stop has moved this
+                    // trade's stop into profit (breakeven lock or beyond). The chart
+                    // recolours the SL line gold + "TS" when true.
+                    let trailingActive = false;
+                    if (activeTrade && typeof activeTrade.qty === 'number' && activeTrade.qty > 0 && typeof activeTrade.entryPrice === 'number' && typeof activeTrade.sl === 'number') {
+                      const live = (typeof livePrice === 'number' ? livePrice : activeTrade.entryPrice) as number;
+                      const pnl = calcPnl(activeTrade, live);
+                      const trail = calcTrailingStop({ qty: activeTrade.qty, openPnlUSD: pnl });
+                      // Active once the trail has triggered AND the stop is at/into profit.
+                      const intoProfit = activeTrade.side === 'buy'
+                        ? activeTrade.sl >= activeTrade.entryPrice
+                        : activeTrade.sl <= activeTrade.entryPrice;
+                      trailingActive = trail.active && intoProfit;
+                    }
                     return (
                       <TradingViewWidget
                         key={symbol}
@@ -1401,6 +1415,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
                         category={activeTrade?.category}
                         qty={activeTrade?.qty}
                         openedAt={activeTrade?.openedAt}
+                        trailingActive={trailingActive}
                         livePrice={livePrice}
                         onSlChange={activeTrade ? (p) => adjustSl(activeTrade.id, p) : undefined}
                         onTpChange={activeTrade ? (p) => adjustTp(activeTrade.id, p) : undefined}

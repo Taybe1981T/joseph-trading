@@ -63,7 +63,7 @@ const INDICATORS = [
   { id: 'vol', label: 'Volume' },
 ];
 
-export default function TradingViewWidget({ symbol, entryPrice, sl, tp, onSlChange, onTpChange, openedAt, livePrice }: TradingViewWidgetProps) {
+export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, trailingActive, onSlChange, onTpChange, openedAt, livePrice }: TradingViewWidgetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<any>(null);
@@ -123,15 +123,21 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, onSlChan
     } catch {}
   }, [tf, activeTool, activeIndicators, indicatorStyles, drawColor, drawWidth]);
 
-  const allPropsRef = useRef({ entryPrice, sl, tp, onSlChange, onTpChange, openedAt });
-  allPropsRef.current = { entryPrice, sl, tp, onSlChange, onTpChange, openedAt };
+  const allPropsRef = useRef({ entryPrice, sl, tp, side, trailingActive, onSlChange, onTpChange, openedAt });
+  allPropsRef.current = { entryPrice, sl, tp, side, trailingActive, onSlChange, onTpChange, openedAt };
   const livePriceRef = useRef<number | null>(livePrice);
   livePriceRef.current = livePrice;
 
   const lineDefs = (p = allPropsRef.current) => {
+    // When the dynamic trailing stop has kicked in and ratcheted the stop into
+    // profit, we recolour the SL line GOLD and relabel it "TS" so the user sees
+    // at a glance that the stop is now locking in profit, not a plain risk stop.
+    const slIsTrailing = !!p.trailingActive && p.sl != null && p.entryPrice != null && (
+      p.side === 'buy' ? p.sl > p.entryPrice : p.sl < p.entryPrice
+    );
     return [
       { key: 'entry' as LineKey, price: p.entryPrice, color: '#eab308', title: 'Entry', editable: false },
-      { key: 'sl' as LineKey, price: p.sl, color: '#f23645', title: 'SL', editable: true },
+      { key: 'sl' as LineKey, price: p.sl, color: slIsTrailing ? '#f59e0b' : '#f23645', title: slIsTrailing ? 'TS' : 'SL', editable: true },
       { key: 'tp' as LineKey, price: p.tp, color: '#089981', title: 'TP', editable: true },
     ];
   };
