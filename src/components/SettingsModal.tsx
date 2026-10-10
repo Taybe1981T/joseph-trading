@@ -410,6 +410,29 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
           </button>
           <NumberInput label={isAr ? 'أدنى النطاق الذهبي' : 'Golden Min (%)'} value={settings.goldenConfMin ?? 70} onChange={(v) => handleChange('goldenConfMin', v)} color="text-amber-300" desc={isAr ? 'أقل من هذه النسبة → محايد (إشارة ضعيفة)' : 'Below this → neutral (weak signal)'} />
           <NumberInput label={isAr ? 'أقصى النطاق الذهبي' : 'Golden Max (%)'} value={settings.goldenConfMax ?? 85} onChange={(v) => handleChange('goldenConfMax', v)} color="text-amber-300" desc={isAr ? 'أعلى من هذه النسبة → محايد (دخول متأخر/مطاردة)' : 'Above this → neutral (late entry / chasing)'} />
+          <div className="h-px bg-white/10 my-3" />
+          <button onClick={() => handleChange('trailingEnabled', settings.trailingEnabled === false)}
+            className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all text-right gap-4 ${
+              settings.trailingEnabled !== false
+                ? 'bg-emerald-400/10 border-emerald-400/40 text-emerald-300'
+                : 'bg-white/5 border-white/5 text-brand-muted'
+            }`}>
+            <div className="flex-1 min-w-0">
+              <div className="text-lg md:text-xl font-black leading-tight">{isAr ? 'تفعيل الوقف المتحرك (Trailing Stop)' : 'Enable Trailing Stop'}</div>
+              <div className="text-sm md:text-base opacity-70 mt-1 leading-snug">{isAr ? 'يؤمّن الصفقة عند نقطة الدخول ثم يتبع الربح بخطوات؛ القيم أدناه عند لوت 0.01 وتتوسع تلقائيًا مع اللوت' : 'Locks breakeven then trails profit in steps; values below are for lot 0.01 and auto-scale with lot size'}</div>
+            </div>
+            <div className={`w-14 h-8 rounded-full transition-colors flex items-center px-1 shrink-0 ${
+              settings.trailingEnabled !== false ? 'bg-emerald-400' : 'bg-white/20'
+            }`}>
+              <div className={`w-6 h-6 bg-white rounded-full transition-transform shadow ${
+                settings.trailingEnabled !== false ? 'translate-x-6' : 'translate-x-0'
+              }`} />
+            </div>
+          </button>
+          <NumberInput label={isAr ? 'ربح التفعيل عند 0.01 ($)' : 'Activation Profit @0.01 ($)'} value={settings.trailingBaseActivationUSD ?? 5} onChange={(v) => handleChange('trailingBaseActivationUSD', v)} color="text-emerald-300" suffix="$" min={1} max={100} desc={isAr ? 'الربح الذي يحرّك الوقف لنقطة الدخول (افتراضي 5$)' : 'Profit that moves the stop to breakeven (default $5)'} />
+          <NumberInput label={isAr ? 'خطوة التتبع عند 0.01 ($)' : 'Trail Step @0.01 ($)'} value={settings.trailingBaseStepUSD ?? 2} onChange={(v) => handleChange('trailingBaseStepUSD', v)} color="text-emerald-300" suffix="$" min={1} max={50} desc={isAr ? 'كل ربح إضافي بهذا المقدار يضيف خطوة قفل ربح (افتراضي 2$)' : 'Each extra profit of this size locks one more step (default $2)'} />
+          <NumberInput label={isAr ? 'زيادة التفعيل لكل 0.01 لوت ($)' : 'Extra Activation per +0.01 lot ($)'} value={settings.trailingActivationLotStep ?? 2} onChange={(v) => handleChange('trailingActivationLotStep', v)} color="text-emerald-300" suffix="$" min={0} max={20} desc={isAr ? 'يُضاف للتفعيل مع كل وحدة لوت إضافية (افتراضي 2$)' : 'Added to activation per extra lot unit (default $2)'} />
+          <NumberInput label={isAr ? 'زيادة الخطوة لكل 0.01 لوت ($)' : 'Extra Step per +0.01 lot ($)'} value={settings.trailingStepLotStep ?? 1} onChange={(v) => handleChange('trailingStepLotStep', v)} color="text-emerald-300" suffix="$" min={0} max={10} desc={isAr ? 'يُضاف للخطوة مع كل وحدة لوت إضافية (افتراضي 1$)' : 'Added to the step per extra lot unit (default $1)'} />
         </div>
       </div>
 

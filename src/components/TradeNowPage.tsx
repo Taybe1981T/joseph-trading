@@ -51,6 +51,25 @@ function loadAddedByCategory(): Record<string, string[]> {
   try { return JSON.parse(localStorage.getItem(ADDED_CAT_KEY) || '{}'); } catch { return {}; }
 }
 
+// ── Trailing-stop owner settings (stored in strategy_settings by the dev) ──
+// Read fresh on every tick so a settings change applies to live trades with no
+// reload. Defaults mirror the product rule: 0.01 lot → $5 arm / $2 step,
+// +$2 arm / +$1 step per extra 0.01-lot unit.
+const STRATEGY_KEY = 'strategy_settings';
+function loadTrailingSettings(): { enabled: boolean; baseActivationUSD: number; baseStepUSD: number; activationLotStep: number; stepLotStep: number } {
+  const fallback = { enabled: true, baseActivationUSD: 5, baseStepUSD: 2, activationLotStep: 2, stepLotStep: 1 };
+  try {
+    const raw = JSON.parse(localStorage.getItem(STRATEGY_KEY) || '{}');
+    return {
+      enabled: raw.trailingEnabled !== false,
+      baseActivationUSD: typeof raw.trailingBaseActivationUSD === 'number' && raw.trailingBaseActivationUSD > 0 ? raw.trailingBaseActivationUSD : 5,
+      baseStepUSD: typeof raw.trailingBaseStepUSD === 'number' && raw.trailingBaseStepUSD > 0 ? raw.trailingBaseStepUSD : 2,
+      activationLotStep: typeof raw.trailingActivationLotStep === 'number' && raw.trailingActivationLotStep >= 0 ? raw.trailingActivationLotStep : 2,
+      stepLotStep: typeof raw.trailingStepLotStep === 'number' && raw.trailingStepLotStep >= 0 ? raw.trailingStepLotStep : 1,
+    };
+  } catch { return fallback; }
+}
+
 function toTvSymbol(sym: string): string {
   const s = sym.trim().toUpperCase();
   const tvMap = loadTvMap();
@@ -353,7 +372,11 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
       // stop only if the new level is strictly better than the current one.
       if (typeof t.qty === 'number' && t.qty > 0 && typeof t.entryPrice === 'number') {
         const pnlUSD = calcPnl(t, price);
-        const trail = calcTrailingStop({ qty: t.qty, openPnlUSD: pnlUSD });
+        const ts = loadTrailingSettings();
+        if (!ts.enabled) {
+          // Trailing disabled by the owner → keep the original stop, skip trailing.
+        } else {
+        const trail = calcTrailingStop({ qty: t.qty, openPnlUSD: pnlUSD, baseActivationUSD: ts.baseActivationUSD, baseStepUSD: ts.baseStepUSD, activationLotStep: ts.activationLotStep, stepLotStep: ts.stepLotStep });
         // active covers BOTH: first activation (offset 0 → stop to breakeven/entry)
         // and every subsequent step (offset > 0 → stop trails into profit).
         if (trail.active && trail.offsetUSD >= 0) {
@@ -375,7 +398,8 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
               try { await store.updateTrade(t.id, { sl: newSl }); } catch { /* offline: local copy stands */ }
             }
           }
-        }
+        } // end if(trail.active)
+        } // end else (trailing enabled)
       }
 
       const hitTp = t.tp != null && ((t.side === 'buy' && price >= t.tp) || (t.side === 'sell' && price <= t.tp));

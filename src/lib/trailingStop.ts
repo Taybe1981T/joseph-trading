@@ -20,6 +20,10 @@
 export interface TrailingParams {
   qty: number;        // trade lot size (0.01, 0.03, 0.07 …)
   openPnlUSD: number; // current unrealised profit in USD (can be negative)
+  baseActivationUSD?: number; // owner-tunable base activation at lot 0.01 (default 5)
+  baseStepUSD?: number;       // owner-tunable base step at lot 0.01 (default 2)
+  activationLotStep?: number; // extra activation per +0.01 lot (default 2)
+  stepLotStep?: number;       // extra step per +0.01 lot (default 1)
 }
 
 export interface TrailingResult {
@@ -30,11 +34,14 @@ export interface TrailingResult {
   k: number;
 }
 
-export function calcTrailingStop({ qty, openPnlUSD }: TrailingParams): TrailingResult {
+export function calcTrailingStop({ qty, openPnlUSD, baseActivationUSD = 5, baseStepUSD = 2, activationLotStep = 2, stepLotStep = 1 }: TrailingParams): TrailingResult {
   // k = how many 0.01-lot "units" this trade is (min 1).
   const k = Math.max(1, Math.round((qty || 0) / 0.01));
-  const activationUSD = 5 + 2 * (k - 1);   // 0.01→5, 0.02→7, 0.03→9 …
-  const stepUSD = 2 + 1 * (k - 1);         // 0.01→2, 0.02→3, 0.03→4 …
+  // Owner-tunable scaling: base values hold at lot 0.01; every extra 0.01 unit
+  // adds activationLotStep to the activation and stepLotStep to the step.
+  // Default: 0.01→(5,2) · 0.02→(7,3) · 0.03→(9,4) …
+  const activationUSD = baseActivationUSD + activationLotStep * (k - 1);
+  const stepUSD = baseStepUSD + stepLotStep * (k - 1);
 
   // Not enough profit yet → trailing not engaged, keep original stop.
   if (openPnlUSD < activationUSD) {

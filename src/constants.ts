@@ -51,6 +51,12 @@ export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   goldenRangeEnabled: true, // only show signals whose confidence is inside the golden window
   goldenConfMin: 70,        // below this → neutral (too weak)
   goldenConfMax: 85,        // above this → neutral (late-entry / chasing risk)
+  // ── Trailing stop (dynamic, scales with lot size) ──
+  trailingEnabled: true,    // master on/off (each TradeNowPage tick checks it)
+  trailingBaseActivationUSD: 5,  // $ profit that arms the trail at the base lot 0.01
+  trailingBaseStepUSD: 2,        // locked-profit step ($) at the base lot 0.01
+  trailingActivationLotStep: 2,  // +$ activation for each extra 0.01 lot above 0.01
+  trailingStepLotStep: 1,        // +$ step for each extra 0.01 lot above 0.01
 };
 
 export const DEFAULT_AUTO_SETTINGS = {

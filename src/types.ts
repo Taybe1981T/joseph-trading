@@ -123,6 +123,12 @@ export interface StrategySettings {
   goldenRangeEnabled?: boolean;        // when true, only signals inside [goldenConfMin..goldenConfMax] are shown
   goldenConfMin?: number;              // lower edge of the golden window (default 70) — below → neutral
   goldenConfMax?: number;              // upper edge of the golden window (default 85) — above → neutral (chasing risk)
+  // ── Trailing stop (dynamic, scales with lot size) ──
+  trailingEnabled?: boolean;           // master on/off for the trailing stop (default true)
+  trailingBaseActivationUSD?: number;  // profit ($) that activates the trail at lot 0.01 (default 5)
+  trailingBaseStepUSD?: number;        // trailing step ($) at lot 0.01 (default 2)
+  trailingActivationLotStep?: number;  // extra activation ($) per +0.01 lot above 0.01 (default 2)
+  trailingStepLotStep?: number;        // extra step ($) per +0.01 lot above 0.01 (default 1)
 }
 
 export interface AutoAnalysisSettings {
