@@ -312,13 +312,13 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, tr
         height: el.clientHeight || 360,
         layout: {
           background: { type: ColorType.Solid, color: '#0b0e14' },
-          textColor: '#8b93a7',
+          textColor: '#f59e0b', // yellow on BOTH axes (price + time labels)
           fontFamily: 'inherit',
           // Bigger axis + last-value (current price) labels so the whole scale
           // reads clearly. lightweight-charts has no per-axis font size, so this
           // is global for the few labels the chart draws (price axis, time axis,
           // and the current-price tag).
-          fontSize: 15,
+          fontSize: 16,
         },
         grid: {
           vertLines: { color: 'rgba(255,255,255,0.04)' },
@@ -326,11 +326,42 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, tr
         },
         rightPriceScale: {
           // Amber axis: price labels + border use the app's gold accent.
-          borderColor: 'rgba(245,158,11,0.35)',
+          borderColor: 'rgba(245,158,11,0.55)',
+          borderVisible: true,
           scaleMargins: { top: 0.12, bottom: 0.12 },
           textColor: '#f59e0b', // yellow price-axis labels
+          entireTextOnly: false, // اعرض كل تسميات السعر بلا إخفاء
+          minimumWidth: 92, // شريط سعر أعرض وأوضح
         },
-        timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true, secondsVisible: false },
+        timeScale: {
+          borderColor: 'rgba(245,158,11,0.55)', // yellow time-axis border
+          borderVisible: true,
+          timeVisible: true,
+          secondsVisible: false,
+          // تفاصيل التاريخ من الدقيقة → السنة حسب الإطار والزوم. الصيغة:
+          // يوم/شهر/سنة + الساعة عند الأطر اللحظية، شهر/سنة عند اليومي+،
+          // سنة فقط عند الشهري. كل التسميات صفراء عبر textColor أدناه.
+          tickMarkFormatter: (time: any, tickMarkType: number, _locale: string) => {
+            // يدعم UTCTimestamp (رقم) وBusinessDay ({year,month,day}) وISO string
+            let ms = 0;
+            if (typeof time === 'number') ms = time * 1000;
+            else if (typeof time === 'string') ms = Date.parse(time);
+            else if (time && typeof time === 'object') {
+              const y = time.year ?? 1970, m = time.month ?? 1, d0 = time.day ?? 1;
+              ms = Date.UTC(y, m - 1, d0);
+            }
+            const d = new Date(ms || 0);
+            const dd = String(d.getUTCDate()).padStart(2, '0');
+            const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+            const yyyy = d.getUTCFullYear();
+            const hh = String(d.getUTCHours()).padStart(2, '0');
+            const mi = String(d.getUTCMinutes()).padStart(2, '0');
+            // tickMarkType (lightweight-charts): 0=سنة 1=شهر 2=يوم 3=ساعة 4=دقيقة
+            if (tickMarkType <= 1) return tickMarkType === 0 ? `${yyyy}` : `${mm}/${yyyy}`;
+            if (tickMarkType === 2) return `${dd}/${mm}/${yyyy}`;
+            return `${dd}/${mm} ${hh}:${mi}`;
+          },
+        },
         crosshair: { mode: CrosshairMode.Normal },
       });
       const series = chart.addSeries(CandlestickSeries, {
