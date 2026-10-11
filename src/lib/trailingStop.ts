@@ -1,13 +1,14 @@
 // ---------- Dynamic Trailing Stop (scales with lot size) ----------
 //
 // Rule (per the product owner, verified against their worked examples):
-//   • Base lot 0.01 (one "unit" k=1):
+//   • Base lot = the category's per-$1,000 unit (forex/metals/stocks 0.01, crypto 0.1)
+//     — one "unit" k=1. The worked $ figures below use the 0.01 base:
 //       - trailing ACTIVATES once open profit reaches $5  → stop jumps to breakeven (entry)
 //       - from there the stop trails to (windows × $2) of LOCKED profit, where
 //         windows = floor(profit / $5):
 //         $10 (2×) → entry+4 · $15 (3×) → entry+6 · $20 (4×) → entry+8 …
 //         (every extra full $5 of profit adds $2 of locked profit)
-//   • Every extra 0.01 lot (k = lot / 0.01):
+//   • Every extra base lot (k = lot / categoryBase):
 //       - activation  += $2  (5, 7, 9, …)      →  activation = 5 + 2*(k-1)
 //       - step size   += $1  (2, 3, 4, …)      →  step       = 2 + 1*(k-1)
 //   • The stop NEVER moves backwards (only ratchets toward profit).
@@ -20,6 +21,7 @@
 export interface TrailingParams {
   qty: number;        // trade lot size (0.01, 0.03, 0.07 …)
   openPnlUSD: number; // current unrealised profit in USD (can be negative)
+  baseUnit?: number;  // category base lot per $1,000 (forex/metals/stocks 0.01, crypto 0.1)
   baseActivationUSD?: number; // owner-tunable base activation at lot 0.01 (default 5)
   baseStepUSD?: number;       // owner-tunable base step at lot 0.01 (default 2)
   activationLotStep?: number; // extra activation per +0.01 lot (default 2)
@@ -34,9 +36,11 @@ export interface TrailingResult {
   k: number;
 }
 
-export function calcTrailingStop({ qty, openPnlUSD, baseActivationUSD = 5, baseStepUSD = 2, activationLotStep = 2, stepLotStep = 1 }: TrailingParams): TrailingResult {
-  // k = how many 0.01-lot "units" this trade is (min 1).
-  const k = Math.max(1, Math.round((qty || 0) / 0.01));
+export function calcTrailingStop({ qty, openPnlUSD, baseActivationUSD = 5, baseStepUSD = 2, activationLotStep = 2, stepLotStep = 1, baseUnit = 0.01 }: TrailingParams): TrailingResult {
+  // k = how many base-lot "units" this trade is (min 1). The unit is the category's
+  // per-$1,000 base lot (forex/metals/stocks 0.01, crypto 0.1) so activation/step
+  // stay proportional to real risk across categories (e.g. 1.0 crypto lot = k=10).
+  const k = Math.max(1, Math.round((qty || 0) / baseUnit));
   // Owner-tunable scaling: base values hold at lot 0.01; every extra 0.01 unit
   // adds activationLotStep to the activation and stepLotStep to the step.
   // Default: 0.01→(5,2) · 0.02→(7,3) · 0.03→(9,4) …

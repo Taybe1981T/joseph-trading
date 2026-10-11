@@ -70,7 +70,7 @@ export function isMarketOpen(category: string, symbol?: string, now: Date = new 
 // Base (per-lot) quantity per category at a $1,000 balance. The lot scales with
 // the account: every extra $1,000 adds one base unit (see dynamicLotSize), so a
 // $3,000 balance trades 3× the base, a $7,000 balance 7×, etc.
-function baseQtyPerCategory(category: string): number {
+export function baseQtyPerCategory(category: string): number {
   switch (category) {
     case 'crypto': return 0.1;   // 0.1 units of coin per $1,000
     case 'forex': return 0.01;   // 0.01 lots per $1,000 (1 lot = 100,000 units)

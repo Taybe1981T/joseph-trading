@@ -8,7 +8,7 @@ import TradingViewWidget from './TradingViewWidget';
 import MT5Web from './MT5Web';
 import {
   PaperTrade, getTradeStore, getLivePrice, subscribePrices,
-  calcPnl, getDefaultQty, START_BALANCE, MIN_BALANCE, DEFAULT_LEVERAGE, LEVERAGE_OPTIONS, isMarketOpen, calcRiskUSD,
+  calcPnl, getDefaultQty, START_BALANCE, MIN_BALANCE, DEFAULT_LEVERAGE, LEVERAGE_OPTIONS, isMarketOpen, calcRiskUSD, baseQtyPerCategory,
 } from '../services/paperTradingService';
 import { searchSymbols, catEmoji, SuggestedSymbol } from '../services/symbolSuggestions';
 import { playOpenSound, playCloseSound, playDragTick } from '../lib/tradeSounds';
@@ -420,7 +420,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
         if (!ts.enabled) {
           // Trailing disabled by the owner → keep the original stop, skip trailing.
         } else {
-        const trail = calcTrailingStop({ qty: t.qty, openPnlUSD: pnlUSD, baseActivationUSD: ts.baseActivationUSD, baseStepUSD: ts.baseStepUSD, activationLotStep: ts.activationLotStep, stepLotStep: ts.stepLotStep });
+        const trail = calcTrailingStop({ qty: t.qty, openPnlUSD: pnlUSD, baseUnit: baseQtyPerCategory(t.category || detectCategory(t.symbol)), baseActivationUSD: ts.baseActivationUSD, baseStepUSD: ts.baseStepUSD, activationLotStep: ts.activationLotStep, stepLotStep: ts.stepLotStep });
         // active covers BOTH: first activation (offset 0 → stop to breakeven/entry)
         // and every subsequent step (offset > 0 → stop trails into profit).
         if (trail.active && trail.offsetUSD >= 0) {
@@ -1472,7 +1472,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
                     if (activeTrade && typeof activeTrade.qty === 'number' && activeTrade.qty > 0 && typeof activeTrade.entryPrice === 'number' && typeof activeTrade.sl === 'number') {
                       const live = (typeof livePrice === 'number' ? livePrice : activeTrade.entryPrice) as number;
                       const pnl = calcPnl(activeTrade, live);
-                      const trail = calcTrailingStop({ qty: activeTrade.qty, openPnlUSD: pnl });
+                      const trail = calcTrailingStop({ qty: activeTrade.qty, openPnlUSD: pnl, baseUnit: baseQtyPerCategory(activeTrade.category || detectCategory(activeTrade.symbol)) });
                       // Active once the trail has triggered AND the stop is at/into profit.
                       const intoProfit = activeTrade.side === 'buy'
                         ? activeTrade.sl >= activeTrade.entryPrice
