@@ -318,7 +318,7 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, tr
           // reads clearly. lightweight-charts has no per-axis font size, so this
           // is global for the few labels the chart draws (price axis, time axis,
           // and the current-price tag).
-          fontSize: 16,
+          fontSize: 18,
         },
         grid: {
           vertLines: { color: 'rgba(255,255,255,0.04)' },
@@ -331,16 +331,15 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, tr
           scaleMargins: { top: 0.12, bottom: 0.12 },
           textColor: '#f59e0b', // yellow price-axis labels
           entireTextOnly: false, // اعرض كل تسميات السعر بلا إخفاء
-          minimumWidth: 92, // شريط سعر أعرض وأوضح
+          minimumWidth: 104, // شريط سعر أعرض لاستيعاب خط 18
         },
         timeScale: {
           borderColor: 'rgba(245,158,11,0.55)', // yellow time-axis border
           borderVisible: true,
           timeVisible: true,
           secondsVisible: false,
-          // تفاصيل التاريخ من الدقيقة → السنة حسب الإطار والزوم. الصيغة:
-          // يوم/شهر/سنة + الساعة عند الأطر اللحظية، شهر/سنة عند اليومي+،
-          // سنة فقط عند الشهري. كل التسميات صفراء عبر textColor أدناه.
+          // التاريخ الكامل دائماً (يوم/شهر/سنة) على الشريط الزمني، مع الساعة
+          // عند الأطر اللحظية. الصيغة: يوم/شهر/سنة [+ ساعة:دقيقة].
           tickMarkFormatter: (time: any, tickMarkType: number, _locale: string) => {
             // يدعم UTCTimestamp (رقم) وBusinessDay ({year,month,day}) وISO string
             let ms = 0;
@@ -357,9 +356,10 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, tr
             const hh = String(d.getUTCHours()).padStart(2, '0');
             const mi = String(d.getUTCMinutes()).padStart(2, '0');
             // tickMarkType (lightweight-charts): 0=سنة 1=شهر 2=يوم 3=ساعة 4=دقيقة
-            if (tickMarkType <= 1) return tickMarkType === 0 ? `${yyyy}` : `${mm}/${yyyy}`;
-            if (tickMarkType === 2) return `${dd}/${mm}/${yyyy}`;
-            return `${dd}/${mm} ${hh}:${mi}`;
+            // التاريخ الكامل (يوم/شهر/سنة) يظهر دائماً، مع الساعة عند اللحظي.
+            const full = `${dd}/${mm}/${yyyy}`;
+            if (tickMarkType <= 2) return full;
+            return `${full} ${hh}:${mi}`;
           },
         },
         crosshair: { mode: CrosshairMode.Normal },
