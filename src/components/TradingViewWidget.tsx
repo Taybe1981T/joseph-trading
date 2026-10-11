@@ -338,9 +338,8 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, tr
           borderVisible: true,
           timeVisible: true,
           secondsVisible: false,
-          // التاريخ الكامل دائماً (يوم/شهر/سنة) على الشريط الزمني، مع الساعة
-          // عند الأطر اللحظية. الصيغة: يوم/شهر/سنة [+ ساعة:دقيقة].
-          tickMarkFormatter: (time: any, tickMarkType: number, _locale: string) => {
+          // كل التفاصيل دائماً: يوم/شهر/سنة + ساعة:دقيقة على الشريط الزمني.
+          tickMarkFormatter: (time: any, _tickMarkType: number, _locale: string) => {
             // يدعم UTCTimestamp (رقم) وBusinessDay ({year,month,day}) وISO string
             let ms = 0;
             if (typeof time === 'number') ms = time * 1000;
@@ -356,10 +355,9 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, tr
             const hh = String(d.getUTCHours()).padStart(2, '0');
             const mi = String(d.getUTCMinutes()).padStart(2, '0');
             // tickMarkType (lightweight-charts): 0=سنة 1=شهر 2=يوم 3=ساعة 4=دقيقة
-            // التاريخ الكامل (يوم/شهر/سنة) يظهر دائماً، مع الساعة عند اللحظي.
-            const full = `${dd}/${mm}/${yyyy}`;
-            if (tickMarkType <= 2) return full;
-            return `${full} ${hh}:${mi}`;
+            // كل المستويات دائماً: يوم/شهر/سنة + ساعة:دقيقة (دقائق+ساعات+أيام+شهور).
+            // ملاحظة: شموع اليومي+ في Yahoo تحمل توقيت 00:00 UTC لذلك تُعرض 00:00.
+            return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
           },
         },
         crosshair: { mode: CrosshairMode.Normal },
