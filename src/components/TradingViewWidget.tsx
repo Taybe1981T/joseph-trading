@@ -689,6 +689,19 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, tr
     }
   };
 
+  // Zoom candles in/out by scaling barSpacing (px per bar): larger value = bigger
+  // candles & fewer visible bars, smaller = more bars. Clamped to a safe range so
+  // the chart never collapses or explodes. Independent of horizontal scroll pos.
+  const zoom = (dir: number) => {
+    try {
+      const ts = chartRef.current?.timeScale();
+      const cur = ts.options()?.barSpacing ?? (tf === '1d' ? 16 : 11);
+      const next = Math.max(3, Math.min(50, dir > 0 ? cur * 1.3 : cur / 1.3));
+      ts.applyOptions({ barSpacing: next });
+      syncPositions();
+    } catch {}
+  };
+
   return (
     // The chart plays its own click/drag ticks, so the global UI click sound is
     // muted here — otherwise every drag over the canvas would double-tick.
@@ -810,6 +823,8 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, tr
       {/* bottom nav: scroll back/forward/reset */}
       <div className="flex items-center justify-center gap-4 py-2 bg-[#0b0e14] border-t border-white/5">
         <span className="text-[10px] text-white/30 font-mono px-2" title="App build (bundle hash)">{bundleVer || 'dev'}</span>
+        <button onClick={() => { playClickSound(); zoom(1); }} title="تكبير الشموع" className="w-12 h-10 rounded-lg bg-[#22c55e]/15 border-2 border-[#22c55e]/40 text-[#22c55e] hover:bg-[#22c55e]/25 active:scale-90 transition-all flex items-center justify-center text-2xl font-black">+</button>
+        <button onClick={() => { playClickSound(); zoom(-1); }} title="تصغير الشموع" className="w-12 h-10 rounded-lg bg-[#ef4444]/15 border-2 border-[#ef4444]/40 text-[#ef4444] hover:bg-[#ef4444]/25 active:scale-90 transition-all flex items-center justify-center text-2xl font-black">−</button>
         <button onClick={() => { playClickSound(); scrollBy(-1); }} title="للخلف" className="w-14 h-10 rounded-lg bg-white/5 border-2 border-white/10 text-white hover:bg-white/10 active:scale-90 transition-all flex items-center justify-center text-xl">←</button>
         <button onClick={() => { playClickSound(); scrollBy(1); }} title="للأمام" className="w-14 h-10 rounded-lg bg-white/5 border-2 border-white/10 text-white hover:bg-white/10 active:scale-90 transition-all flex items-center justify-center text-xl">→</button>
         <button onClick={() => { playClickSound(); resetView(); }} title="العودة لآخر سعر (مع الحفاظ على الحجم)" className="w-14 h-10 rounded-lg bg-[#F59E0B] text-black font-black flex items-center justify-center text-xl border-2 border-[#F59E0B] active:scale-90 transition-all">↻</button>
