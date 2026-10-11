@@ -17,6 +17,7 @@ import { toTvSymbol as toTvSymbolShared } from '../lib/tvSymbol';
 import { calcTrailingStop } from '../lib/trailingStop';
 import MT5ConnectModal from './MT5ConnectModal';
 import { loadConnection, mt5Bridge, MT5Connection } from '../services/mt5Bridge';
+import { isDeveloperEmail } from '../lib/clientIds';
 
 interface TradeNowPageProps {
   lang: Language;
@@ -232,6 +233,10 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   const mt5ConnRef = React.useRef<MT5Connection | null>(mt5Conn);
   React.useEffect(() => { execRealRef.current = execReal; }, [execReal]);
   React.useEffect(() => { mt5ConnRef.current = mt5Conn; }, [mt5Conn]);
+  // The MT5 real-execution UI is DEVELOPER-ONLY for now — hidden from clients
+  // until the paper auto-trading system is fully validated. Without this flag
+  // the Link/REAL buttons and the connect modal never render.
+  const isDev = isDeveloperEmail(user?.email);
   const [symbolsCollapsed, setSymbolsCollapsed] = useState(false);
   const [ticketCollapsed, setTicketCollapsed] = useState(true);
   const [chartCollapsed, setChartCollapsed] = useState(false);
@@ -1119,27 +1124,31 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
             📈 {isAr ? 'MT5 ويب' : 'MT5 Web'} ↗
           </button>
 
-          {/* ── Real-money MT5 bridge control ─────────────────────────── */}
-          <button
-            onClick={() => setMt5Modal(true)}
-            className={`px-5 py-2 rounded-2xl text-[16px] font-black uppercase transition-all leading-none border active:scale-95 ${
-              mt5Conn ? 'bg-emerald-500/15 border-emerald-400 text-emerald-200' : 'bg-white/10 border-white/15 text-white/60 hover:bg-white/20'
-            }`}
-            title={isAr ? 'ربط حساب MT5 الحقيقي عبر الجسر الخاص بك' : 'Connect your real MT5 account via your own bridge'}
-          >
-            🔗 {mt5Conn ? (isAr ? 'MT5 متصل' : 'MT5 Linked') : (isAr ? 'اربط MT5' : 'Link MT5')}
-          </button>
+          {/* ── Real-money MT5 bridge control — DEVELOPER-ONLY ────────── */}
+          {isDev && (
+            <>
+              <button
+                onClick={() => setMt5Modal(true)}
+                className={`px-5 py-2 rounded-2xl text-[16px] font-black uppercase transition-all leading-none border active:scale-95 ${
+                  mt5Conn ? 'bg-emerald-500/15 border-emerald-400 text-emerald-200' : 'bg-white/10 border-white/15 text-white/60 hover:bg-white/20'
+                }`}
+                title={isAr ? 'ربط حساب MT5 الحقيقي عبر الجسر الخاص بك' : 'Connect your real MT5 account via your own bridge'}
+              >
+                🔗 {mt5Conn ? (isAr ? 'MT5 متصل' : 'MT5 Linked') : (isAr ? 'اربط MT5' : 'Link MT5')}
+              </button>
 
-          {mt5Conn && (
-            <button
-              onClick={() => setExecReal((v) => !v)}
-              className={`px-5 py-2 rounded-2xl text-[16px] font-black uppercase transition-all leading-none border-2 active:scale-95 ${
-                execReal ? 'bg-red-500 text-white border-red-400 shadow-lg shadow-red-500/30' : 'bg-white/10 border-white/15 text-white/60 hover:bg-white/20'
-              }`}
-              title={isAr ? 'بدّل بين التداول الورقي (افتراضي) والتداول الحقيقي' : 'Toggle paper (default) vs real execution'}
-            >
-              {execReal ? (isAr ? '🔴 حقيقي' : '🔴 REAL') : (isAr ? 'ورقي' : 'Paper')}
-            </button>
+              {mt5Conn && (
+                <button
+                  onClick={() => setExecReal((v) => !v)}
+                  className={`px-5 py-2 rounded-2xl text-[16px] font-black uppercase transition-all leading-none border-2 active:scale-95 ${
+                    execReal ? 'bg-red-500 text-white border-red-400 shadow-lg shadow-red-500/30' : 'bg-white/10 border-white/15 text-white/60 hover:bg-white/20'
+                  }`}
+                  title={isAr ? 'بدّل بين التداول الورقي (افتراضي) والتداول الحقيقي' : 'Toggle paper (default) vs real execution'}
+                >
+                  {execReal ? (isAr ? '🔴 حقيقي' : '🔴 REAL') : (isAr ? 'ورقي' : 'Paper')}
+                </button>
+              )}
+            </>
           )}
         </div>
         <div className="flex items-end justify-between gap-2 flex-wrap w-full">
@@ -1991,8 +2000,8 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
           </div>
         </div>
       )}
-      {/* MT5 real-connection modal */}
-      {mt5Modal && (
+      {/* MT5 real-connection modal — DEVELOPER-ONLY */}
+      {isDev && mt5Modal && (
         <MT5ConnectModal
           lang={lang}
           onClose={() => setMt5Modal(false)}
