@@ -47,7 +47,9 @@ type LineKey = 'entry' | 'sl' | 'tp';
 // cleanest, most TradingView-like perspective and the backend fully supports it
 // (Binance 1d/365 bars, Twelve Data 1day). Outlier-spiked candles are neutralised
 // at runtime by sanitizeCandlesForChart(), so daily is safe to show.
-const TIMEFRAMES = ['1m', '5m', '15m', '1h', '1d'];
+// Full range 1-minute → 1-month (a monthly chart spans years). Keys match the
+// /api/market-data backend: note lowercase '1w' for weekly, capital '1M'.
+const TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '4h', '1d', '1w', '1M'];
 
 const DRAW_TOOLS = [
   { id: 'cursor', label: 'مؤشر', icon: '↖' },
@@ -199,7 +201,7 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, tr
             if (diff < bestDiff) { bestDiff = diff; best = c.time; }
           }
         }
-        const tfSec: Record<string, number> = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400, '1W': 604800, '1M': 2592000 };
+        const tfSec: Record<string, number> = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400, '1w': 604800, '1M': 2592000 };
         let x: number | null = null;
         if (best != null && bestDiff <= (tfSec[tf] || 3600) * 4) {
           try { x = chart.timeScale().timeToCoordinate(best as any); } catch {}
@@ -312,14 +314,21 @@ export default function TradingViewWidget({ symbol, entryPrice, sl, tp, side, tr
           background: { type: ColorType.Solid, color: '#0b0e14' },
           textColor: '#8b93a7',
           fontFamily: 'inherit',
+          // Bigger axis + last-value (current price) labels so the whole scale
+          // reads clearly. lightweight-charts has no per-axis font size, so this
+          // is global for the few labels the chart draws (price axis, time axis,
+          // and the current-price tag).
+          fontSize: 15,
         },
         grid: {
           vertLines: { color: 'rgba(255,255,255,0.04)' },
           horzLines: { color: 'rgba(255,255,255,0.04)' },
         },
         rightPriceScale: {
-          borderColor: 'rgba(255,255,255,0.1)',
+          // Amber axis: price labels + border use the app's gold accent.
+          borderColor: 'rgba(245,158,11,0.35)',
           scaleMargins: { top: 0.12, bottom: 0.12 },
+          textColor: '#f59e0b', // yellow price-axis labels
         },
         timeScale: { borderColor: 'rgba(255,255,255,0.1)', timeVisible: true, secondsVisible: false },
         crosshair: { mode: CrosshairMode.Normal },
