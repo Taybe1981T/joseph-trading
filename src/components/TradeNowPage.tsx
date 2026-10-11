@@ -248,6 +248,13 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   // for that trade so it does NOT instantly close on the current parked price.
   const levelCooldownRef = React.useRef<Record<string, number>>({});
 
+  // ── Manual-ticket auto-fill tracking ──
+  // The ticket (qty + SL/TP $ fields) is pre-filled from the SAME balance-scaled
+  // logic the auto-trader uses (getDefaultQty + calcRiskUSD). Each field is only
+  // auto-filled while the user has NOT touched it; once typed, we never overwrite.
+  // Switching symbol resets all three to untouched so the new symbol pre-fills.
+  const ticketTouchedRef = React.useRef<{ qty: boolean; sl: boolean; tp: boolean }>({ qty: false, sl: false, tp: false });
+
   // Find matching signal for current symbol
   const matchedSignal = React.useMemo(() => {
     if (!symbol || signals.length === 0) return null;
@@ -276,8 +283,45 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
       setTpPrice('');
     }
     lastFillSymbol.current = symbol;
+    // Switching symbol resets the ticket-touch flags so the new symbol pre-fills.
+    ticketTouchedRef.current = { qty: false, sl: false, tp: false };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);
+
+  // ── Ticket auto-fill from the SAME balance-scaled logic the auto-trader uses ──
+  // Pre-fills qty + SL/TP $ fields with getDefaultQty + calcRiskUSD whenever the
+  // symbol or balance changes — but ONLY for fields the user has not typed in yet
+  // (ticketTouchedRef). Once typed, the value is sacred and never overwritten.
+  // matchedSignal wins for SL/TP when present (its values already follow the
+  // signal's own risk plan); otherwise the balance-scaled defaults apply.
+  useEffect(() => {
+    if (!symbol) return;
+    const cat = detectCategory(symbol);
+    if (!ticketTouchedRef.current.qty) {
+      const autoQty = getDefaultQty(cat, balance);
+      setQty((prev) => (prev === autoQty ? prev : autoQty));
+    }
+    // A matching signal already carries its own SL/TP risk plan (filled above as
+    // USD). When one exists, keep those values — the balance-scaled defaults below
+    // are ONLY a fallback for symbols without a live signal.
+    const hasSignalRisk = !!(matchedSignal && matchedSignal.stopLoss && matchedSignal.takeProfit);
+    if (!hasSignalRisk && (!ticketTouchedRef.current.sl || !ticketTouchedRef.current.tp)) {
+      const { slUsd, tpUsd } = calcRiskUSD(balance);
+      if (!ticketTouchedRef.current.sl) {
+        setSlPrice((prev) => {
+          const next = slUsd.toFixed(0);
+          return prev === next ? prev : next;
+        });
+      }
+      if (!ticketTouchedRef.current.tp) {
+        setTpPrice((prev) => {
+          const next = tpUsd.toFixed(0);
+          return prev === next ? prev : next;
+        });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol, balance]);
 
 
   const allSymbolsFor = (cat: string): string[] => {
@@ -1281,21 +1325,21 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
                 })()}
               </label>
               <div className="flex items-center gap-2 mt-1">
-                <button onClick={() => setQty((q) => Math.max(0.01, +(q / 2).toFixed(4)))} className="w-11 h-11 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">÷</button>
+                <button onClick={() => { ticketTouchedRef.current.qty = true; setQty((q) => Math.max(0.01, +(q / 2).toFixed(4))); }} className="w-11 h-11 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">÷</button>
                 <input
                   type="text" inputMode="decimal" lang="en" dir="ltr"
                   value={String(qty)}
-                  onChange={(e) => setQty(parseFloat(e.target.value.replace(/[^0-9.]/g, '')) || 0)}
+                  onChange={(e) => { ticketTouchedRef.current.qty = true; setQty(parseFloat(e.target.value.replace(/[^0-9.]/g, '')) || 0); }}
                   className="flex-1 h-11 rounded-xl bg-black/40 border border-white/15 text-center text-lg font-black text-brand-text outline-none focus:border-emerald-500"
                   style={{ direction: 'ltr' }}
                 />
-                <button onClick={() => setQty((q) => +(q * 2).toFixed(4))} className="w-11 h-11 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">×</button>
+                <button onClick={() => { ticketTouchedRef.current.qty = true; setQty((q) => +(q * 2).toFixed(4)); }} className="w-11 h-11 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">×</button>
               </div>
               <div className="flex gap-1.5 mt-2">
                 {[0.01, 0.1, 0.5, 1, 5].map((v) => (
                   <button
                     key={v}
-                    onClick={() => setQty(v)}
+                    onClick={() => { ticketTouchedRef.current.qty = true; setQty(v); }}
                     className={`flex-1 py-1.5 rounded-lg text-sm font-black transition-all ${qty === v ? 'bg-[#F59E0B] text-black' : 'bg-white/5 text-brand-text/60 hover:bg-white/10'}`}
                   >
                     {v}
@@ -1309,33 +1353,40 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
               <div className="min-w-0">
                 <label className="block text-xs font-black uppercase text-emerald-400/90 tracking-wider truncate">{isAr ? 'جني الأرباح ($)' : 'Take Profit ($)'}</label>
                 <div className="flex items-stretch gap-1.5 mt-1 min-w-0">
-                  <button onClick={() => adjustPrice('tp', -1)} className="w-11 h-11 shrink-0 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">−</button>
+                  <button onClick={() => { ticketTouchedRef.current.tp = true; adjustPrice('tp', -1); }} className="w-11 h-11 shrink-0 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">−</button>
                   <input
                     type="text" inputMode="decimal" lang="en" dir="ltr"
                     placeholder="$"
                     value={tpPrice}
-                    onChange={(e) => setTpPrice(e.target.value.replace(/[^0-9.]/g, ''))}
+                    onChange={(e) => { ticketTouchedRef.current.tp = true; setTpPrice(e.target.value.replace(/[^0-9.]/g, '')); }}
                     className="flex-1 w-full min-w-0 h-11 rounded-xl bg-black/40 border border-white/15 text-center text-base font-bold text-brand-text outline-none focus:border-emerald-500 placeholder:text-brand-text/25 placeholder:text-sm"
                     style={{ direction: 'ltr' }}
                   />
-                  <button onClick={() => adjustPrice('tp', 1)} className="w-11 h-11 shrink-0 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">+</button>
+                  <button onClick={() => { ticketTouchedRef.current.tp = true; adjustPrice('tp', 1); }} className="w-11 h-11 shrink-0 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">+</button>
                 </div>
               </div>
               <div className="min-w-0">
                 <label className="block text-xs font-black uppercase text-red-400/90 tracking-wider truncate">{isAr ? 'وقف الخسارة ($)' : 'Stop Loss ($)'}</label>
                 <div className="flex items-stretch gap-1.5 mt-1 min-w-0">
-                  <button onClick={() => adjustPrice('sl', -1)} className="w-11 h-11 shrink-0 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">−</button>
+                  <button onClick={() => { ticketTouchedRef.current.sl = true; adjustPrice('sl', -1); }} className="w-11 h-11 shrink-0 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">−</button>
                   <input
                     type="text" inputMode="decimal" lang="en" dir="ltr"
                     placeholder="$"
                     value={slPrice}
-                    onChange={(e) => setSlPrice(e.target.value.replace(/[^0-9.]/g, ''))}
+                    onChange={(e) => { ticketTouchedRef.current.sl = true; setSlPrice(e.target.value.replace(/[^0-9.]/g, '')); }}
                     className="flex-1 w-full min-w-0 h-11 rounded-xl bg-black/40 border border-white/15 text-center text-base font-bold text-brand-text outline-none focus:border-red-500 placeholder:text-brand-text/25 placeholder:text-sm"
                     style={{ direction: 'ltr' }}
                   />
-                  <button onClick={() => adjustPrice('sl', 1)} className="w-11 h-11 shrink-0 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">+</button>
+                  <button onClick={() => { ticketTouchedRef.current.sl = true; adjustPrice('sl', 1); }} className="w-11 h-11 shrink-0 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">+</button>
                 </div>
               </div>
+            </div>
+
+            {/* Ticket auto-note: values come from the same balance-scaled logic — editable anytime */}
+            <div className="text-[11px] md:text-xs text-center text-brand-text/40 font-bold">
+              {isAr
+                ? `القيم معبأة تلقائيًا حسب الرصيد (لوت ${qty} · وقف $${slPrice || '—'} · هدف $${tpPrice || '—'}) — عدّل أي قيمة يدويًا قبل الفتح كما تشاء`
+                : `Auto-filled from balance (lot ${qty} · SL $${slPrice || '—'} · TP $${tpPrice || '—'}) — edit any value manually before opening`}
             </div>
 
             {/* Buy/Sell */}
