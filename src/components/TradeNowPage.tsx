@@ -15,6 +15,8 @@ import { playOpenSound, playCloseSound, playDragTick } from '../lib/tradeSounds'
 import { pricesToUsd, usdToPrice, slAmountUSD, notionalInUSD } from '../lib/positionMath';
 import { toTvSymbol as toTvSymbolShared } from '../lib/tvSymbol';
 import { calcTrailingStop } from '../lib/trailingStop';
+import MT5ConnectModal from './MT5ConnectModal';
+import { loadConnection, mt5Bridge, MT5Connection } from '../services/mt5Bridge';
 
 interface TradeNowPageProps {
   lang: Language;
@@ -208,6 +210,28 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   const [popId, setPopId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [platform, setPlatform] = useState<'chart' | 'mt5'>('chart');
+
+  // ── Real MT5 execution (self-hosted bridge) ──────────────────────────────
+  // OFF by default → the site keeps its paper trading exactly as before.
+  // The user must connect a bridge AND flip execReal to trade real money.
+  const [mt5Modal, setMt5Modal] = useState(false);
+  const [mt5Conn, setMt5Conn] = useState<MT5Connection | null>(() => { try { return loadConnection(); } catch { return null; } });
+  const [execReal, setExecReal] = useState<boolean>(false);
+  // local trade id → real MT5 ticket (persisted so close/trail survive reload)
+  const mt5TicketsRef = React.useRef<Record<string, number>>({});
+  React.useEffect(() => {
+    try { mt5TicketsRef.current = JSON.parse(localStorage.getItem('finalyze_mt5_tickets') || '{}'); } catch {}
+  }, []);
+  const rememberTicket = (id: string, ticket: number) => {
+    mt5TicketsRef.current[id] = ticket;
+    try { localStorage.setItem('finalyze_mt5_tickets', JSON.stringify(mt5TicketsRef.current)); } catch {}
+  };
+  // Refs so long-lived callbacks (checkAutoClose's interval) never read a stale
+  // execReal / mt5Conn from a frozen `[]` closure.
+  const execRealRef = React.useRef(execReal);
+  const mt5ConnRef = React.useRef<MT5Connection | null>(mt5Conn);
+  React.useEffect(() => { execRealRef.current = execReal; }, [execReal]);
+  React.useEffect(() => { mt5ConnRef.current = mt5Conn; }, [mt5Conn]);
   const [symbolsCollapsed, setSymbolsCollapsed] = useState(false);
   const [ticketCollapsed, setTicketCollapsed] = useState(true);
   const [chartCollapsed, setChartCollapsed] = useState(false);
@@ -440,6 +464,15 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
               // Update locally first (instant UI), then persist (best-effort).
               setTrades((prev) => prev.map((x) => x.id === t.id ? { ...x, sl: newSl } : x));
               try { await store.updateTrade(t.id, { sl: newSl }); } catch { /* offline: local copy stands */ }
+              // ── REAL MODE ── also push the new (ratcheted) stop to the live
+              // MT5 order so the broker's stop trails too, not just our mirror.
+              if (execRealRef.current && mt5ConnRef.current) {
+                const ticket = mt5TicketsRef.current[t.id];
+                if (ticket != null) {
+                  try { await mt5Bridge.modify(mt5ConnRef.current, ticket, { sl: newSl }); }
+                  catch { /* keep the local mirror; broker stop stays put */ }
+                }
+              }
             }
           }
         } // end if(trail.active)
@@ -453,6 +486,17 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   }, []);
 
   async function closeTradeInternal(t: PaperTrade, exitPrice: number, reason: 'manual' | 'tp' | 'sl') {
+    // ── REAL MODE ── close the live MT5 order first (best-effort). The local
+    // book-keeping below still runs so the mirror + balance stay in sync even
+    // if the broker call fails.
+    if (execRealRef.current && mt5ConnRef.current) {
+      const ticket = mt5TicketsRef.current[t.id];
+      if (ticket != null) {
+        try { await mt5Bridge.close(mt5ConnRef.current, ticket); } catch { /* mirror still closes */ }
+        delete mt5TicketsRef.current[t.id];
+        try { localStorage.setItem('finalyze_mt5_tickets', JSON.stringify(mt5TicketsRef.current)); } catch {}
+      }
+    }
     const pnl = calcPnl(t, exitPrice);
     const newBalance = balanceRef.current + pnl;
     try {
@@ -731,6 +775,30 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     if (slAmount > 0) slVal = usdToPrice(symbol, slAmount, livePrice, !isBuy, qty, cat);
     else slVal = matchedSignal?.stopLoss || null;
     const tradeData = { symbol, category: cat, side, qty, entryPrice: livePrice, status: 'open' as const, tp: tpVal, sl: slVal, openedAt: Date.now() };
+
+    // ── REAL execution via self-hosted MT5 bridge (opt-in) ──────────────
+    // Runs ONLY when the user has connected a bridge AND flipped the switch
+    // to REAL. Everything above (balance-scaled sizing, market-open check,
+    // margin check, SL/TP USD→price conversion) is IDENTICAL to paper — the
+    // only difference is that the order is now SENT TO THE REAL MT5 BROKER.
+    let mt5Ticket: number | undefined;
+    if (execReal && mt5Conn) {
+      try {
+        const res = side === 'buy'
+          ? await mt5Bridge.buy(mt5Conn, { symbol, volume: qty, sl: slVal, tp: tpVal })
+          : await mt5Bridge.sell(mt5Conn, { symbol, volume: qty, sl: slVal, tp: tpVal });
+        if (!res.ok) throw new Error(res.comment || 'MT5 rejected the order');
+        // Use the broker's real fill price as the local mirror's entry.
+        if (res.price != null) tradeData.entryPrice = res.price;
+        mt5Ticket = res.ticket;
+      } catch (e: any) {
+        setToast((isAr ? 'فشل تنفيذ الأمر الحقيقي: ' : 'Real order failed: ') + (e?.message || String(e)));
+        setTimeout(() => setToast(null), 6000);
+        setBusy(false);
+        return;
+      }
+    }
+
     let id: string;
     try {
       id = await store.addTrade(tradeData);
@@ -743,6 +811,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
         localStorage.setItem('paper_trading_data', JSON.stringify(raw));
       } catch {}
     }
+    if (mt5Ticket) rememberTicket(id, mt5Ticket);
     setTrades((prev) => [{ id, ...tradeData }, ...prev]);
     setTpPrice(''); setSlPrice('');
     setBusy(false);
@@ -1049,6 +1118,29 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
           >
             📈 {isAr ? 'MT5 ويب' : 'MT5 Web'} ↗
           </button>
+
+          {/* ── Real-money MT5 bridge control ─────────────────────────── */}
+          <button
+            onClick={() => setMt5Modal(true)}
+            className={`px-5 py-2 rounded-2xl text-[16px] font-black uppercase transition-all leading-none border active:scale-95 ${
+              mt5Conn ? 'bg-emerald-500/15 border-emerald-400 text-emerald-200' : 'bg-white/10 border-white/15 text-white/60 hover:bg-white/20'
+            }`}
+            title={isAr ? 'ربط حساب MT5 الحقيقي عبر الجسر الخاص بك' : 'Connect your real MT5 account via your own bridge'}
+          >
+            🔗 {mt5Conn ? (isAr ? 'MT5 متصل' : 'MT5 Linked') : (isAr ? 'اربط MT5' : 'Link MT5')}
+          </button>
+
+          {mt5Conn && (
+            <button
+              onClick={() => setExecReal((v) => !v)}
+              className={`px-5 py-2 rounded-2xl text-[16px] font-black uppercase transition-all leading-none border-2 active:scale-95 ${
+                execReal ? 'bg-red-500 text-white border-red-400 shadow-lg shadow-red-500/30' : 'bg-white/10 border-white/15 text-white/60 hover:bg-white/20'
+              }`}
+              title={isAr ? 'بدّل بين التداول الورقي (افتراضي) والتداول الحقيقي' : 'Toggle paper (default) vs real execution'}
+            >
+              {execReal ? (isAr ? '🔴 حقيقي' : '🔴 REAL') : (isAr ? 'ورقي' : 'Paper')}
+            </button>
+          )}
         </div>
         <div className="flex items-end justify-between gap-2 flex-wrap w-full">
           <button
@@ -1899,6 +1991,15 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
           </div>
         </div>
       )}
+      {/* MT5 real-connection modal */}
+      {mt5Modal && (
+        <MT5ConnectModal
+          lang={lang}
+          onClose={() => setMt5Modal(false)}
+          onConnected={(cc) => { setMt5Conn(cc); setMt5Modal(false); }}
+        />
+      )}
+
       {/* Toast notification */}
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[999] animate-bounce">
