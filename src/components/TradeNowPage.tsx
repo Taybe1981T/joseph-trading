@@ -1082,7 +1082,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   return (
     <div className="w-full px-2 sm:px-4 pt-2 pb-3 space-y-3">
       {/* Account bar */}
-      <div className="rounded-2xl border border-[#F59E0B]/40 bg-gradient-to-r from-[#F59E0B]/15 via-transparent to-transparent px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
+      <div className="rounded-2xl border border-[#F59E0B]/40 bg-gradient-to-r from-[#F59E0B]/15 via-transparent to-transparent px-3 sm:px-4 py-2.5 flex flex-col gap-2.5 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between lg:gap-3">
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-[#F59E0B] flex items-center justify-center shadow-lg shadow-[#F59E0B]/30">
             <TrendingUp size={20} className="text-black" />
@@ -1107,18 +1107,18 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
               : (autoTrade ? 'Auto-Exec ON' : 'Auto-Exec OFF')}
           </button>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-2 gap-2 lg:flex lg:items-center">
           <button
             onClick={() => setPlatform('chart')}
-            className={`px-6 py-2 rounded-2xl text-[20px] font-black uppercase transition-all leading-none ${
-              platform === 'chart' ? 'bg-emerald-500 text-black' : 'bg-white/10 text-white/60 hover:bg-white/20'
+            className={`w-full py-3 rounded-2xl text-xl font-black uppercase transition-all leading-none active:scale-95 ${
+              platform === 'chart' ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/30' : 'bg-white/10 text-white/60 hover:bg-white/20'
             }`}
           >
             📊 {isAr ? 'الشارت' : 'Chart'}
           </button>
           <button
             onClick={() => window.open('https://metatraderweb.app', '_blank', 'noopener,noreferrer')}
-            className="px-6 py-2 rounded-2xl text-[20px] font-black uppercase transition-all leading-none bg-sky-500 text-black hover:bg-sky-400 cursor-pointer active:scale-95"
+            className="w-full py-3 rounded-2xl text-xl font-black uppercase transition-all leading-none bg-sky-500 text-black hover:bg-sky-400 cursor-pointer active:scale-95 shadow-lg shadow-sky-500/30"
             title={isAr ? 'افتح منصة MT5 الحقيقية في تبويب جديد لتسجيل الدخول والتداول' : 'Open the live MT5 platform in a new tab to log in and trade'}
           >
             📈 {isAr ? 'MT5 ويب' : 'MT5 Web'} ↗
@@ -1151,56 +1151,37 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
             </>
           )}
         </div>
-        <div className="flex items-end justify-between gap-2 flex-wrap w-full">
-          <button
-            onClick={() => setSymbolsCollapsed(!symbolsCollapsed)}
-            className={`tog-btn flex items-center gap-2 px-6 py-3 rounded-xl text-base font-black uppercase tracking-wider border transition-all active:scale-95 shrink-0 bg-[#3E2723] text-amber-100 ${
-              symbolsCollapsed ? 'border-[#F59E0B]/70 shadow-lg shadow-black/30' : 'border-white/15 hover:bg-[#4E342E]'
-            }`}
-            title={symbolsCollapsed ? (isAr ? 'توسيع الرموز' : 'Expand symbols') : (isAr ? 'طي الرموز' : 'Collapse symbols')}
-          >
-            {symbolsCollapsed ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
-            {isAr ? 'الرموز' : 'Symbols'}
-          </button>
-          <div className="flex flex-col items-center gap-1 min-w-0">
-            <button
-              onClick={() => setChartCollapsed(!chartCollapsed)}
-              className={`tog-btn flex items-center gap-2 px-6 py-3 rounded-xl text-base font-black uppercase tracking-wider border transition-all active:scale-95 shrink-0 bg-[#3E2723] text-amber-100 ${
-                chartCollapsed ? 'border-[#F59E0B]/70 shadow-lg shadow-black/30' : 'border-white/15 hover:bg-[#4E342E]'
-              }`}
-              title={chartCollapsed ? (isAr ? 'توسيع الشارت' : 'Expand chart') : (isAr ? 'طي الشارت' : 'Collapse chart')}
-            >
-              {chartCollapsed ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
-              {isAr ? 'الشارت' : 'Chart'}
-            </button>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="px-4 py-1.5 rounded-xl bg-black/30 border border-white/10 text-center min-w-[110px]">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:flex lg:items-end lg:justify-between lg:flex-wrap lg:w-full">
+          {/* 3) بطاقات المقاييس — شبكة زوجية (كل زوجين على مستوى) */}
+          <div className="col-span-2 sm:col-span-3 lg:contents grid grid-cols-2 gap-2 w-full">
+            <div className="flex items-center gap-2 flex-wrap col-span-2">
+              <div className="flex-1 px-4 py-2 rounded-xl bg-black/30 border border-white/10 text-center min-w-0">
                 <div className="text-[10px] font-black uppercase text-brand-text/50 tracking-wider">{isAr ? 'الرصيد' : 'Balance'}</div>
-                <div className="text-base font-black text-emerald-400">${balance.toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
+                <div className="text-base font-black text-emerald-400 sm:text-lg">${balance.toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
               </div>
-              <div className="px-4 py-1.5 rounded-xl bg-black/30 border border-white/10 text-center min-w-[110px]">
+              <div className="flex-1 px-4 py-2 rounded-xl bg-black/30 border border-white/10 text-center min-w-0">
                 <div className="text-[10px] font-black uppercase text-brand-text/50 tracking-wider">{isAr ? 'الإجمالي' : 'Equity'}</div>
-                <div className={`text-base font-black ${unrealizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>${equity.toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
+                <div className={`text-lg font-black ${unrealizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>${equity.toLocaleString('en-US', { maximumFractionDigits: 2 })}</div>
               </div>
-              <div className="px-4 py-1.5 rounded-xl bg-black/30 border border-white/10 text-center min-w-[110px]">
+              <div className="flex-1 px-4 py-2 rounded-xl bg-black/30 border border-white/10 text-center min-w-0">
                 <div className="text-[10px] font-black uppercase text-brand-text/50 tracking-wider">{isAr ? 'ربح مفتوح' : 'Open P&L'}</div>
-                <div className={`text-base font-black ${unrealizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtMoney(unrealizedPnl)}</div>
+                <div className={`text-lg font-black ${unrealizedPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{fmtMoney(unrealizedPnl)}</div>
               </div>
               <div
-                className="px-4 py-1.5 rounded-xl bg-black/30 border border-white/10 text-center min-w-[120px]"
+                className="flex-1 px-4 py-2 rounded-xl bg-black/30 border border-white/10 text-center min-w-0"
                 title={isAr ? 'مستوى الهامش = الإجمالي ÷ الهامش المستخدم × 100' : 'Margin Level = Equity ÷ Used Margin × 100'}
               >
                 <div className="text-[10px] font-black uppercase text-brand-text/50 tracking-wider">{isAr ? 'مستوى الهامش' : 'Margin Level'}</div>
-                <div className={`text-base font-black ${stats.marginLevel >= 100 ? 'text-emerald-400' : stats.marginLevel > 0 ? 'text-yellow-400' : 'text-red-400'}`}>
+                <div className={`text-lg font-black ${stats.marginLevel >= 100 ? 'text-emerald-400' : stats.marginLevel > 0 ? 'text-yellow-400' : 'text-red-400'}`}>
                   {stats.marginLevel > 0 ? `${stats.marginLevel.toLocaleString('en-US')}%` : '—'}
                 </div>
               </div>
-              <div className="px-4 py-1.5 rounded-xl bg-black/30 border border-white/10 text-center min-w-[110px]">
+              <div className="flex-1 px-4 py-2 rounded-xl bg-black/30 border border-white/10 text-center min-w-0">
                 <div className="text-[10px] font-black uppercase text-brand-text/50 tracking-wider">{isAr ? 'الرافعة' : 'Leverage'}</div>
                 <select
                   value={leverage}
                   onChange={(e) => changeLeverage(Number(e.target.value))}
-                  className="bg-transparent text-base font-black text-sky-300 focus:outline-none cursor-pointer text-center w-full"
+                  className="bg-transparent text-lg font-black text-sky-300 focus:outline-none cursor-pointer text-center w-full"
                   title={isAr ? 'الرافعة المالية' : 'Financial leverage'}
                 >
                   {LEVERAGE_OPTIONS.map((opt) => (
@@ -1217,15 +1198,36 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
               </button>
             </div>
           </div>
+          {/* 4) أزرار الطي: فتح Chart + التذكرة + الرموز — صف تحتها */}
+          <button
+            onClick={() => setChartCollapsed(!chartCollapsed)}
+            className={`flex items-center justify-center gap-1.5 px-3 py-3 rounded-xl text-sm font-black uppercase tracking-wider border transition-all active:scale-95 bg-[#3E2723] text-amber-100 ${
+              chartCollapsed ? 'border-[#F59E0B]/70 shadow-lg shadow-black/30' : 'border-white/15'
+            }`}
+            title={chartCollapsed ? (isAr ? 'فتح الشارت' : 'Open chart') : (isAr ? 'طي الشارت' : 'Collapse chart')}
+          >
+            {chartCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+            {isAr ? 'فتح Chart' : 'Chart'}
+          </button>
           <button
             onClick={() => setTicketCollapsed(!ticketCollapsed)}
-            className={`tog-btn flex items-center gap-2 px-6 py-3 rounded-xl text-base font-black uppercase tracking-wider border transition-all active:scale-95 shrink-0 bg-[#3E2723] text-amber-100 ${
-              ticketCollapsed ? 'border-[#F59E0B]/70 shadow-lg shadow-black/30' : 'border-white/15 hover:bg-[#4E342E]'
+            className={`flex items-center justify-center gap-1.5 px-3 py-3 rounded-xl text-sm font-black uppercase tracking-wider border transition-all active:scale-95 bg-[#3E2723] text-amber-100 ${
+              ticketCollapsed ? 'border-[#F59E0B]/70 shadow-lg shadow-black/30' : 'border-white/15'
             }`}
             title={ticketCollapsed ? (isAr ? 'فتح لوحة الصفقات' : 'Open order ticket') : (isAr ? 'طي لوحة الصفقات' : 'Collapse order ticket')}
           >
-            {ticketCollapsed ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
+            {ticketCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
             {isAr ? 'فتح صفقات' : 'Order Ticket'}
+          </button>
+          <button
+            onClick={() => setSymbolsCollapsed(!symbolsCollapsed)}
+            className={`flex items-center justify-center gap-1.5 px-3 py-3 rounded-xl text-sm font-black uppercase tracking-wider border transition-all active:scale-95 bg-[#3E2723] text-amber-100 ${
+              symbolsCollapsed ? 'border-[#F59E0B]/70 shadow-lg shadow-black/30' : 'border-white/15'
+            }`}
+            title={symbolsCollapsed ? (isAr ? 'توسيع الرموز' : 'Expand symbols') : (isAr ? 'طي الرموز' : 'Collapse symbols')}
+          >
+            {symbolsCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+            {isAr ? 'الرموز' : 'Symbols'}
           </button>
         </div>
       </div>
@@ -1247,7 +1249,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
           </div>
           {!symbolsCollapsed && (
           <>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 lg:flex-wrap lg:overflow-visible lg:mx-0 lg:px-0">
               {CATEGORY_TABS.map((tabC) => (
                 <button
                   key={tabC.key}
@@ -1275,8 +1277,8 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
               )}
             </div>
 
-            {/* Symbols grid */}
-            <div className="flex flex-wrap gap-1.5 flex-1 overflow-y-auto content-start min-h-0">
+            {/* Symbols — تمرير أفقي على الهاتف (مثل التحليل اليدوي)، شبكة على سطح المكتب */}
+            <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 lg:mx-0 lg:px-0 lg:flex-wrap lg:overflow-y-auto lg:flex-1 lg:content-start lg:min-h-0 lg:pb-0">
               {symbols.length === 0 && category !== 'custom' && (
                 <span className="text-sm font-bold text-brand-text/40 py-2">
                   {isAr ? 'لا رموز ظاهرة' : 'No visible symbols'}
@@ -1290,10 +1292,10 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
               {symbols.map((sym) => {
                 const isCustom = category === 'custom' || !ORIGINAL_SYMBOLS.has(sym);
                 return (
-                  <div key={sym} className="relative group">
+                  <div key={sym} className="relative group shrink-0">
                     <button
                       onClick={() => { setSymbol(sym); setQty(getDefaultQty(detectCategory(sym), balance)); }}
-                      className={`pl-4 pr-8 py-2.5 rounded-xl text-lg font-black transition-all border ${
+                      className={`pl-4 pr-8 py-2.5 rounded-xl text-base sm:text-lg font-black transition-all border whitespace-nowrap ${
                         symbol === sym
                           ? 'bg-sky-400 text-black border-sky-300 shadow-lg shadow-sky-400/30'
                           : 'bg-sky-500/15 text-sky-300 border-sky-500/25 hover:bg-sky-500/30 hover:text-sky-200'

@@ -372,104 +372,104 @@ export default function Header({
               {/* Sidebar Navigation Items */}
               {/* Trade - always accessible on mobile */}
               <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('trade'); }}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl border border-black/10 bg-[#F59E0B]/30 hover:bg-[#F59E0B]/50 transition-all shadow-sm">
-                <TrendingUp size={18} className="text-[#F59E0B]" />
+                className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] transition-all shadow-md">
+                <TrendingUp size={20} className="text-black" strokeWidth={2.75} />
                 <span className="text-xs font-black text-black uppercase min-w-0 leading-snug">{lang === 'ar' ? 'التداول' : 'Trade'}</span>
               </button>
               <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('prices'); }}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl border border-black/10 bg-emerald-500/20 hover:bg-emerald-500/40 transition-all shadow-sm">
-                <BarChart3 size={18} className="text-emerald-500" />
+                className="flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] transition-all shadow-md">
+                <BarChart3 size={20} className="text-black" strokeWidth={2.75} />
                 <span className="text-xs font-black text-black uppercase min-w-0 leading-snug">{lang === 'ar' ? 'الأسعار الحية' : 'Live Prices'}</span>
               </button>
               {isDeveloper ? (
                 <>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('radar'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-white/10 hover:bg-[#F59E0B]/10 transition-all shadow-sm">
-                    <Zap size={18} className="text-[#F59E0B]" />
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] transition-all shadow-md">
+                    <Zap size={20} className="text-black" strokeWidth={2.75} />
                     <span className="text-xs font-black text-black uppercase min-w-0 leading-snug">{lang === 'ar' ? 'إعدادات التحليل التلقائي' : 'Auto Analysis Settings'}</span>
                   </button>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('manualAnalysis'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition-all shadow-sm">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-600">
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500 hover:bg-red-400 active:scale-[0.98] transition-all shadow-md">
+                    <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M12 20h9" />
                       <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                     </svg>
                     <span className="text-xs font-black text-black uppercase min-w-0 leading-snug">{lang === 'ar' ? 'التحليل اليدوي' : 'Manual Analysis'}</span>
                   </button>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('apiKey'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-white/10 hover:bg-[#F59E0B]/10 transition-all shadow-sm">
-                    <Key size={18} className="text-[#F59E0B]" />
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] transition-all shadow-md">
+                    <Key size={20} className="text-black" strokeWidth={2.75} />
                     <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'مفتاح API' : 'API Key'}</span>
                   </button>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('profile'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-white/10 hover:bg-[#F59E0B]/10 transition-all shadow-sm">
-                    <UserIcon size={18} className="text-[#F59E0B]" />
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] transition-all shadow-md">
+                    <UserIcon size={20} className="text-black" strokeWidth={2.75} />
                     <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'الملف الشخصي' : 'Profile'}</span>
                   </button>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('settings'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-white/10 hover:bg-[#F59E0B]/10 transition-all shadow-sm">
-                    <Settings size={18} className="text-[#F59E0B]" />
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] transition-all shadow-md">
+                    <Settings size={20} className="text-black" strokeWidth={2.75} />
                     <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'الإعدادات' : 'Settings'}</span>
                   </button>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('storeSettings'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-white/10 hover:bg-[#F59E0B]/10 transition-all shadow-sm">
-                    <Store size={18} className="text-[#F59E0B]" />
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 active:scale-[0.98] transition-all shadow-md">
+                    <Store size={20} className="text-black" strokeWidth={2.75} />
                     <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'إعدادات المتجر' : 'Store Settings'}</span>
                   </button>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('store'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-emerald-500/10 hover:bg-emerald-500/20 transition-all shadow-sm">
-                    <Store size={18} className="text-emerald-500" />
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.98] transition-all shadow-md">
+                    <Store size={20} className="text-black" strokeWidth={2.75} />
                     <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'عرض المتجر (اختبار)' : 'View Store (test)'}</span>
                   </button>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('clientMonitor'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-white/10 hover:bg-[#F59E0B]/10 transition-all shadow-sm">
-                    <Users size={18} className="text-[#F59E0B]" />
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] transition-all shadow-md">
+                    <Users size={20} className="text-black" strokeWidth={2.75} />
                     <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'مراقبة العملاء' : 'Client Monitor'}</span>
                   </button>
                   {/* Suggestions - Developer */}
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('suggestions'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-[#F59E0B]/20 hover:bg-[#F59E0B]/40 transition-all shadow-sm">
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] transition-all shadow-md">
                     <div className="relative">
-                      <Bell size={18} className="text-[#F59E0B]" />
+                      <Bell size={20} className="text-black" strokeWidth={2.75} />
                       {newSuggestionsCount > 0 && (
-                        <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-[16px] bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center px-1 shadow-lg">
+                        <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-[16px] bg-red-600 text-white text-[9px] font-black rounded-full flex items-center justify-center px-1 shadow-lg">
                           {newSuggestionsCount}
                         </span>
                       )}
                     </div>
                     <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'المقترحات' : 'Suggestions'}</span>
                     {newSuggestionsCount > 0 && (
-                      <span className="mr-auto text-[10px] font-black text-[#F59E0B] bg-[#F59E0B]/20 px-2 py-0.5 rounded-full">
+                      <span className="mr-auto text-[10px] font-black text-black bg-black/15 px-2 py-0.5 rounded-full">
                         {newSuggestionsCount} {lang === 'ar' ? 'جديد' : 'new'}
                       </span>
                     )}
                   </button>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('ads'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-[#F59E0B]/20 hover:bg-[#F59E0B]/40 transition-all shadow-sm">
-                    <Monitor size={18} className="text-[#F59E0B]" />
-                    <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'إعلاناتي' : 'My Ads'}</span>
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-violet-500 hover:bg-violet-400 active:scale-[0.98] transition-all shadow-md">
+                    <Monitor size={20} className="text-white" strokeWidth={2.75} />
+                    <span className="text-xs font-black text-white uppercase">{lang === 'ar' ? 'إعلاناتي' : 'My Ads'}</span>
                   </button>
                 </>
               ) : (
                 <>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('profile'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-white/10 hover:bg-[#F59E0B]/10 transition-all shadow-sm">
-                    <UserIcon size={18} className="text-[#F59E0B]" />
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] transition-all shadow-md">
+                    <UserIcon size={20} className="text-black" strokeWidth={2.75} />
                     <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'الملف الشخصي' : 'Profile'}</span>
                   </button>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('about'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-white/10 hover:bg-[#F59E0B]/10 transition-all shadow-sm">
-                    <Info size={18} className="text-[#F59E0B]" />
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 active:scale-[0.98] transition-all shadow-md">
+                    <Info size={20} className="text-black" strokeWidth={2.75} />
                     <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'نبذة عنا' : 'About Us'}</span>
                   </button>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('suggestions'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-white/10 hover:bg-[#F59E0B]/10 transition-all shadow-sm">
-                    <Lightbulb size={18} className="text-[#F59E0B]" />
-                    <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'اقتراحاتكم' : 'Your Suggestions'}</span>
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-violet-500 hover:bg-violet-400 active:scale-[0.98] transition-all shadow-md">
+                    <Lightbulb size={20} className="text-white" strokeWidth={2.75} />
+                    <span className="text-xs font-black text-white uppercase">{lang === 'ar' ? 'اقتراحاتكم' : 'Your Suggestions'}</span>
                   </button>
                   <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('store'); }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-sky-500/20 hover:bg-sky-500/40 transition-all shadow-sm">
-                    <Store size={18} className="text-sky-500" />
+                    className="flex items-center gap-3 px-4 py-3 rounded-xl bg-sky-500 hover:bg-sky-400 active:scale-[0.98] transition-all shadow-md">
+                    <Store size={20} className="text-black" strokeWidth={2.75} />
                     <span className="text-xs font-black text-black uppercase">{lang === 'ar' ? 'متجر البوتات' : 'Bots Store'}</span>
                   </button>
                   {hasActivePlan && (
@@ -506,13 +506,13 @@ export default function Header({
 {planClient && (
                     <>
                       <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('radar'); }}
-                        className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-white/10 hover:bg-[#F59E0B]/10 transition-all shadow-sm">
-                        <Zap size={18} className="text-[#F59E0B]" />
+                        className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 active:scale-[0.98] transition-all shadow-md">
+                        <Zap size={20} className="text-black" strokeWidth={2.75} />
                         <span className="text-xs font-black text-black uppercase min-w-0 leading-snug">{lang === 'ar' ? 'إعدادات التحليل التلقائي' : 'Auto Analysis Settings'}</span>
                       </button>
                       <button onClick={() => { setShowMobileMenu(false); onNavigatePage?.('manualAnalysis'); }}
-                        className="flex items-center gap-3 px-4 py-3 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 transition-all shadow-sm">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-red-600">
+                        className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500 hover:bg-red-400 active:scale-[0.98] transition-all shadow-md">
+                        <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="black" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M12 20h9" />
                           <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
                         </svg>
@@ -535,10 +535,10 @@ export default function Header({
                 href="https://www.facebook.com/messages/e2ee/t/7630276620403742/"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/20 bg-[#0084FF]/20 hover:bg-[#0084FF]/40 transition-all shadow-sm"
+                className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[#0084FF] hover:bg-[#3399FF] active:scale-[0.98] transition-all shadow-md"
               >
-                <MessageCircle size={18} className="text-[#0084FF]" />
-                <span className="text-xs font-black text-black uppercase">
+                <MessageCircle size={20} className="text-white" strokeWidth={2.75} />
+                <span className="text-xs font-black text-white uppercase">
                   {lang === 'ar' ? 'تواصل معنا' : 'Contact Us'}
                 </span>
               </a>
