@@ -563,11 +563,15 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
       const { slUsd, tpUsd } = calcRiskUSD(bal);
       const side: 'buy' | 'sell' = isBuy ? 'buy' : 'sell';
       // Convert the USD stop/target into price levels for this category, anchored
-      // on the entry price (signal pullback entry, else live price).
+      // on the REAL live entry price. A market order fills at the current market
+      // price, so the SL/TP must be measured from there too. Anchoring on the
+      // signal's ideal pullback level (sig.entryPrice) put the TP behind the live
+      // price, so the very first tick looked "already hit" → instant close at the
+      // fixed tpUsd, then a repeat. Using `price` makes auto behave like manual.
       // Signature: usdToPrice(symbol, amountUSD, entryPrice, above, qty, category).
       // Buy  -> stop is BELOW entry (false), target ABOVE (true).
       // Sell -> stop is ABOVE entry (true),  target BELOW (false).
-      const entryPrice = (sig.entryPrice && sig.entryPrice > 0) ? sig.entryPrice : price;
+      const entryPrice = price;
       const slPrice = usdToPrice(sym, slUsd, entryPrice, side === 'sell', q, cat);
       const tpPrice = usdToPrice(sym, tpUsd, entryPrice, side === 'buy', q, cat);
       const tradeData = {
