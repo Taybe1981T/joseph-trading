@@ -1812,11 +1812,11 @@ Return ONLY valid JSON:
       });
     }
 
-    // ═══ STEP 5e: Advanced Candle Filter — REVERSAL PREVENTION (1W + 1M) ═══
-    // The Direction Unify filter now works as a REVERSAL SAFETY NET:
-    // it BLOCKS a signal ONLY when BOTH the weekly (1W) AND monthly (1M)
-    // candles oppose the signal direction (e.g. both bearish against a BUY).
-    // If only one opposes the signal (or the daily aligns), the signal is kept.
+    // ═══ STEP 5e: Advanced Candle Filter — REVERSAL PREVENTION (1M mandatory) ═══
+    // v5.12.0: MONTHLY-ONLY mandatory match. The big-trend monthly candle (1M)
+    // MUST agree with the signal; if it opposes, we block (no fighting the
+    // monthly trend). The weekly (1W) and daily (1D) are intentionally FREE —
+    // the 1W running against the signal IS the pullback this strategy buys into.
     // The greedy "Candle Size (ATR)" filter has been REMOVED entirely.
     var candleMatchBlocked = false;
     if (candleMatchData) {
@@ -1868,7 +1868,12 @@ Return ONLY valid JSON:
         return `${i.label}: ${dirName} ${arrow}`;
       };
 
-      // ── FILTER A: Reversal prevention — block ONLY when 1W AND 1M both oppose ──
+      // ── FILTER A (v5.12.0): Monthly-only mandatory match ──
+      // The big-trend MONTHLY candle (1M) MUST agree with the signal; if it
+      // opposes, we block (no fighting the monthly trend). The weekly (1W) and
+      // daily (1D) are intentionally left FREE — the 1W running against the
+      // signal IS the pullback this strategy buys into. This keeps pullback
+      // entries while forbidding counter-trend entries on the monthly scale.
       const directionFilterOn = settings.candleDirectionFilter !== false;
       let directionBlocked = false;
       let directionWhy = '';
@@ -1876,22 +1881,19 @@ Return ONLY valid JSON:
       if (directionFilterOn) {
         const dirFrames = info.filter(i => i.enabled && i.dir !== 'unknown');
         dirValue = dirFrames.map(frameStr).filter(Boolean).join(' | ');
-        const weekly = dirFrames.find(f => f.label === '1W');
         const monthly = dirFrames.find(f => f.label === '1M');
-        if (weekly && monthly) {
-          const weeklyOpposesBuy = weekly.dir === 'bearish';
-          const weeklyOpposesSell = weekly.dir === 'bullish';
+        if (monthly) {
           const monthlyOpposesBuy = monthly.dir === 'bearish';
           const monthlyOpposesSell = monthly.dir === 'bullish';
-          if (signalIsBuy && weeklyOpposesBuy && monthlyOpposesBuy) {
+          if (signalIsBuy && monthlyOpposesBuy) {
             directionBlocked = true;
-            directionWhy = '1W & 1M both bearish oppose BUY — reversal risk';
-          } else if (signalIsSell && weeklyOpposesSell && monthlyOpposesSell) {
+            directionWhy = '1M bearish opposes BUY — counter monthly trend, reversal risk';
+          } else if (signalIsSell && monthlyOpposesSell) {
             directionBlocked = true;
-            directionWhy = '1W & 1M both bullish oppose SELL — reversal risk';
+            directionWhy = '1M bullish opposes SELL — counter monthly trend, reversal risk';
           }
         } else {
-          directionWhy = '1W and 1M candle data required';
+          directionWhy = '1M candle data required';
         }
       }
 
@@ -1910,7 +1912,7 @@ Return ONLY valid JSON:
           check: 'Candle Match',
           value: info.map(frameStr).filter(Boolean).join(' | '),
           status: 'positive',
-          impact: '1W & 1M do not both oppose the signal — allowed'
+          impact: '1M agrees with the signal — allowed'
         });
       }
     }
