@@ -55,28 +55,27 @@ export function validateCandleMatchInput(input: CandleMatchInput): CandleMatchVa
   }
 
   // Check 2: If candle match (reversal prevention) is enabled, check direction.
-  // REVERSAL PREVENTION now blocks only when BOTH weekly (1W) AND monthly (1M)
-  // oppose the signal — the greedy 3-way unification and size filter were removed.
+  // Monthly (1M) is MANDATORY — the signal is blocked unless the 1M candle
+  // agrees with it (prevents trading against the big-trend direction). The
+  // weekly (1W) is intentionally left free so a pullback (the very thing a
+  // BUY-entry strategy buys into) is not rejected.
   if (input.settings.useCandleMatch || input.settings.candleDirectionFilter !== false) {
-    const weeklyDir = input.weeklyDirection;
     const monthlyDir = input.monthlyDirection;
     const signalIsBuy = input.signal === SignalType.BUY || input.signal === SignalType.STRONG_BUY;
     const signalIsSell = input.signal === SignalType.SELL || input.signal === SignalType.STRONG_SELL;
 
-    if (weeklyDir && monthlyDir && weeklyDir !== 'unknown' && monthlyDir !== 'unknown') {
-      const weeklyOpposesBuy = weeklyDir === 'bearish';
-      const weeklyOpposesSell = weeklyDir === 'bullish';
+    if (monthlyDir && monthlyDir !== 'unknown') {
       const monthlyOpposesBuy = monthlyDir === 'bearish';
       const monthlyOpposesSell = monthlyDir === 'bullish';
 
-      if (signalIsBuy && weeklyOpposesBuy && monthlyOpposesBuy) {
-        errors.push('CRITICAL: 1W and 1M both bearish cannot confirm BUY signal — reversal risk');
+      if (signalIsBuy && monthlyOpposesBuy) {
+        errors.push('CRITICAL: monthly (1M) is bearish cannot confirm BUY signal — against big-trend direction');
       }
-      if (signalIsSell && weeklyOpposesSell && monthlyOpposesSell) {
-        errors.push('CRITICAL: 1W and 1M both bullish cannot confirm SELL signal — reversal risk');
+      if (signalIsSell && monthlyOpposesSell) {
+        errors.push('CRITICAL: monthly (1M) is bullish cannot confirm SELL signal — against big-trend direction');
       }
     } else {
-      warnings.push('Reversal prevention needs 1W and 1M candle data');
+      warnings.push('Reversal prevention needs 1M candle data');
     }
   }
 

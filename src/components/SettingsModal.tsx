@@ -481,7 +481,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
             { key: 'useVolumeGuard', label: isAr ? 'حارس الحجم الاحترافي' : 'Volume Guard (Pro)', desc: isAr ? 'فلتر حجم خماسي: كشف فخاخ الامتصاص، جهد مقابل نتيجة، اتجاه الحجم، تفاعل الدعم/المقاومة' : '5-module volume filter: absorption traps, effort vs result, volume trend, S/R interaction' },
             { key: 'useFilterSideways', label: isAr ? 'فلتر الاتجاه العرضي' : 'Sideways Filter', desc: isAr ? 'حظر الإشارات في الأسواق العرضية' : 'Block signals in sideways markets' },
             { key: 'useCandleMatch', label: isAr ? 'فلتر منع الانعكاس (الشموع)' : 'Reversal Guard (Candles)', desc: isAr ? 'تفعيل فلتر الشموع المتقدم' : 'Enable the advanced reversal-prevention filter' },
-            { key: 'candleDirectionFilter', label: isAr ? 'منع الانعكاس (1W + 1M)' : 'Reversal Prevention (1W + 1M)', desc: isAr ? 'حظر فقط إذا كانت 1W و 1M كلتاهما ضد الإشارة' : 'Block only when BOTH 1W and 1M oppose the signal' },
+            { key: 'candleDirectionFilter', label: isAr ? 'تأكيد الاتجاه الشهري (1M)' : 'Monthly Trend Confirmation (1M)', desc: isAr ? 'حظر الإشارة إذا كانت شمعة الشهر (1M) ضدها — الأسبوع واليوم حرّان' : 'Block the signal if the Monthly (1M) candle opposes it — Weekly & Daily are free' },
           ].map((item) => (
             <button key={item.key} onClick={() => {
               const next = !(settings as any)[item.key];
