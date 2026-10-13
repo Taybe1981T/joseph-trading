@@ -1560,6 +1560,16 @@ const isDeveloperSession = () => {
       }
     }
 
+    // Publish the whole scan to topSignals ONCE, here, after every open
+    // category finished and the best-per-category / conflict-resolution inside
+    // updateTopSignals has run. This is the SAME pipeline the manual-analysis
+    // path uses (it calls updateTopSignals on its results too), so radar and
+    // manual now produce identical results for the same category. It also feeds
+    // the global auto-trade engine, which reads ONLY topSignals — without this
+    // call the radar's signals never reached topSignals, so (a) radar results
+    // never showed in the signals box and (b) auto-trade never opened a trade.
+    updateTopSignals(scanResults);
+
     // Save results to Firestore for clients ΓÇö only if there are results
     if (!isPlanClient) {
     try {
