@@ -939,6 +939,11 @@ const isDeveloperSession = () => {
   }, [user]);
 
   const [progress, setProgress] = useState<{ current: string, total: number, index: number, failed?: number, exchange?: string } | null>(null);
+  // Radar (auto-analysis) progress is tracked SEPARATELY from manual-analysis
+  // progress. Both used to share `progress`, so running a manual analysis lit
+  // the "auto analysis" icon in the Header by mistake. The radar writes here;
+  // the Header reads from here. Manual analysis keeps using `progress` only.
+  const [radarProgress, setRadarProgress] = useState<{ current: string, total: number, index: number, failed?: number, exchange?: string } | null>(null);
   const [topSignals, setTopSignals] = useState<AnalysisResult[]>(() => {
     try {
       const stored = JSON.parse(localStorage.getItem('top_signals_persistent') || '[]');
@@ -1488,7 +1493,7 @@ const isDeveloperSession = () => {
       for (const sym of syms) {
         if (!autoSettingsRef.current.isEnabled) break;
 
-          setProgress({ current: sym, total: syms.length, index: scanResults.length, failed: scanFailed, exchange: exchange ? exchangeLabel(exchange.key, lang) : undefined });
+          setRadarProgress({ current: sym, total: syms.length, index: scanResults.length, failed: scanFailed, exchange: exchange ? exchangeLabel(exchange.key, lang) : undefined });
 
         let lastError: any = null;
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -1546,7 +1551,7 @@ const isDeveloperSession = () => {
         if (lastError) {
           console.error(`Radar Error [${sym}]:`, lastError.message);
           scanFailed++;
-        setProgress({ current: sym, total: syms.length, index: scanResults.length, failed: scanFailed, exchange: exchange ? exchangeLabel(exchange.key, lang) : undefined });
+        setRadarProgress({ current: sym, total: syms.length, index: scanResults.length, failed: scanFailed, exchange: exchange ? exchangeLabel(exchange.key, lang) : undefined });
           await new Promise(r => setTimeout(r, 3000));
         } else {
           // Paced between symbols so a scan never hammers the shared key pool.
@@ -1593,8 +1598,8 @@ const isDeveloperSession = () => {
     }
     }
 
-    // Clear progress
-    setProgress(null);
+    // Clear radar progress (manual analysis keeps its own `progress` state)
+    setRadarProgress(null);
   }, [settings, lang, hasActivePlan, user, isPlanClient]);
 
   // Radar lifecycle: start on toggle-ON, stop on toggle-OFF
@@ -2515,7 +2520,9 @@ const started = planGrants
           setIsSidebarOpen(false);
         }}
         lastSyncStatus={lastSyncStatus}
-        analysisProgress={progress}
+        // radarProgress = auto-analysis (radar) only. Manual analysis writes to
+        // `progress`, so it can never light the auto-analysis icon again.
+        analysisProgress={radarProgress}
         isAnalyzing={isAnalyzing}
         newSuggestionsCount={effectivePage === 'suggestions' ? 0 : newSuggestionsCount}
         onNavigateSuggestions={() => navigateTo('suggestions')}
