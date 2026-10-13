@@ -985,9 +985,11 @@ const isDeveloperSession = () => {
   // ON (localStorage AUTO_TRADE_KEY) — otherwise it stays idle.
   const autoEngineRef = useRef<AutoTradeEngine | null>(null);
   useEffect(() => {
-    // Auto-trade is OPT-IN: it only runs when the user explicitly turned it ON
-    // from the trade page (which writes '1'). Any other value = OFF.
-    const isAutoOn = (() => { try { return localStorage.getItem('paper_trading_auto_trade') === '1'; } catch { return false; } })();
+    // Auto-trade mirrors the trade page's own toggle: it defaults to ON and only
+    // runs when the user has NOT explicitly turned it OFF (which writes '0').
+    // This must match TradeNowPage's AUTO_TRADE_KEY semantics (`!== '0'`), else
+    // the engine would never start for a user who left the toggle at its default.
+    const isAutoOn = (() => { try { return localStorage.getItem('paper_trading_auto_trade') !== '0'; } catch { return true; } })();
     if (!isAutoOn) {
       autoEngineRef.current?.stop();
       autoEngineRef.current = null;
@@ -1504,7 +1506,11 @@ const isDeveloperSession = () => {
             ]);
             if (r && !(r as any).error) {
               const sig = r.signal || '';
-              if (sig && sig !== 'no_entry' && sig !== 'neutral' && !r.isSideways) updateTopSignals([r]);
+              // Do NOT publish signals to topSignals incrementally here. The
+              // auto-trade engine consumes topSignals, and publishing mid-scan
+              // would open trades on a single symbol BEFORE the whole category
+              // is analyzed and the best-per-category filter runs. topSignals
+              // is written once, authoritatively, at the end of the scan.
               if (sig && sig !== 'no_entry' && sig !== 'neutral' && !r.isSideways) {
                 scanResults.push(r);
                 setClientSignals(prev => {
