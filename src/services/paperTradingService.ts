@@ -20,6 +20,10 @@ export interface PaperTrade {
   sl?: number | null;
   openedAt: number;
   closedAt?: number;
+  // Who owns open/close for this trade. 'auto' = global AutoTradeEngine,
+  // 'manual' = the user's own ticket on the trade page. Exactly one engine
+  // manages a given trade so SL/TP/trailing is never applied twice.
+  source?: 'auto' | 'manual';
 }
 
 export const START_BALANCE = 10000;

@@ -36,6 +36,7 @@ import TransactionsPage from './components/TransactionsPage';
 import AboutPage from './components/AboutPage';
 import SuggestionsPage from './components/SuggestionsPage';
 import TradeNowPage from './components/TradeNowPage';
+import { AutoTradeEngine } from './services/autoTradeEngine';
 import StorePage from './components/StorePage';
 import SeoPricesPage from './pages/SeoPricesPage';
 import StoreSettingsPage from './components/StoreSettingsPage';
@@ -975,7 +976,48 @@ const isDeveloperSession = () => {
   // Track the most up-to-date signals instantly to avoid stale closures
   const signalsRef = useRef(topSignals);
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
+
+  // ── Global auto-trade engine ──────────────────────────────────────────
+  // Runs while the app is open, on ANY page (not just the trade page), so a
+  // strong signal is opened the moment it appears and re-opened after an
+  // auto-close while its signal is still shown. Started once; fed the latest
+  // signals/leverage on every change. Only acts when the user has auto-trade
+  // ON (localStorage AUTO_TRADE_KEY) — otherwise it stays idle.
+  const autoEngineRef = useRef<AutoTradeEngine | null>(null);
+  useEffect(() => {
+    // Auto-trade is OPT-IN: it only runs when the user explicitly turned it ON
+    // from the trade page (which writes '1'). Any other value = OFF.
+    const isAutoOn = (() => { try { return localStorage.getItem('paper_trading_auto_trade') === '1'; } catch { return false; } })();
+    if (!isAutoOn) {
+      autoEngineRef.current?.stop();
+      autoEngineRef.current = null;
+      return;
+    }
+    // Read the account's real leverage so margin checks are accurate (not a
+    // hardcoded 100).
+    let currentLeverage = 100;
+    try {
+      const raw = JSON.parse(localStorage.getItem('paper_trading_data') || 'null');
+      if (raw && typeof raw.leverage === 'number' && raw.leverage > 0) currentLeverage = raw.leverage;
+    } catch { /* keep default */ }
+    if (!autoEngineRef.current) {
+      autoEngineRef.current = new AutoTradeEngine({
+        user,
+        leverage: currentLeverage,
+        signals: topSignals.map((s) => ({ symbol: s.symbol, signal: s.signal })),
+      });
+      autoEngineRef.current.start();
+    } else {
+      autoEngineRef.current.updateConfig({
+        user,
+        leverage: currentLeverage,
+        signals: topSignals.map((s) => ({ symbol: s.symbol, signal: s.signal })),
+      });
+    }
+  }, [topSignals, user]);
+
+  useEffect(() => () => { autoEngineRef.current?.stop(); autoEngineRef.current = null; }, []);
+
   useEffect(() => {
     signalsRef.current = topSignals;
     localStorage.setItem('top_signals_persistent', JSON.stringify(topSignals));
@@ -2804,9 +2846,14 @@ const started = planGrants
               />
             )}
 
-            {effectivePage === 'trade' && (
+            {/* Trade page: mounted ALWAYS (hidden when not active) so the
+                auto-open engine keeps scanning displayed signals and the
+                trailing/monitor loop keeps protecting open trades even while
+                the user browses other pages. Opening a trade no longer requires
+                sitting on the trade page. */}
+            <div className={effectivePage === 'trade' ? 'contents' : 'hidden'} aria-hidden={effectivePage !== 'trade'}>
               <TradeNowPage lang={lang} user={user} signals={topSignals} />
-            )}
+            </div>
 
             {effectivePage === 'store' && (
               <StorePage

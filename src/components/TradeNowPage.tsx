@@ -19,6 +19,11 @@ import MT5ConnectModal from './MT5ConnectModal';
 import { loadConnection, mt5Bridge, MT5Connection } from '../services/mt5Bridge';
 import { isDeveloperEmail } from '../lib/clientIds';
 
+// Minimum wait after an auto-close before the same symbol may be auto-opened
+// again. Prevents a rapid open→close→open loop while still letting a still-valid
+// signal re-open a fresh position seconds later.
+const AUTO_REOPEN_COOLDOWN_MS = 8000;
+
 interface TradeNowPageProps {
   lang: Language;
   user: User | null;
@@ -190,6 +195,15 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   const autoOpenedRef = React.useRef<Set<string>>(new Set());
   // In-flight guard so two rapid signal updates can't open the same symbol twice.
   const autoOpeningRef = React.useRef<Set<string>>(new Set());
+  // Latest autoTrade flag for long-lived callbacks (avoids stale []-closures).
+  const autoTradeRef = React.useRef(autoTrade);
+  React.useEffect(() => { autoTradeRef.current = autoTrade; }, [autoTrade]);
+  // Last time each symbol was auto-closed — a short cooldown prevents a rapid
+  // open→close→open loop while still allowing a fresh re-open a few seconds later.
+  const lastClosedAtRef = React.useRef<Record<string, number>>({});
+  // Bumped after every auto-close to re-trigger the signal scan so a still-valid
+  // signal is reopened without depending on a fragile stale-closure callback.
+  const [reopenTick, setReopenTick] = useState(0);
   // Inline SL/TP editing for an open trade
   const [editId, setEditId] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -431,7 +445,10 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
 
   const checkAutoClose = useCallback(async (sym: string, price: number) => {
     const currentTrades = tradesRef.current;
-    const targets = currentTrades.filter((t) => t.status === 'open' && t.symbol === sym);
+    // Only MANUAL trades are closed here. Auto trades are owned by the global
+    // AutoTradeEngine (which also trails them) — closing them here too would
+    // double-close. Trades with no explicit source are treated as manual.
+    const targets = currentTrades.filter((t) => t.status === 'open' && t.symbol === sym && t.source !== 'auto');
     const now = Date.now();
     for (const t of targets) {
       // Skip auto-close right after the user sets SL/TP (cooldown window).
@@ -520,15 +537,26 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     setBalance(newBalance);
     setTrades((prev) => prev.map((x) => x.id === t.id ? { ...x, status: 'closed', exitPrice, pnl, closeReason: reason, closedAt: Date.now() } : x));
     playCloseSound();
+    // Auto re-open: if this trade was closed automatically (tp/sl), allow the
+    // symbol to be auto-opened again so a still-valid signal keeps running its
+    // trailing cycle. A short cooldown avoids an instant open→close→open loop.
+    if (reason === 'tp' || reason === 'sl') {
+      autoOpenedRef.current.delete(t.symbol);
+      lastClosedAtRef.current[t.symbol] = Date.now();
+      setReopenTick((n) => n + 1);
+    }
   }
 
-  // ── AUTO-OPEN ENGINE ──
-  // When auto-trade is ON, open a PAPER trade for every strong buy/sell signal
-  // currently shown in the box, once per symbol (never a duplicate). Uses the
-  // signal's own entry/SL/TP and the category's default lot size. Skips when the
-  // market is closed or margin is insufficient — it never touches real money.
+  // ── AUTO-OPEN ENGINE (DISABLED — handled globally) ──
+  // Auto open/close is owned by the SINGLE global AutoTradeEngine in App.tsx,
+  // which runs on every page, uses a persistent localStorage guard (so a
+  // refresh/navigation never re-opens a displayed signal), and is the only
+  // engine that trails auto trades. This local copy is intentionally neutered
+  // to prevent two engines fighting over the same trade (double open/close).
+  // It remains only as documentation of the original logic.
   const autoOpenSignals = useCallback(async () => {
-    if (!autoTrade) return;
+    return; // no-op: the global engine is the sole source of truth
+    /* eslint-disable-next-line no-unreachable */
     for (const sig of signals) {
       const isBuy = sig.signal === SignalType.STRONG_BUY || sig.signal === SignalType.BUY;
       const isSell = sig.signal === SignalType.STRONG_SELL || sig.signal === SignalType.SELL;
@@ -539,6 +567,10 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
       // or an open trade already exists for it.
       if (autoOpenedRef.current.has(sym) || autoOpeningRef.current.has(sym)) continue;
       if (tradesRef.current.some((t) => t.status === 'open' && t.symbol === sym)) continue;
+      // Cooldown after a recent auto-close: prevent an instant open→close→open
+      // loop. Allow a genuine re-open only after the cooldown window elapses.
+      const lastClose = lastClosedAtRef.current[sym];
+      if (lastClose && Date.now() - lastClose < AUTO_REOPEN_COOLDOWN_MS) continue;
 
       const cat = detectCategory(sym);
       // Respect market hours (crypto is 24/7).
@@ -605,11 +637,14 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     }
   }, [autoTrade, signals, leverage]);
 
-  // Re-scan whenever the displayed signals change while auto-trade is ON.
+  // Re-scan whenever the displayed signals change, or after an auto-close
+  // (reopenTick) so a still-live signal is reopened. Only runs while the trade
+  // page is mounted — see the global engine in App.tsx for trading while the
+  // user browses other pages.
   useEffect(() => {
     if (!autoTrade || signals.length === 0) return;
     autoOpenSignals();
-  }, [autoTrade, signals, autoOpenSignals]);
+  }, [autoTrade, signals, autoOpenSignals, reopenTick]);
 
   const toggleAutoTrade = () => {
     setAutoTrade((prev) => {
@@ -783,7 +818,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     else tpVal = matchedSignal?.takeProfit || null;
     if (slAmount > 0) slVal = usdToPrice(symbol, slAmount, livePrice, !isBuy, qty, cat);
     else slVal = matchedSignal?.stopLoss || null;
-    const tradeData = { symbol, category: cat, side, qty, entryPrice: livePrice, status: 'open' as const, tp: tpVal, sl: slVal, openedAt: Date.now() };
+    const tradeData = { symbol, category: cat, side, qty, entryPrice: livePrice, status: 'open' as const, tp: tpVal, sl: slVal, openedAt: Date.now(), source: 'manual' as const };
 
     // ── REAL execution via self-hosted MT5 bridge (opt-in) ──────────────
     // Runs ONLY when the user has connected a bridge AND flipped the switch
