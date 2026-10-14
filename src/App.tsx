@@ -1494,9 +1494,22 @@ const isDeveloperSession = () => {
     // Play start alert sound
     try { playAudio('start'); } catch {}
 
-    const cats = s.category === 'all'
+    const rawCats = s.category === 'all'
       ? Object.keys(SYMBOL_CATEGORIES) as (keyof typeof SYMBOL_CATEGORIES)[]
       : (s.category || 'all').split(',') as (keyof typeof SYMBOL_CATEGORIES)[];
+
+    // Enforce a FIXED category order regardless of how they were saved/selected:
+    // forex → crypto → stocks → metals. Without this, a multi-category scan
+    // could jump crypto→metals→crypto… because it followed the stored string
+    // order. Sorting by the canonical SYMBOL_CATEGORIES key order keeps the
+    // radar strictly sequential as the user expects.
+    const catOrder = Object.keys(SYMBOL_CATEGORIES) as string[];
+    const cats = [...new Set(rawCats.map(c => String(c).trim()).filter(Boolean))]
+      .sort((a, b) => {
+        const ia = catOrder.indexOf(a);
+        const ib = catOrder.indexOf(b);
+        return (ia < 0 ? catOrder.length : ia) - (ib < 0 ? catOrder.length : ib);
+      }) as (keyof typeof SYMBOL_CATEGORIES)[];
 
     // Expand "stocks" into only the exchanges that are OPEN right now.
     // Each job carries the region + label so the UI can show which exchange is being scanned.
@@ -1593,12 +1606,14 @@ const isDeveloperSession = () => {
                   localStorage.setItem(ownsPaidPlan ? cxnSigKey : 'finalyze_client_signals', JSON.stringify(u.slice(-100)));
                   return u.slice(-100);
                 });
-                if (isPlanClient) {
-                  const isStrong = sig === 'strong_buy' || sig === 'strong_sell';
-                  setNewSignalAlert(lang === 'ar' ? (isStrong ? `✅ لقد تم رصد فرصة تداول قوية جديدة! — ${r.symbol}` : `✅ لقد تم رصد فرصة تداول جديدة! — ${r.symbol}`) : (isStrong ? `✅ New strong trading opportunity detected! — ${r.symbol}` : `✅ New trading opportunity detected! — ${r.symbol}`));
-                  setTimeout(() => setNewSignalAlert(null), 8000);
-                  try { playAudio('success'); } catch {}
-                }
+                // LIVE per-symbol display: publish this symbol the moment it is
+                // analyzed, so the user sees a category's signals fill in as its
+                // symbols complete (not only after the whole category finishes).
+                // kickEngine=false here → display only; the trade for the whole
+                // category opens once, below, after all its symbols are done and
+                // filtered. TopSignals keeps the "strong + top-3-by-confidence"
+                // rule per category on every render, so the strongest survive.
+                updateTopSignals([r], false);
               }
               lastError = null;
               break;
@@ -1629,24 +1644,20 @@ const isDeveloperSession = () => {
         }
       }
 
-      // ── PER-CATEGORY DISPLAY (immediate) ──
-      // All of THIS category's symbols are analyzed. Show its filtered signals
-      // right now (kickEngine=false → display only, no trade opened yet), so the
-      // user sees each category's best signals as soon as that category is done
-      // — exactly as before — instead of waiting for the whole multi-category
-      // scan. The trade open stays deferred until every category finishes below.
-      updateTopSignals(jobResults, false);
+      // ── PER-CATEGORY: DISPLAY + OPEN (immediate) ──
+      // All of THIS category's symbols are analyzed and its results filtered.
+      // Show them now AND open the trade now (kickEngine=true) — the user wants
+      // a position opened the moment a category's signal is displayed, not held
+      // back until every other category finishes. The engine's persistent guard
+      // already prevents double-opening the same symbol, so opening per-category
+      // is safe and matches the pre-regression behaviour.
+      updateTopSignals(jobResults, true);
     }
 
-    // Publish the WHOLE scan to topSignals + open ONE trade, ONCE, after every
-    // open category finished and the best-per-category / conflict-resolution
-    // inside updateTopSignals has run. This is the SAME pipeline the
-    // manual-analysis path uses (it calls updateTopSignals too), so radar and
-    // manual produce identical results for the same category. kickEngine=true
-    // here (and only here) is what opens the position — guaranteeing a trade is
-    // placed only after the full category set is analyzed and filtered, never
-    // on a mid-scan partial signal.
-    updateTopSignals(scanResults, true);
+    // NOTE: no second topSignals write / engine kick here anymore. Every category
+    // already displayed + opened its own signals above (sequential order), so a
+    // final pass would be redundant and risk opening late — exactly the bug we
+    // are fixing. `scanResults` remains only for the Firestore sync below.
 
     // Save results to Firestore for clients ΓÇö only if there are results
     if (!isPlanClient) {
