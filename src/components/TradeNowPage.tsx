@@ -15,6 +15,7 @@ import { playOpenSound, playCloseSound, playDragTick } from '../lib/tradeSounds'
 import { pricesToUsd, usdToPrice, slAmountUSD, notionalInUSD } from '../lib/positionMath';
 import { toTvSymbol as toTvSymbolShared } from '../lib/tvSymbol';
 import { calcTrailingStop } from '../lib/trailingStop';
+import { clearOpened as clearAutoOpened, resetGuard as resetAutoGuard } from '../services/autoGuard';
 import MT5ConnectModal from './MT5ConnectModal';
 import { loadConnection, mt5Bridge, MT5Connection } from '../services/mt5Bridge';
 import { isDeveloperEmail } from '../lib/clientIds';
@@ -537,6 +538,13 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     setBalance(newBalance);
     setTrades((prev) => prev.map((x) => x.id === t.id ? { ...x, status: 'closed', exitPrice, pnl, closeReason: reason, closedAt: Date.now() } : x));
     playCloseSound();
+    // Keep the GLOBAL auto-trade guard in sync with reality. Whatever closed this
+    // position (manual, tp, or sl), it is no longer open — so its persistent
+    // `opened` entry MUST be cleared. If it isn't, the global AutoTradeEngine
+    // keeps seeing the symbol as "already opened" and refuses to ever re-open its
+    // still-displayed signal again. Clearing here (and in doReset) is what keeps
+    // the guard honest; the cooldown below still throttles instant re-opens.
+    clearAutoOpened(t.symbol);
     // Auto re-open: if this trade was closed automatically (tp/sl), allow the
     // symbol to be auto-opened again so a still-valid signal keeps running its
     // trailing cycle. A short cooldown avoids an instant open→close→open loop.
@@ -912,6 +920,9 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     }
     setBalance(newBalance);
     setTrades((prev) => prev.map((x) => closedMap[x.id] ? { ...x, ...closedMap[x.id] } : x));
+    // Every symbol just closed is no longer open — clear its persistent auto-trade
+    // guard so the global engine can re-open a still-valid signal later.
+    closable.forEach((t) => clearAutoOpened(t.symbol));
     setBusy(false);
     setToast(isAr ? `تم إغلاق ${closable.length} صفقة دفعة واحدة` : `Closed ${closable.length} trades at once`);
     setTimeout(() => setToast(null), 2500);
@@ -1073,6 +1084,11 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     setBalance(val);
     setLeverage(DEFAULT_LEVERAGE);
     setTrades([]);
+    // A reset wipes every position, so the persistent auto-trade guard (which
+    // remembers which symbols were "opened") must be wiped too — otherwise the
+    // global engine still believes those symbols have a live position and refuses
+    // to ever re-open their signals after the reset.
+    resetAutoGuard();
     setShowReset(false);
     setResetInput('');
     setQty(getDefaultQty(detectCategory(symbol || ''), val));

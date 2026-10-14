@@ -20,7 +20,7 @@ import {
   type PaperTrade,
 } from './paperTradingService';
 import { calcTrailingStop } from '../lib/trailingStop';
-import { isOpened, markOpened, markClosed, lastClosedAt } from './autoGuard';
+import { isOpened, markOpened, markClosed, clearOpened, lastClosedAt } from './autoGuard';
 import { SYMBOL_CATEGORIES } from '../constants';
 
 // Trailing settings (mirrors TradeNowPage's local copy so the global engine can
@@ -144,21 +144,32 @@ export class AutoTradeEngine {
         if (!isBuy && !isSell) continue;
         const sym = sig.symbol;
         if (!sym) continue;
-        // Persistent guards: survives refresh/reload. Cleared only on real close.
-        if (isOpened(sym)) continue;
-        if (openAuto.some((t) => t.symbol === sym)) continue;
+        // Persistent guard: survives refresh/reload. Cleared only on real close.
+        // STUCK-GUARD REPAIR: the guard lives in localStorage, but a trade can be
+        // closed manually / reset / cleared on the trade page without the engine
+        // running. When that happens the symbol stays stuck in `opened` forever
+        // and its (still-displayed) signal would NEVER open again. So if the guard
+        // says "opened" but there is genuinely no open auto position for it, we
+        // clear the stale entry and let it re-open — matching the reality on the
+        // trade page (no open position ⇒ nothing to protect against re-opening).
+        if (isOpened(sym) && !openAuto.some((t) => t.symbol === sym)) {
+          console.warn(`[AutoTradeEngine] stuck guard for ${sym} — no open position, clearing so it can re-open`);
+          clearOpened(sym);
+        }
+        if (isOpened(sym)) { console.warn(`[AutoTradeEngine] skip ${sym}: guard says opened`); continue; }
+        if (openAuto.some((t) => t.symbol === sym)) { console.warn(`[AutoTradeEngine] skip ${sym}: open auto position already exists`); continue; }
         const lastClose = lastClosedAt(sym);
-        if (lastClose && Date.now() - lastClose < REOPEN_COOLDOWN_MS) continue;
+        if (lastClose && Date.now() - lastClose < REOPEN_COOLDOWN_MS) { console.warn(`[AutoTradeEngine] skip ${sym}: reopen cooldown`); continue; }
 
         const cat = detectCategory(sym);
-        if (!isMarketOpen(cat, sym)) continue;
+        if (!isMarketOpen(cat, sym)) { console.warn(`[AutoTradeEngine] skip ${sym}: market closed (${cat})`); continue; }
 
         const price = await this.getPrice(sym);
-        if (price == null || !(price > 0)) continue;
+        if (price == null || !(price > 0)) { console.warn(`[AutoTradeEngine] skip ${sym}: no live price`); continue; }
 
         const q = getDefaultQty(cat, balance);
         const requiredMargin = notionalInUSD(cat, sym, price, q) / leverage;
-        if (requiredMargin > balance) continue;
+        if (requiredMargin > balance) { console.warn(`[AutoTradeEngine] skip ${sym}: insufficient margin (need ${requiredMargin.toFixed(2)} > balance ${balance})`); continue; }
 
         const { slUsd, tpUsd } = calcRiskUSD(balance);
         const side: 'buy' | 'sell' = isBuy ? 'buy' : 'sell';
