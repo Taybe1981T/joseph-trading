@@ -156,11 +156,26 @@ export class AutoTradeEngine {
     // without this in-scan check a switched-OFF engine would keep opening.
     try { if (typeof localStorage !== 'undefined' && localStorage.getItem('paper_trading_auto_trade') === '0') return; } catch { /* keep scanning */ }
     try {
-      const store = getTradeStore(this.config.user);
-      const [{ balance, leverage }, allTrades] = await Promise.all([
-        store.getAccount(),
-        store.listTrades(),
-      ]);
+    let store = getTradeStore(this.config.user);
+    let balance = 0;
+    let leverage = 1;
+    let allTrades: PaperTrade[] = [];
+    try {
+      const [r, t] = await Promise.all([store.getAccount(), store.listTrades()]);
+      balance = r.balance;
+      leverage = r.leverage;
+      allTrades = t;
+    } catch (e) {
+      // Firestore permission/auth failure (e.g. user object restored from
+      // localStorage with a stale token) → fall back to the local store so
+      // the scan keeps working WITHOUT a page refresh.
+      console.warn('[AutoTradeEngine] Firestore unavailable, falling back to local store:', e);
+      store = getTradeStore(null); // LocalStore
+      const [r, t] = await Promise.all([store.getAccount(), store.listTrades()]);
+      balance = r.balance;
+      leverage = r.leverage;
+      allTrades = t;
+    }
       // This engine ONLY owns auto trades. Manual trades are managed by the
       // trade page's own engine — touching them here would double-close them.
       const openAuto = allTrades.filter((t) => t.status === 'open' && t.source === 'auto');
