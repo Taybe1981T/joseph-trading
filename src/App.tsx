@@ -1145,7 +1145,12 @@ const isDeveloperSession = () => {
     }
   };
 
-  const updateTopSignals = (results: AnalysisResult[]) => {
+  // `kickEngine` controls auto-trade OPENING (not display). Display always
+  // happens (setTopSignals) so a finished category shows its filtered signals
+  // immediately — the radar calls this per-category with kickEngine=false, and
+  // ONCE after ALL categories with kickEngine=true so only one position opens
+  // after the final best-per-category filter. Manual analysis passes true.
+  const updateTopSignals = (results: AnalysisResult[], kickEngine = true) => {
     try {
     let changed = false;
     let hasBrandNewSymbol = false;
@@ -1286,25 +1291,31 @@ const isDeveloperSession = () => {
       // Each category independently shows its strong signals + top 3 regular
       const published = [...strong, ...regular];
       setTopSignals(published);
+      // Keep the ref in sync IMMEDIATELY (not just via the [topSignals] effect,
+      // which only runs after the next render). The radar calls this
+      // per-category in a tight loop; without this the next category's call
+      // would read a stale `signalsRef.current` and drop the earlier
+      // categories' signals from the box.
+      signalsRef.current = published;
+      try { localStorage.setItem('top_signals_persistent', JSON.stringify(published)); } catch {}
 
       // ── DIRECT ENGINE KICK (same-tick auto-open) ──
-      // Why: the global AutoTradeEngine is fed through a useEffect on
-      // [topSignals, user]. That effect fires AFTER this render commits, and
-      // the trade page's own list only refreshes on mount — so a signal that
-      // just appeared could sit visible-but-unopened until a manual refresh.
-      // Kicking the engine synchronously right where the signals are
-      // published guarantees the trade opens the moment the signal shows,
-      // with zero dependence on effect timing. Uses the ref directly (and
-      // falls back to a custom event for any listener) — never waits.
+      // GATED by kickEngine: display always happens above (so a finished
+      // category shows its signals immediately), but auto-trade OPENING only
+      // fires when explicitly asked — the radar defers this to ONCE after ALL
+      // categories finish, so a position opens only after the final
+      // best-per-category filter, never on a mid-scan partial signal.
+      if (kickEngine) {
       try {
         const eng = (autoEngineRef as any)?.current;
         if (eng && typeof eng.scanNow === 'function') {
-          eng.updateConfig?.({ signals: published.map((s: any) => ({ symbol: s.symbol, signal: s.signal })) });
+          eng.updateConfig?.({ signals: published.map((s: any) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })) });
           eng.scanNow();
         } else {
           try { window.dispatchEvent(new CustomEvent('finalyze-signals-published', { detail: { count: published.length } })); } catch {}
         }
       } catch { /* engine kick is best-effort */ }
+      }
 
       if (hasBrandNewSymbol) {
         setNewSignalAlert(lang === 'ar' ? '✅ لقد تم رصد فرصة تداول قوية جديدة!' : '✅ New strong trading opportunity detected!');
@@ -1517,6 +1528,10 @@ const isDeveloperSession = () => {
     for (let jobIdx = 0; jobIdx < openJobs.length; jobIdx++) {
       if (!autoSettingsRef.current.isEnabled) break;
       const { cat, region, exchange } = openJobs[jobIdx];
+      // Results for THIS category only. Collected here so that the moment the
+      // category's symbols are all analyzed we can DISPLAY its filtered signals
+      // (kickEngine=false) — without waiting for the remaining categories.
+      const jobResults: AnalysisResult[] = [];
       // Alert 3: Category complete and beginning of next category analysis
       if (jobIdx > 0) {
         try { initAudio(); } catch {}
@@ -1572,6 +1587,7 @@ const isDeveloperSession = () => {
               // is written once, authoritatively, at the end of the scan.
               if (sig && sig !== 'no_entry' && sig !== 'neutral' && !r.isSideways) {
                 scanResults.push(r);
+                jobResults.push(r);
                 setClientSignals(prev => {
                   const u = [...prev.filter(x => x.symbol !== r.symbol), r];
                   localStorage.setItem(ownsPaidPlan ? cxnSigKey : 'finalyze_client_signals', JSON.stringify(u.slice(-100)));
@@ -1612,17 +1628,25 @@ const isDeveloperSession = () => {
           await new Promise(r => setTimeout(r, 2500));
         }
       }
+
+      // ── PER-CATEGORY DISPLAY (immediate) ──
+      // All of THIS category's symbols are analyzed. Show its filtered signals
+      // right now (kickEngine=false → display only, no trade opened yet), so the
+      // user sees each category's best signals as soon as that category is done
+      // — exactly as before — instead of waiting for the whole multi-category
+      // scan. The trade open stays deferred until every category finishes below.
+      updateTopSignals(jobResults, false);
     }
 
-    // Publish the whole scan to topSignals ONCE, here, after every open
-    // category finished and the best-per-category / conflict-resolution inside
-    // updateTopSignals has run. This is the SAME pipeline the manual-analysis
-    // path uses (it calls updateTopSignals on its results too), so radar and
-    // manual now produce identical results for the same category. It also feeds
-    // the global auto-trade engine, which reads ONLY topSignals — without this
-    // call the radar's signals never reached topSignals, so (a) radar results
-    // never showed in the signals box and (b) auto-trade never opened a trade.
-    updateTopSignals(scanResults);
+    // Publish the WHOLE scan to topSignals + open ONE trade, ONCE, after every
+    // open category finished and the best-per-category / conflict-resolution
+    // inside updateTopSignals has run. This is the SAME pipeline the
+    // manual-analysis path uses (it calls updateTopSignals too), so radar and
+    // manual produce identical results for the same category. kickEngine=true
+    // here (and only here) is what opens the position — guaranteeing a trade is
+    // placed only after the full category set is analyzed and filtered, never
+    // on a mid-scan partial signal.
+    updateTopSignals(scanResults, true);
 
     // Save results to Firestore for clients ΓÇö only if there are results
     if (!isPlanClient) {
