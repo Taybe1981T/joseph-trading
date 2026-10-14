@@ -1045,14 +1045,14 @@ const isDeveloperSession = () => {
       autoEngineRef.current = new AutoTradeEngine({
         user,
         leverage: currentLeverage,
-        signals: topSignals.map((s) => ({ symbol: s.symbol, signal: s.signal })),
+        signals: topSignals.map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
       });
       autoEngineRef.current.start();
     } else {
       autoEngineRef.current.updateConfig({
         user,
         leverage: currentLeverage,
-        signals: topSignals.map((s) => ({ symbol: s.symbol, signal: s.signal })),
+        signals: topSignals.map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
       });
     }
   }, [topSignals, user, autoTradeGen]);

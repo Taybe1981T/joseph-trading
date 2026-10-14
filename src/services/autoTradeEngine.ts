@@ -23,6 +23,40 @@ import { calcTrailingStop } from '../lib/trailingStop';
 import { isOpened, markOpened, markClosed, clearOpened, lastClosedAt } from './autoGuard';
 import { SYMBOL_CATEGORIES } from '../constants';
 
+// ── PENDING-OPEN QUEUE (persisted) ──
+// When a displayed signal can't open right away (market closed at scan time,
+// or the quote feed has no price yet), dropping it means "signal with no
+// trade" — opening only "magically" after a later refresh. This queue
+// remembers the intent in localStorage so the next scan opens it as soon as
+// conditions allow (market opens / price arrives), with zero user action.
+const PENDING_KEY = 'finalyze_pending_opens_v1';
+const PENDING_TTL_MS = 48 * 3600 * 1000; // forget stale intents after 48h
+interface PendingOpen { signal: string; entryPrice?: number | null; stopLoss?: number | null; takeProfit?: number | null; queuedAt: number }
+function readPending(): Record<string, PendingOpen> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PENDING_KEY) || '{}');
+    if (!raw || typeof raw !== 'object') return {};
+    const now = Date.now();
+    const out: Record<string, PendingOpen> = {};
+    for (const [k, v] of Object.entries<any>(raw)) {
+      if (v && typeof v.signal === 'string' && typeof v.queuedAt === 'number' && now - v.queuedAt < PENDING_TTL_MS) out[k] = v as PendingOpen;
+    }
+    return out;
+  } catch { return {}; }
+}
+function writePending(p: Record<string, PendingOpen>) {
+  try { localStorage.setItem(PENDING_KEY, JSON.stringify(p)); } catch { /* private mode */ }
+}
+function enqueuePendingOpen(sym: string, p: PendingOpen) {
+  const all = readPending();
+  all[sym] = p;
+  writePending(all);
+}
+function consumePendingOpen(sym: string) {
+  const all = readPending();
+  if (all[sym]) { delete all[sym]; writePending(all); }
+}
+
 // Trailing settings (mirrors TradeNowPage's local copy so the global engine can
 // trail auto trades on every page, not just the trade page).
 function loadTrailingSettings(): { enabled: boolean; baseActivationUSD: number; baseStepUSD: number; activationLotStep: number; stepLotStep: number } {
@@ -58,7 +92,7 @@ function detectCategory(sym: string): string {
 export interface AutoTradeConfig {
   user: any; // Firebase user or null
   leverage: number;
-  signals: Array<{ symbol: string; signal: SignalType }>;
+  signals: Array<{ symbol: string; signal: SignalType; entryPrice?: number | null; stopLoss?: number | null; takeProfit?: number | null }>;
 }
 
 const SCAN_INTERVAL_MS = 3000;
@@ -166,7 +200,23 @@ export class AutoTradeEngine {
       }
 
       // OPEN PASS: open new signals (persistent guard prevents re-open on reload).
-      for (const sig of this.config.signals) {
+      // Merge in pending-open intents (queued while market was closed or the
+      // quote feed had no price). A pending symbol whose signal is no longer
+      // displayed is still opened — it was a completed, filtered category
+      // signal that simply couldn't fill at scan time.
+      let openList = this.config.signals;
+      try {
+        const pend = readPending();
+        const seen = new Set(openList.map((s) => s.symbol));
+        const extra: typeof openList = [];
+        for (const [sym, p] of Object.entries(pend)) {
+          if (seen.has(sym)) continue;
+          if (p.signal !== SignalType.STRONG_BUY && p.signal !== SignalType.BUY && p.signal !== SignalType.STRONG_SELL && p.signal !== SignalType.SELL) continue;
+          extra.push({ symbol: sym, signal: p.signal as SignalType, entryPrice: p.entryPrice ?? null, stopLoss: p.stopLoss ?? null, takeProfit: p.takeProfit ?? null });
+        }
+        if (extra.length) openList = [...openList, ...extra];
+      } catch { /* pending merge is best-effort */ }
+      for (const sig of openList) {
         const isBuy = sig.signal === SignalType.STRONG_BUY || sig.signal === SignalType.BUY;
         const isSell = sig.signal === SignalType.STRONG_SELL || sig.signal === SignalType.SELL;
         if (!isBuy && !isSell) continue;
@@ -190,10 +240,35 @@ export class AutoTradeEngine {
         if (lastClose && Date.now() - lastClose < REOPEN_COOLDOWN_MS) { console.warn(`[AutoTradeEngine] skip ${sym}: reopen cooldown`); continue; }
 
         const cat = detectCategory(sym);
-        if (!isMarketOpen(cat, sym)) { console.warn(`[AutoTradeEngine] skip ${sym}: market closed (${cat})`); continue; }
+        const marketOpen = isMarketOpen(cat, sym);
+        // ── WEEKEND PENDING QUEUE ──
+        // A fresh analysis (metals/forex/stocks) routinely lands while the
+        // market is closed (weekend). Skipping it outright means the signal is
+        // displayed but never traded — the user sees "signal with no trade"
+        // even though auto-trade is ON. A page refresh during open hours then
+        // "magically" opens it. Instead: remember the pending intent and open
+        // automatically the moment the market opens, without any refresh.
+        if (!marketOpen) {
+          try { enqueuePendingOpen(sym, { signal: sig.signal, entryPrice: sig.entryPrice ?? null, stopLoss: sig.stopLoss ?? null, takeProfit: sig.takeProfit ?? null, queuedAt: Date.now() }); } catch {}
+          console.warn(`[AutoTradeEngine] queued ${sym}: market closed (${cat}) — will auto-open at open`);
+          continue;
+        }
+        // Market just opened (or pending from an earlier closed-market scan):
+        // drain any queued intent for this symbol first so weekend analyses
+        // open in order before fresh scans compete for margin.
+        try { consumePendingOpen(sym); } catch {}
 
         const price = await this.getPrice(sym);
-        if (price == null || !(price > 0)) { console.warn(`[AutoTradeEngine] skip ${sym}: no live price`); continue; }
+        if (price == null || !(price > 0)) {
+          // ── NO-PRICE PENDING QUEUE ──
+          // Same idea as the closed-market queue: the quote feed (/api/quote)
+          // often returns null for metals/forex right after an analysis while
+          // the provider warms up. Skipping here drops the trade silently.
+          // Queue it so the next scan with a valid price opens it.
+          try { enqueuePendingOpen(sym, { signal: sig.signal, entryPrice: sig.entryPrice ?? null, stopLoss: sig.stopLoss ?? null, takeProfit: sig.takeProfit ?? null, queuedAt: Date.now() }); } catch {}
+          console.warn(`[AutoTradeEngine] queued ${sym}: no live price — will retry`);
+          continue;
+        }
 
         const q = getDefaultQty(cat, balance);
         const requiredMargin = notionalInUSD(cat, sym, price, q) / leverage;
