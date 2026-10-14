@@ -989,6 +989,40 @@ const isDeveloperSession = () => {
   // signals/leverage on every change. Only acts when the user has auto-trade
   // ON (localStorage AUTO_TRADE_KEY) — otherwise it stays idle.
   const autoEngineRef = useRef<AutoTradeEngine | null>(null);
+  // Same-tab auto-trade switch generation. The engine-feeding useEffect below
+  // depends on [topSignals, user] only, so flipping the toggle on the trade
+  // page (same tab — no `storage` event fires) would otherwise leave a
+  // running engine alive. Bumping this state forces a re-run that starts or
+  // stops the engine immediately.
+  const [autoTradeGen, setAutoTradeGen] = useState(0);
+  useEffect(() => {
+    const onAutoTrade = (e: Event) => {
+      const on = (e as CustomEvent)?.detail?.on;
+      if (typeof on === 'boolean' && !on) {
+        // Switch OFF: stop instantly, don't wait for any re-render.
+        autoEngineRef.current?.stop();
+        autoEngineRef.current = null;
+      }
+      setAutoTradeGen((n) => n + 1);
+    };
+    const onStorage = (ev: StorageEvent) => {
+      if (!ev.key || ev.key === 'paper_trading_auto_trade') {
+        try {
+          if (localStorage.getItem('paper_trading_auto_trade') === '0') {
+            autoEngineRef.current?.stop();
+            autoEngineRef.current = null;
+          }
+        } catch { /* ignore */ }
+        setAutoTradeGen((n) => n + 1);
+      }
+    };
+    try { window.addEventListener('finalyze-auto-trade-changed', onAutoTrade as EventListener); } catch {}
+    try { window.addEventListener('storage', onStorage); } catch {}
+    return () => {
+      try { window.removeEventListener('finalyze-auto-trade-changed', onAutoTrade as EventListener); } catch {}
+      try { window.removeEventListener('storage', onStorage); } catch {}
+    };
+  }, []);
   useEffect(() => {
     // Auto-trade mirrors the trade page's own toggle: it defaults to ON and only
     // runs when the user has NOT explicitly turned it OFF (which writes '0').
@@ -1021,7 +1055,7 @@ const isDeveloperSession = () => {
         signals: topSignals.map((s) => ({ symbol: s.symbol, signal: s.signal })),
       });
     }
-  }, [topSignals, user]);
+  }, [topSignals, user, autoTradeGen]);
 
   useEffect(() => () => { autoEngineRef.current?.stop(); autoEngineRef.current = null; }, []);
 
@@ -1250,7 +1284,27 @@ const isDeveloperSession = () => {
       
       // Pass all signals - TopSignals component handles category-based display
       // Each category independently shows its strong signals + top 3 regular
-      setTopSignals([...strong, ...regular]);
+      const published = [...strong, ...regular];
+      setTopSignals(published);
+
+      // ── DIRECT ENGINE KICK (same-tick auto-open) ──
+      // Why: the global AutoTradeEngine is fed through a useEffect on
+      // [topSignals, user]. That effect fires AFTER this render commits, and
+      // the trade page's own list only refreshes on mount — so a signal that
+      // just appeared could sit visible-but-unopened until a manual refresh.
+      // Kicking the engine synchronously right where the signals are
+      // published guarantees the trade opens the moment the signal shows,
+      // with zero dependence on effect timing. Uses the ref directly (and
+      // falls back to a custom event for any listener) — never waits.
+      try {
+        const eng = (autoEngineRef as any)?.current;
+        if (eng && typeof eng.scanNow === 'function') {
+          eng.updateConfig?.({ signals: published.map((s: any) => ({ symbol: s.symbol, signal: s.signal })) });
+          eng.scanNow();
+        } else {
+          try { window.dispatchEvent(new CustomEvent('finalyze-signals-published', { detail: { count: published.length } })); } catch {}
+        }
+      } catch { /* engine kick is best-effort */ }
 
       if (hasBrandNewSymbol) {
         setNewSignalAlert(lang === 'ar' ? '✅ لقد تم رصد فرصة تداول قوية جديدة!' : '✅ New strong trading opportunity detected!');

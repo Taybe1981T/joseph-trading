@@ -410,6 +410,43 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     return () => { alive = false; };
   }, [user?.uid]);
 
+  // ── LIVE TRADE-LIST SYNC (show auto-opened trades without refresh) ──
+  // Why: the global AutoTradeEngine opens trades directly in the store while
+  // the user sits on ANY page. This list previously loaded only on mount, so
+  // a trade opened seconds after a radar scan stayed invisible until a manual
+  // refresh — the user believed "nothing opened". A light 2s poll picks up
+  // any store change (open/close by the global engine on any page) and also
+  // listens to cross-tab `storage` writes (same storage key).
+  useEffect(() => {
+    let alive = true;
+    const syncFromStore = async () => {
+      if (!alive) return;
+      try {
+        const acc = await store.getAccount();
+        const list = await store.listTrades();
+        if (!alive) return;
+        setBalance((prev) => (prev === acc.balance ? prev : acc.balance));
+        setLeverage((prev) => (prev === acc.leverage ? prev : acc.leverage));
+        setTrades((prev) => {
+          const sorted = [...list].sort((a, b) => b.openedAt - a.openedAt);
+          const sig = (t: PaperTrade) => `${t.id}:${t.status}:${t.exitPrice ?? ''}:${t.pnl ?? ''}:${t.sl ?? ''}:${t.tp ?? ''}`;
+          const a = prev.map(sig).join('|');
+          const b = sorted.map(sig).join('|');
+          return a === b ? prev : sorted;
+        });
+      } catch { /* keep the last known list */ }
+    };
+    const iv = setInterval(syncFromStore, 2000);
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || e.key === 'paper_trading_data') void syncFromStore();
+    };
+    const onFocus = () => { void syncFromStore(); };
+    try { window.addEventListener('storage', onStorage); } catch {}
+    try { window.addEventListener('focus', onFocus); } catch {}
+    return () => { alive = false; clearInterval(iv); try { window.removeEventListener('storage', onStorage); } catch {} try { window.removeEventListener('focus', onFocus); } catch {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
+
   // Live price for selected symbol
   useEffect(() => {
     let alive = true;
@@ -658,6 +695,12 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     setAutoTrade((prev) => {
       const next = !prev;
       try { localStorage.setItem(AUTO_TRADE_KEY, next ? '1' : '0'); } catch {}
+      // Notify the global AutoTradeEngine in the SAME tab instantly. The
+      // cross-tab `storage` event never fires in the tab that wrote the
+      // value, and the App effect feeding the engine depends on
+      // [topSignals, user] only — so without this, switching OFF would
+      // leave a running engine opening trades until the next signal.
+      try { window.dispatchEvent(new CustomEvent('finalyze-auto-trade-changed', { detail: { on: next } })); } catch {}
       // When switching ON, run an immediate scan of the current signals.
       if (next) setTimeout(() => autoOpenSignals(), 0);
       return next;

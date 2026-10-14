@@ -74,7 +74,18 @@ export class AutoTradeEngine {
   }
 
   updateConfig(patch: Partial<AutoTradeConfig>) {
+    const prevSignals = this.config.signals;
     this.config = { ...this.config, ...patch };
+    // When the displayed signals change while the engine is already running,
+    // fire a scan IMMEDIATELY instead of waiting for the next interval tick.
+    // Without this, a signal produced by a just-finished radar scan could sit
+    // unopened for up to SCAN_INTERVAL_MS (or be missed entirely if the timer
+    // was throttled while the tab was backgrounded) — the user would only see
+    // the trade appear after a manual page refresh (which re-runs start()).
+    if (this.running && patch.signals && patch.signals !== prevSignals) {
+      // Defer a tick so the patched config is fully committed before scanning.
+      setTimeout(() => this.scan(), 0);
+    }
   }
 
   start() {
@@ -85,6 +96,18 @@ export class AutoTradeEngine {
     console.log('[AutoTradeEngine] started');
   }
 
+  /** Public immediate scan — lets App kick the engine synchronously the very
+   *  tick new signals are published (no waiting for effect/interval timing). */
+  scanNow() {
+    if (!this.running) {
+      // Engine exists but was stopped (e.g. toggled off then on without a
+      // topSignals change to re-trigger the App effect) — restart it.
+      try { this.start(); } catch { try { this.scan(); } catch {} }
+      return;
+    }
+    try { this.scan(); } catch (e) { console.error('[AutoTradeEngine] scanNow error:', e); }
+  }
+
   stop() {
     if (this.timer != null) { clearInterval(this.timer); this.timer = null; }
     this.running = false;
@@ -93,6 +116,11 @@ export class AutoTradeEngine {
 
   private async scan() {
     if (!this.running) return;
+    // Honor the same-tab toggle instantly. The App effect that starts/stops
+    // this engine depends on [topSignals, user] only, so flipping the
+    // auto-trade switch on the trade page (same tab) does NOT re-run it —
+    // without this in-scan check a switched-OFF engine would keep opening.
+    try { if (typeof localStorage !== 'undefined' && localStorage.getItem('paper_trading_auto_trade') === '0') return; } catch { /* keep scanning */ }
     try {
       const store = getTradeStore(this.config.user);
       const [{ balance, leverage }, allTrades] = await Promise.all([
