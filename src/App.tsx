@@ -1299,24 +1299,6 @@ const isDeveloperSession = () => {
       signalsRef.current = published;
       try { localStorage.setItem('top_signals_persistent', JSON.stringify(published)); } catch {}
 
-      // ── DIRECT ENGINE KICK (same-tick auto-open) ──
-      // GATED by kickEngine: display always happens above (so a finished
-      // category shows its signals immediately), but auto-trade OPENING only
-      // fires when explicitly asked — the radar defers this to ONCE after ALL
-      // categories finish, so a position opens only after the final
-      // best-per-category filter, never on a mid-scan partial signal.
-      if (kickEngine) {
-      try {
-        const eng = (autoEngineRef as any)?.current;
-        if (eng && typeof eng.scanNow === 'function') {
-          eng.updateConfig?.({ signals: published.map((s: any) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })) });
-          eng.scanNow();
-        } else {
-          try { window.dispatchEvent(new CustomEvent('finalyze-signals-published', { detail: { count: published.length } })); } catch {}
-        }
-      } catch { /* engine kick is best-effort */ }
-      }
-
       if (hasBrandNewSymbol) {
         setNewSignalAlert(lang === 'ar' ? '✅ لقد تم رصد فرصة تداول قوية جديدة!' : '✅ New strong trading opportunity detected!');
         setTimeout(() => setNewSignalAlert(null), 8000);
@@ -1325,6 +1307,42 @@ const isDeveloperSession = () => {
           playAudio('success');
         }, 400);
       }
+    }
+
+    // ── AUTO-OPEN (gated by kickEngine ONLY — deliberately OUTSIDE if (changed)) ──
+    // ROOT-CAUSE FIX: by the time the category-level call runs with
+    // kickEngine=true, the per-symbol live display above already added these
+    // symbols to signalsRef.current, so `changed` comes back FALSE (no rank
+    // change) and a kick nested inside `if (changed)` was silently SKIPPED —
+    // the trade then never opened until a manual page refresh (start() runs an
+    // immediate scan with the persisted signals). Display belongs inside
+    // if (changed); OPENING must not be gated on it.
+    if (kickEngine) {
+      const engineSignals = () => (signalsRef.current || []).map((s: any) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null }));
+      const fire = () => {
+        try {
+          const eng = (autoEngineRef as any)?.current;
+          if (eng && typeof eng.scanNow === 'function') {
+            const sigs = engineSignals();
+            eng.updateConfig?.({ signals: sigs });
+            eng.scanNow();
+            console.log(`[auto-open] kick → ${sigs.length} signal(s) fed to engine`);
+          } else {
+            // Engine not created (auto-trade just toggled ON / effect not run
+            // yet): bump the generation so the engine effect re-runs, creates
+            // the engine with the CURRENT topSignals and start() scans at once.
+            setAutoTradeGen((n) => n + 1);
+            console.log('[auto-open] engine missing → restarting via effect');
+          }
+        } catch (e) { console.warn('[auto-open] kick failed:', e); }
+      };
+      // Hidden background verification: kick NOW, then re-kick a few times over
+      // the next 15s. If the first scan is skipped by a transient condition
+      // (quote feed not warmed, reopen cooldown, store latency) a later retry
+      // opens it — NO page refresh needed, no radar interruption. The engine's
+      // persistent guard makes retries idempotent (already-open ⇒ skipped).
+      fire();
+      [3000, 8000, 15000].forEach((ms) => setTimeout(fire, ms));
     }
     } catch (e) { console.warn('[updateTopSignals] Error:', e); }
   };
