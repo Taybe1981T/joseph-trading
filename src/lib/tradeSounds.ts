@@ -63,6 +63,7 @@ export function playChampagnePop(volume: number = 0.7) {
       g.gain.exponentialRampToValueAtTime(gain, at + 0.012);
       g.gain.exponentialRampToValueAtTime(0.0001, at + decay);
       g2.gain.value = 0.12; // أُحدة الجرس أهدأ من الأساس
+      g.connect(c.destination); // التوصيل بمخرج الصوت (بدونه يبقى الصوت صامتًا)
       o.start(at);
       o.stop(at + decay + 0.05);
       o2.start(at);
