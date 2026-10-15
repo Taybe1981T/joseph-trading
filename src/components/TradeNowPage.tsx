@@ -20,7 +20,6 @@ import { openEventFor, broadcastMirrorEvent } from '../services/tradeMirror';
 import MT5ConnectModal from './MT5ConnectModal';
 import { loadConnection, mt5Bridge, MT5Connection } from '../services/mt5Bridge';
 import { isDeveloperEmail } from '../lib/clientIds';
-import { isDeveloperEmail } from '../lib/clientIds';
 
 // Minimum wait after an auto-close before the same symbol may be auto-opened
 // again. Prevents a rapid open→close→open loop while still letting a still-valid
