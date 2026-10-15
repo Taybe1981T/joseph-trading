@@ -256,6 +256,8 @@ export class AutoTradeEngine {
       // a "stuck guard" one. This set makes that distinction exact.
       const openedThisScan = new Set<string>();
       for (const sig of openList) {
+        const sym = sig.symbol;
+        if (!sym) continue;
         // ── NO-DUPLICATE GUARD ── Prevent a second auto position on the same
         // symbol: never open a second trade if one is already open for this
         // symbol. The displayed signal may redraw, but margin or a still-open
@@ -268,8 +270,6 @@ export class AutoTradeEngine {
         const isBuy = sig.signal === SignalType.STRONG_BUY || sig.signal === SignalType.BUY;
         const isSell = sig.signal === SignalType.STRONG_SELL || sig.signal === SignalType.SELL;
         if (!isBuy && !isSell) continue;
-        const sym = sig.symbol;
-        if (!sym) continue;
         // Persistent guard: survives refresh/reload. Cleared only on real close.
         // STUCK-GUARD REPAIR: the guard lives in localStorage, but a trade can be
         // closed manually / reset / cleared on the trade page without the engine

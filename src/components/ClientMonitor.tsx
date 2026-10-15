@@ -248,7 +248,7 @@ export default function ClientMonitor({ clients, lang, onRefresh, onMergeDuplica
             <p className="text-xs text-white/60 mt-0.5">
               {clientLoginRequired
                 ? (isAr ? 'العملاء يجب عليهم تسجيل الدخول عبر Google' : 'Clients must sign in with Google')
-                : (isAr ? 'العملاء يدخلون مباشرة بدون تسجيل دخول' : 'Clients enter directly without login')}</
+                : (isAr ? 'العملاء يدخلون مباشرة بدون تسجيل دخول' : 'Clients enter directly without login')}
             </p>
           </div>
         </div>
