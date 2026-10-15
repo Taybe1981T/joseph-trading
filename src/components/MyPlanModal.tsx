@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Crown, X, RefreshCcw, TimerReset, Zap, CalendarCheck, Hourglass, Trash2, AlertTriangle, ChevronRight } from 'lucide-react';
+import { Crown, X, RefreshCcw, TimerReset, Zap, CalendarCheck, Hourglass, Trash2, AlertTriangle, ChevronRight, Copy } from 'lucide-react';
+import { isMirrorEnabled, setMirrorEnabled } from '../services/tradeMirror';
 
 interface MyPlanModalProps {
   lang: 'ar' | 'en';
@@ -44,6 +45,15 @@ function useCountdown(target?: string | null) {
 export default function MyPlanModal({ lang, plan, features, paidMode = true, onClose, onReturnToFree, onActivate, onDeletePlan, email, asPage = false }: MyPlanModalProps) {
   const isAr = lang === 'ar';
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // نسخ صفقات المطور — مفتاح اشتراك العميل في المزامنة التلقائية.
+  const [mirrorOn, setMirrorOn] = useState<boolean>(() => isMirrorEnabled());
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      try { setMirrorOn((e as CustomEvent)?.detail?.on ?? isMirrorEnabled()); } catch {}
+    };
+    try { window.addEventListener('finalyze-mirror-changed', onChange as EventListener); } catch {}
+    return () => { try { window.removeEventListener('finalyze-mirror-changed', onChange as EventListener); } catch {} };
+  }, []);
   const left = useCountdown(plan?.expiryDate);
   if (!plan) return null;
 
@@ -142,6 +152,25 @@ export default function MyPlanModal({ lang, plan, features, paidMode = true, onC
         ) : (
           <p className="text-center text-[11px] text-slate-500 mb-3">{isAr ? 'خطتك مفعّلة وتعمل في كل مميزات التحليل.' : 'Your plan is active with all analysis features.'}</p>
         )}
+        {/* نسخ صفقات المطور تلقائياً — نفس صفقات المطور تُفتح في حسابك */}
+        <button
+          onClick={() => { const next = !mirrorOn; setMirrorOn(next); try { setMirrorEnabled(next); } catch {} }}
+          className={`w-full mb-3 flex items-center justify-between gap-3 px-4 py-3.5 rounded-2xl border-2 font-black text-sm transition-all active:scale-[0.98] ${mirrorOn ? 'bg-emerald-500 border-emerald-600 text-white shadow-lg shadow-emerald-500/30' : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'}`}
+          title={isAr ? 'نسخ صفقات المطور' : 'Copy developer trades'}
+        >
+          <span className="flex items-center gap-2">
+            <Copy size={16} />
+            {isAr ? 'نسخ صفقات المطور تلقائياً' : 'Auto-copy developer trades'}
+          </span>
+          <span className={`px-3 py-1 rounded-lg text-[11px] font-black uppercase tracking-widest ${mirrorOn ? 'bg-white/20 text-white' : 'bg-white/5 text-slate-400 border border-white/10'}`}>
+            {mirrorOn ? (isAr ? 'مفعّل' : 'ON') : (isAr ? 'مغلق' : 'OFF')}
+          </span>
+        </button>
+        <p className="text-center text-[10px] text-slate-500 mb-3 leading-relaxed">
+          {isAr
+            ? 'عند التفعيل: كل صفقة تلقائية يفتحها المطور تُفتح فوراً في حسابك بنفس المنطق (صفقة واحدة لكل رمز)، ويصلك صوت فتح قارورة الشمبانيا 🍾.'
+            : 'When ON: every auto trade the developer opens is mirrored into your account with the same logic (one trade per symbol), with a champagne-pop sound 🍾.'}
+        </p>
         <button
           onClick={onReturnToFree}
           className="w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-white/5 border border-white/10 text-slate-300 hover:text-white text-xs font-black transition-all"

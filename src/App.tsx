@@ -36,7 +36,9 @@ import TransactionsPage from './components/TransactionsPage';
 import AboutPage from './components/AboutPage';
 import SuggestionsPage from './components/SuggestionsPage';
 import TradeNowPage from './components/TradeNowPage';
-import { AutoTradeEngine } from './services/autoTradeEngine';
+import { AutoTradeEngine, AUTO_OPEN_SOUND_EVENT } from './services/autoTradeEngine';
+import { playChampagnePop } from './lib/tradeSounds';
+import { pollMirrorEvents, isMirrorEnabled, setMirrorEnabled } from './services/tradeMirror';
 import StorePage from './components/StorePage';
 import SeoPricesPage from './pages/SeoPricesPage';
 import StoreSettingsPage from './components/StoreSettingsPage';
@@ -1046,6 +1048,8 @@ const isDeveloperSession = () => {
         user,
         leverage: currentLeverage,
         signals: topSignals.map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
+        isDeveloper: isDeveloperSession(),
+        origin: user?.uid || user?.email || '',
       });
       autoEngineRef.current.start();
     } else {
@@ -1053,11 +1057,70 @@ const isDeveloperSession = () => {
         user,
         leverage: currentLeverage,
         signals: topSignals.map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
+        isDeveloper: isDeveloperSession(),
+        origin: user?.uid || user?.email || '',
       });
     }
   }, [topSignals, user, autoTradeGen]);
 
   useEffect(() => () => { autoEngineRef.current?.stop(); autoEngineRef.current = null; }, []);
+
+  // ── Champagne pop on every AUTO open ─────────────────────────────────────
+  // The global AutoTradeEngine dispatches AUTO_OPEN_SOUND_EVENT (it is headless
+  // and owns no audio). We play the champagne-cork pop here in the UI layer —
+  // on the developer device AND on any client device whose engine mirrors it.
+  useEffect(() => {
+    const onPop = (e: Event) => {
+      const d = (e as CustomEvent)?.detail as any;
+      try {
+        const vol = Math.max(0, Math.min(1, autoSettingsRef.current?.volume ?? 0.7));
+        playChampagnePop(vol);
+      } catch {}
+      try {
+        const sym = d?.symbol || '';
+        const side = d?.side === 'sell' ? (lang === 'ar' ? 'بيع' : 'SELL') : (lang === 'ar' ? 'شراء' : 'BUY');
+        setNewSignalAlert(lang === 'ar' ? `🍾 صفقة تلقائية — ${side} ${sym}` : `🍾 Auto trade — ${side} ${sym}`);
+        setTimeout(() => setNewSignalAlert(null), 8000);
+      } catch {}
+    };
+    try { window.addEventListener(AUTO_OPEN_SOUND_EVENT, onPop as EventListener); } catch {}
+    return () => { try { window.removeEventListener(AUTO_OPEN_SOUND_EVENT, onPop as EventListener); } catch {} };
+  }, [lang]);
+
+  // ── CLIENT trade mirror ──────────────────────────────────────────────────
+  // Subscribers (plan client + mirror switch ON) execute the developer's
+  // broadcast opens/closes locally, in sync. Free/developer sessions skip.
+  useEffect(() => {
+    if (isDeveloperSession()) return;
+    if (!isPlanClient) return;
+    if (!isMirrorEnabled()) return;
+    let alive = true;
+    let busy = false;
+    const tick = async () => {
+      if (!alive || busy) return;
+      busy = true;
+      try {
+        await pollMirrorEvents({
+          user,
+          playChampagne: () => {
+            try { playChampagnePop(Math.max(0, Math.min(1, autoSettingsRef.current?.volume ?? 0.7))); } catch {}
+          },
+          notify: (msg: string) => {
+            try {
+              setNewSignalAlert(msg);
+              setTimeout(() => setNewSignalAlert(null), 8000);
+            } catch {}
+          },
+        });
+      } catch {} finally { busy = false; }
+    };
+    void tick();
+    const iv = setInterval(tick, 10000);
+    const onMirror = () => { void tick(); };
+    try { window.addEventListener('finalyze-mirror-changed', onMirror as EventListener); } catch {}
+    return () => { alive = false; clearInterval(iv); try { window.removeEventListener('finalyze-mirror-changed', onMirror as EventListener); } catch {} };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isPlanClient]);
 
   useEffect(() => {
     signalsRef.current = topSignals;

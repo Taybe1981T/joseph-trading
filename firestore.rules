@@ -221,6 +221,11 @@ service cloud.firestore {
     // None of these carry a client's identity: shared analysis output, market
     // status, public store catalogue, the public suggestion board, counters.
     match /shared_results/{docId} { allow read, write: if true; }
+    // ── Copy-trading mirror events: developer broadcasts auto opens/closes,
+    // clients poll them and execute locally in their OWN accounts. Same open
+    // model as shared_results — public read, write allowed so the developer
+    // device can publish (rules above already scope private trade data away).
+    match /shared_trades/{docId} { allow read, write: if true; }
     match /shared_alerts/{docId} { allow read, write: if true; }
     match /shared_status/{docId} { allow read, write: if true; }
     match /shared_settings/{docId} { allow read, write: if true; }

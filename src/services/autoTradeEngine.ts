@@ -21,7 +21,22 @@ import {
 } from './paperTradingService';
 import { calcTrailingStop } from '../lib/trailingStop';
 import { isOpened, markOpened, markClosed, clearOpened, lastClosedAt } from './autoGuard';
+import { broadcastMirrorEvent, openEventFor, closeEventFor } from './tradeMirror';
 import { SYMBOL_CATEGORIES } from '../constants';
+
+// ── Champagne pop event ──
+// The engine is a headless service (no audio of its own). It dispatches this
+// window event whenever it AUTO-opens a trade; App.tsx listens and plays the
+// champagne-cork sound + toast in the UI layer.
+export const AUTO_OPEN_SOUND_EVENT = 'finalyze-auto-open-champagne';
+function emitAutoOpenSound(symbol: string, side: 'buy' | 'sell') {
+  try {
+    window.dispatchEvent(new CustomEvent(AUTO_OPEN_SOUND_EVENT, { detail: { symbol, side, at: Date.now() } }));
+  } catch {}
+}
+
+// Only the developer device broadcasts mirror events to subscribed clients.
+// Clients must never re-broadcast (would create an echo storm).
 
 // ── PENDING-OPEN QUEUE (persisted) ──
 // When a displayed signal can't open right away (market closed at scan time,
@@ -93,6 +108,10 @@ export interface AutoTradeConfig {
   user: any; // Firebase user or null
   leverage: number;
   signals: Array<{ symbol: string; signal: SignalType; entryPrice?: number | null; stopLoss?: number | null; takeProfit?: number | null }>;
+  /** True only on the developer device — enables mirror broadcast to clients. */
+  isDeveloper?: boolean;
+  /** Developer identity stamped on broadcast events (uid or email). */
+  origin?: string;
 }
 
 const SCAN_INTERVAL_MS = 3000;
@@ -325,6 +344,17 @@ export class AutoTradeEngine {
           markOpened(sym);
           openedThisScan.add(sym);
           console.log(`[AutoTradeEngine] opened ${side} ${sym} @ ${entryPrice} SL:${slPrice} TP:${tpPrice}`);
+          // Champagne pop in the UI layer.
+          emitAutoOpenSound(sym, side);
+          // Developer → clients mirror (developer device only).
+          if (this.config.isDeveloper) {
+            try {
+              await broadcastMirrorEvent(openEventFor(sym, side, sig.signal, tradeData.openedAt, {
+                devEntry: entryPrice, devSl: slPrice, devTp: tpPrice,
+                origin: this.config.origin || '',
+              }));
+            } catch {}
+          }
         } catch (e) { console.error(`[AutoTradeEngine] failed to open ${sym}:`, e); }
       }
     } catch (e) { console.error('[AutoTradeEngine] scan error:', e); }
@@ -338,6 +368,12 @@ export class AutoTradeEngine {
       await store.saveBalance(newBalance);
       console.log(`[AutoTradeEngine] closed ${t.symbol} @ ${exitPrice} (${reason}) P&L: ${pnl.toFixed(2)}`);
       markClosed(t.symbol);
+      // Developer → clients mirror (developer device only).
+      if (this.config.isDeveloper) {
+        try {
+          await broadcastMirrorEvent(closeEventFor(t.symbol, reason, this.config.origin || ''));
+        } catch {}
+      }
     } catch (e) { console.error(`[AutoTradeEngine] failed to close ${t.symbol}:`, e); }
   }
 
