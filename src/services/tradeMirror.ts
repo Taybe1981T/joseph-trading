@@ -188,16 +188,18 @@ export async function pollMirrorEvents(opts: {
   const openFor = (sym: string) => allTrades.find((t: any) => t.status === 'open' && t.symbol === sym);
 
   for (const ev of fresh) {
-    seen.add(ev.id);
     const sym: string = ev.symbol;
-    if (!sym) continue;
+    if (!sym) { seen.add(ev.id); continue; } // malformed event — definitive
     // ANALYSIS-ONLY FENCE: mirror OPENs only for symbols with a displayed
     // signal (auto radar OR manual analysis). Developer hand-opened tickets
     // never appear in the signal lists, so they are never mirrored.
+    // NOTE: a fence rejection does NOT mark the event as seen — the client's
+    // shared_results poll (signals) can LAG the trade event, so the signal
+    // may appear a few seconds later; the event must be retried until then.
     if (ev.kind === 'open' && opts.displayedSymbols && opts.displayedSymbols.length > 0) {
       const ok = opts.displayedSymbols.some((s) => String(s || '').toUpperCase() === String(sym).toUpperCase());
       if (!ok) {
-        console.log(`[TradeMirror] skip ${sym}: not in displayed signals (analysis-only)`);
+        console.log(`[TradeMirror] skip ${sym}: not in displayed signals (analysis-only) — will retry`);
         continue;
       }
     }
@@ -206,18 +208,18 @@ export async function pollMirrorEvents(opts: {
         const sig = String(ev.signal || '');
         const isBuy = sig === 'strong_buy' || sig === 'buy' || ev.side === 'buy';
         const isSell = sig === 'strong_sell' || sig === 'sell' || ev.side === 'sell';
-        if (!isBuy && !isSell) continue;
-        if (openFor(sym)) continue;
-        if (guardIsOpened(sym)) continue;
+        if (!isBuy && !isSell) { seen.add(ev.id); continue; } // invalid signal — definitive
+        if (openFor(sym)) { seen.add(ev.id); continue; } // already have the position
+        if (guardIsOpened(sym)) { seen.add(ev.id); continue; } // guard says we opened it
         const lastClose = guardLastClosedAt(sym);
-        if (lastClose && Date.now() - lastClose < 8000) continue;
+        if (lastClose && Date.now() - lastClose < 8000) continue; // retry after cooldown
         const cat = detectMirrorCategory(sym);
-        if (!isMarketOpen(cat, sym)) continue;
+        if (!isMarketOpen(cat, sym)) continue; // retry — market may open later
         const price = await getLivePrice(sym).catch(() => null);
-        if (price == null || !(price > 0)) continue;
+        if (price == null || !(price > 0)) continue; // retry — quote feed warms up
         const q = getDefaultQty(cat, balance);
         const requiredMargin = notionalInUSD(cat, sym, price, q) / leverage;
-        if (requiredMargin > balance) continue;
+        if (requiredMargin > balance) continue; // retry — balance may free up
         const { slUsd, tpUsd } = calcRiskUSD(balance);
         const side: 'buy' | 'sell' = isBuy ? 'buy' : 'sell';
         await store.addTrade({
@@ -229,6 +231,7 @@ export async function pollMirrorEvents(opts: {
           source: 'auto',
         });
         guardMarkOpened(sym);
+        seen.add(ev.id); // executed — never reprocess
         allTrades = await store.listTrades().catch(() => allTrades);
         const acc2 = await store.getAccount().catch(() => null);
         if (acc2) { balance = acc2.balance; leverage = acc2.leverage; }
@@ -238,19 +241,21 @@ export async function pollMirrorEvents(opts: {
         console.log(`[TradeMirror] mirrored open ${side} ${sym} (dev event ${ev.id})`);
       } else if (ev.kind === 'close') {
         const mine = openFor(sym);
-        if (!mine) { guardClearOpened(sym); continue; }
+        if (!mine) { guardClearOpened(sym); seen.add(ev.id); continue; } // nothing to close
         const price = await getLivePrice(sym).catch(() => null);
-        if (price == null || !(price > 0)) continue;
+        if (price == null || !(price > 0)) continue; // retry — quote feed warms up
         const pnl = calcPnl(mine, price);
         await store.updateTrade(mine.id, { status: 'closed', exitPrice: price, pnl, closeReason: ev.closeReason === 'manual' ? 'manual' : ((ev.closeReason as any) || 'manual'), closedAt: Date.now() });
         await store.saveBalance(balance + pnl).catch(() => {});
         guardMarkClosed(sym);
+        seen.add(ev.id); // executed — never reprocess
         balance = balance + pnl;
         allTrades = await store.listTrades().catch(() => allTrades);
         executed.push(ev);
         console.log(`[TradeMirror] mirrored close ${sym} (${ev.closeReason})`);
       }
     } catch (e) {
+      // Transient failure — do NOT mark seen; retry on the next poll.
       console.warn('[TradeMirror] execute failed for', ev.id, (e as any)?.message || e);
     }
   }
@@ -258,114 +263,40 @@ export async function pollMirrorEvents(opts: {
   return executed;
 }
 
-/** Real-time mirror listener — fires immediately when a new mirror event is
- *  published (developer auto-opens a trade), so the open is executed within
- *  milliseconds instead of waiting for the next poll.
- *  Returns an unsubscribe function (call dispose() to stop listening). */
-export async function listenMirrorEvents(opts: {
+/**
+ * REAL-TIME mirror listener — the client subscribes once to `shared_trades`
+ * and runs the SAME pollMirrorEvents pipeline the moment any event lands,
+ * so a developer open executes on the client device within milliseconds
+ * (instead of waiting for the next 10s poll). Dedupe, the analysis-only
+ * fence and retry semantics are shared with the poll path.
+ * Returns an unsubscribe function.
+ */
+export function listenMirrorEvents(opts: {
   user: any;
   playChampagne: () => void;
   notify: (msg: string) => void;
-  /** Symbols with a currently DISPLAYED signal on this device (topSignals +
-   *  clientSignals). OPEN events are honoured ONLY for these symbols — so a
-   *  developer manual ticket (never in the signal lists) can never open a
-   *  position in a client account. CLOSE events are always honoured. */
   displayedSymbols?: string[];
-}): Promise<VoidFunction> {
-  const seen = readMirrorSeen();
-  const executed: MirrorTradeEvent[] = [];
-
-  // Snapshot: fire immediately on new events (batched writes are coalesced
-  // by Firestore). Dedupe by event id so a re-publish never opens twice.
+}): VoidFunction {
+  let busy = false;
+  const trigger = () => {
+    if (busy) return;
+    busy = true;
+    pollMirrorEvents(opts)
+      .then((executed) => {
+        if (executed.length) console.log(`[TradeMirror] realtime pass executed ${executed.length} event(s)`);
+      })
+      .catch((e) => console.warn('[TradeMirror] realtime pass failed:', (e as any)?.message || e))
+      .finally(() => { busy = false; });
+  };
   const unsub = onSnapshot(
     collection(db, MIRROR_COLLECTION),
     {
-      next: async (snap) => {
-        try {
-          for (const d of snap.docs) {
-            const ev = { id: d.id, ...(d.data() as any) } as MirrorTradeEvent;
-            if (!ev || (ev.kind !== 'open' && ev.kind !== 'close')) continue;
-            if (!ev.publishedAt || Date.now() - ev.publishedAt > MIRROR_TTL_MS) continue;
-            if (seen.has(ev.id)) continue;
-            seen.add(ev.id);
-            if (!ev.symbol) continue;
-            // ANALYSIS-ONLY FENCE: mirror OPENs only for symbols with a displayed
-            // signal (auto radar OR manual analysis). Developer hand-opened tickets
-            // never appear in the signal lists, so they are never mirrored.
-            if (ev.kind === 'open' && opts.displayedSymbols && opts.displayedSymbols.length > 0) {
-              const ok = opts.displayedSymbols.some((s) => String(s || '').toUpperCase() === String(ev.symbol).toUpperCase());
-              if (!ok) {
-                console.log(`[TradeMirror] skip ${ev.symbol}: not in displayed signals (analysis-only)`);
-                continue;
-              }
-            }
-            const store = getTradeStore(opts.user);
-            let balance = 10000;
-            let leverage = 100;
-            let allTrades: any[] = [];
-            try {
-              const acc = await store.getAccount();
-              balance = acc.balance;
-              leverage = acc.leverage;
-              allTrades = await store.listTrades().catch(() => []);
-            } catch { /* local defaults */ }
-            if (ev.kind === 'open') {
-              const sig = String(ev.signal || '');
-              const isBuy = sig === 'strong_buy' || sig === 'buy' || ev.side === 'buy';
-              const isSell = sig === 'strong_sell' || sig === 'sell' || ev.side === 'sell';
-              if (!isBuy && !isSell) continue;
-              if (allTrades.find((t: any) => t.status === 'open' && t.symbol === ev.symbol)) continue;
-              if (guardIsOpened(ev.symbol)) continue;
-              const lastClose = guardLastClosedAt(ev.symbol);
-              if (lastClose && Date.now() - lastClose < 8000) continue;
-              const cat = detectMirrorCategory(ev.symbol);
-              if (!isMarketOpen(cat, ev.symbol)) continue;
-              const price = await getLivePrice(ev.symbol).catch(() => null);
-              if (price == null || !(price > 0)) continue;
-              const q = getDefaultQty(cat, balance);
-              const requiredMargin = notionalInUSD(cat, ev.symbol, price, q) / leverage;
-              if (requiredMargin > balance) continue;
-              const { slUsd, tpUsd } = calcRiskUSD(balance);
-              const side: 'buy' | 'sell' = isBuy ? 'buy' : 'sell';
-              await store.addTrade({
-                symbol: ev.symbol, category: cat, side, qty: q, entryPrice: price,
-                status: 'open' as const,
-                tp: usdToPrice(ev.symbol, tpUsd, price, side === 'buy', q, cat),
-                sl: usdToPrice(ev.symbol, slUsd, price, side === 'sell', q, cat),
-                openedAt: Date.now(),
-                source: 'auto',
-              });
-              guardMarkOpened(ev.symbol);
-              executed.push(ev);
-              try { opts.playChampagne(); } catch {}
-              try { opts.notify(`نسخ تلقائي: ${side === 'buy' ? 'شراء' : 'بيع'} ${ev.symbol}`); } catch {}
-              console.log(`[TradeMirror] mirrored open ${ev.side} ${ev.symbol} (realtime)`);
-            } else if (ev.kind === 'close') {
-              const mine = allTrades.find((t: any) => t.status === 'open' && t.symbol === ev.symbol);
-              if (!mine) { guardClearOpened(ev.symbol); continue; }
-              const price = await getLivePrice(ev.symbol).catch(() => null);
-              if (price == null || !(price > 0)) continue;
-              const pnl = calcPnl(mine, price);
-              await store.updateTrade(mine.id, { status: 'closed', exitPrice: price, pnl, closeReason: ev.closeReason === 'manual' ? 'manual' : ((ev.closeReason as any) || 'manual'), closedAt: Date.now() });
-              await store.saveBalance(balance + pnl).catch(() => {});
-              guardMarkClosed(ev.symbol);
-              balance = balance + pnl;
-              executed.push(ev);
-              console.log(`[TradeMirror] mirrored close ${ev.symbol} (${ev.closeReason})`);
-            }
-          }
-          writeMirrorSeen(seen);
-        } catch (e) {
-          console.warn('[TradeMirror] realtime listener error:', (e as any)?.message || e);
-        }
-      },
-      error: (err) => {
-        console.warn('[TradeMirror] realtime listener error:', err);
-      },
+      next: () => trigger(),
+      error: (err) => console.warn('[TradeMirror] realtime listener error:', err),
     },
   );
-
   return () => {
     try { unsub(); } catch { /* already unsubscribed */ }
   };
 }
+

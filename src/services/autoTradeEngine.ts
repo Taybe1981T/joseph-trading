@@ -121,6 +121,12 @@ export class AutoTradeEngine {
   private timer: number | null = null;
   private config: AutoTradeConfig;
   private running = false;
+  // Scan mutex: scan() is async (awaits live prices). The App kicks a scan
+  // immediately on signal publish + every 3s interval + retries at +3/+8/+15s —
+  // so a second scan CAN start while the first is still awaiting a price, read
+  // "no open position yet" for the same symbol, and open a SECOND trade
+  // (the duplicate-crypto-ticket bug). Only one scan may run at a time.
+  private busy = false;
 
   constructor(config: AutoTradeConfig) {
     this.config = config;
@@ -169,6 +175,9 @@ export class AutoTradeEngine {
 
   private async scan() {
     if (!this.running) return;
+    if (this.busy) return; // a scan is already in flight — it sees the same signals
+    this.busy = true;
+    try {
     // Honor the same-tab toggle instantly. The App effect that starts/stops
     // this engine depends on [topSignals, user] only, so flipping the
     // auto-trade switch on the trade page (same tab) does NOT re-run it —
@@ -358,6 +367,7 @@ export class AutoTradeEngine {
         } catch (e) { console.error(`[AutoTradeEngine] failed to open ${sym}:`, e); }
       }
     } catch (e) { console.error('[AutoTradeEngine] scan error:', e); }
+    } finally { this.busy = false; }
   }
 
   private async closeTrade(store: any, t: PaperTrade, exitPrice: number, reason: 'tp' | 'sl', currentBalance: number) {

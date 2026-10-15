@@ -38,7 +38,7 @@ import SuggestionsPage from './components/SuggestionsPage';
 import TradeNowPage from './components/TradeNowPage';
 import { AutoTradeEngine, AUTO_OPEN_SOUND_EVENT } from './services/autoTradeEngine';
 import { playChampagnePop } from './lib/tradeSounds';
-import { pollMirrorEvents, isMirrorEnabled, setMirrorEnabled } from './services/tradeMirror';
+import { pollMirrorEvents, listenMirrorEvents, isMirrorEnabled, setMirrorEnabled } from './services/tradeMirror';
 import StorePage from './components/StorePage';
 import SeoPricesPage from './pages/SeoPricesPage';
 import StoreSettingsPage from './components/StoreSettingsPage';
@@ -1127,34 +1127,44 @@ const isDeveloperSession = () => {
     if (!isPlanClient && !mirrorFreeAllowed) return;
     let alive = true;
     let busy = false;
+    const displayed = () => [
+      ...(Array.isArray(topSignals) ? topSignals.map((s: any) => s?.symbol).filter(Boolean) : []),
+      ...(Array.isArray(clientSignals) ? clientSignals.map((s: any) => s?.symbol).filter(Boolean) : []),
+    ];
+    const mirrorOpts = () => ({
+      user,
+      displayedSymbols: displayed(),
+      playChampagne: () => {
+        try { playChampagnePop(Math.max(0, Math.min(1, autoSettingsRef.current?.volume ?? 0.7))); } catch {}
+      },
+      notify: (msg: string) => {
+        try {
+          setNewSignalAlert(msg);
+          setTimeout(() => setNewSignalAlert(null), 8000);
+        } catch {}
+      },
+    });
     const tick = async () => {
       if (!alive || busy) return;
       busy = true;
       try {
-        const displayed = [
-          ...(Array.isArray(topSignals) ? topSignals.map((s: any) => s?.symbol).filter(Boolean) : []),
-          ...(Array.isArray(clientSignals) ? clientSignals.map((s: any) => s?.symbol).filter(Boolean) : []),
-        ];
-        await pollMirrorEvents({
-          user,
-          displayedSymbols: displayed,
-          playChampagne: () => {
-            try { playChampagnePop(Math.max(0, Math.min(1, autoSettingsRef.current?.volume ?? 0.7))); } catch {}
-          },
-          notify: (msg: string) => {
-            try {
-              setNewSignalAlert(msg);
-              setTimeout(() => setNewSignalAlert(null), 8000);
-            } catch {}
-          },
-        });
+        await pollMirrorEvents(mirrorOpts());
       } catch {} finally { busy = false; }
     };
     void tick();
     const iv = setInterval(tick, 10000);
     const onMirror = () => { void tick(); };
     try { window.addEventListener('finalyze-mirror-changed', onMirror as EventListener); } catch {}
-    return () => { alive = false; clearInterval(iv); try { window.removeEventListener('finalyze-mirror-changed', onMirror as EventListener); } catch {} };
+    // REAL-TIME: execute a developer open within milliseconds of the broadcast
+    // (the 10s poll above remains as a fallback for missed snapshots).
+    let disposeRealtime: VoidFunction | null = null;
+    try { disposeRealtime = listenMirrorEvents(mirrorOpts()); } catch {}
+    return () => {
+      alive = false;
+      clearInterval(iv);
+      try { disposeRealtime?.(); } catch {}
+      try { window.removeEventListener('finalyze-mirror-changed', onMirror as EventListener); } catch {}
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isPlanClient, mirrorFreeAllowed, topSignals, clientSignals]);
 
