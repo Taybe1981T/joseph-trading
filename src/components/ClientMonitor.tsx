@@ -27,14 +27,17 @@ interface ClientMonitorProps {
   onFreemiumToggle?: (v: boolean) => void;
   clientLoginRequired?: boolean;
   onClientLoginToggle?: (v: boolean) => void;
+  mirrorFreeAllowed?: boolean;
+  onMirrorFreeToggle?: (v: boolean) => void;
 }
 
-export default function ClientMonitor({ clients, lang, onRefresh, onMergeDuplicates, onBan, onDelete, onDeleteByEmail, freemiumDisabled: externalFreemium, onFreemiumToggle, clientLoginRequired: externalClientLogin, onClientLoginToggle }: ClientMonitorProps) {
+export default function ClientMonitor({ clients, lang, onRefresh, onMergeDuplicates, onBan, onDelete, onDeleteByEmail, freemiumDisabled: externalFreemium, onFreemiumToggle, clientLoginRequired: externalClientLogin, onClientLoginToggle, mirrorFreeAllowed: externalMirrorFree, onMirrorFreeToggle }: ClientMonitorProps) {
   const isAr = lang === 'ar';
   const [merging, setMerging] = useState(false);
   const [mergeMsg, setMergeMsg] = useState<string | null>(null);
   const [freemiumDisabled, setFreemiumDisabled] = useState(externalFreemium ?? localStorage.getItem('finalyze_freemium_disabled') === 'true');
   const [clientLoginRequired, setClientLoginRequired] = useState(externalClientLogin ?? localStorage.getItem('finalyze_client_login_required') === 'true');
+  const [mirrorFreeAllowed, setMirrorFreeAllowed] = useState<boolean>(externalMirrorFree ?? (() => { try { const v = localStorage.getItem('finalyze_mirror_free_allowed'); return v == null ? true : v !== '0'; } catch { return true; } })());
   const [grants, setGrants] = useState<PaymentGrant[]>([]);
 
   // ── Client transaction modal ─────────────────────────────────────────────
@@ -245,7 +248,7 @@ export default function ClientMonitor({ clients, lang, onRefresh, onMergeDuplica
             <p className="text-xs text-white/60 mt-0.5">
               {clientLoginRequired
                 ? (isAr ? 'العملاء يجب عليهم تسجيل الدخول عبر Google' : 'Clients must sign in with Google')
-                : (isAr ? 'العملاء يدخلون مباشرة بدون تسجيل دخول' : 'Clients enter directly without login')}
+                : (isAr ? 'العملاء يدخلون مباشرة بدون تسجيل دخول' : 'Clients enter directly without login')}</
             </p>
           </div>
         </div>
@@ -263,6 +266,40 @@ export default function ClientMonitor({ clients, lang, onRefresh, onMergeDuplica
           }`}
         >
           {clientLoginRequired ? (isAr ? 'ON: مطلوب تسجيل' : 'ON: Login Required') : (isAr ? 'OFF: بدون تسجيل' : 'OFF: No Login')}
+        </button>
+      </div>
+
+      {/* Free-client Mirror Toggle (developer-side kill-switch written to
+          Firestore config/mirror so it applies to every free client at once;
+          local preview override available) */}
+      <div className="bg-brand-alt rounded-2xl p-4 border border-white/10 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Layers size={20} className={mirrorFreeAllowed ? 'text-emerald-400' : 'text-amber-400'} />
+          <div>
+            <span className="text-sm font-bold text-white">
+              {isAr ? 'نسخ للعملاء المجانيين' : 'Mirror Free Clients'}
+            </span>
+            <p className="text-xs text-white/60 mt-0.5">
+              {mirrorFreeAllowed
+                ? (isAr ? 'العملاء المجانيون يرآون إشارات المطور ويفتتونها' : 'Free clients receive and follow the developer\'s signals')
+                : (isAr ? 'العملاء المجانيون لا يرآون النسخ' : 'Free clients do NOT mirror (subscribers only)')}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => {
+            const newVal = !mirrorFreeAllowed;
+            setMirrorFreeAllowed(newVal);
+            localStorage.setItem('finalyze_mirror_free_allowed', newVal ? '1' : '0');
+            onMirrorFreeToggle?.(newVal);
+          }}
+          className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${
+            mirrorFreeAllowed
+              ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30'
+              : 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+          }`}
+        >
+          {mirrorFreeAllowed ? (isAr ? 'مفعل' : 'ON') : (isAr ? 'معطّل' : 'OFF')}
         </button>
       </div>
 

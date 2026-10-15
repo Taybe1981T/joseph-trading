@@ -16,8 +16,10 @@ import { pricesToUsd, usdToPrice, slAmountUSD, notionalInUSD } from '../lib/posi
 import { toTvSymbol as toTvSymbolShared } from '../lib/tvSymbol';
 import { calcTrailingStop } from '../lib/trailingStop';
 import { clearOpened as clearAutoOpened, resetGuard as resetAutoGuard } from '../services/autoGuard';
+import { openEventFor, broadcastMirrorEvent } from '../services/tradeMirror';
 import MT5ConnectModal from './MT5ConnectModal';
 import { loadConnection, mt5Bridge, MT5Connection } from '../services/mt5Bridge';
+import { isDeveloperEmail } from '../lib/clientIds';
 import { isDeveloperEmail } from '../lib/clientIds';
 
 // Minimum wait after an auto-close before the same symbol may be auto-opened
@@ -909,6 +911,22 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     if (mt5Ticket) rememberTicket(id, mt5Ticket);
     setTrades((prev) => [{ id, ...tradeData }, ...prev]);
     setTpPrice(''); setSlPrice('');
+    // DEVELOPER ONLY: a manual ticket opened on a DISPLAYED signal (manual
+    // analysis) is broadcast so connected clients mirror it instantly.
+    // Hand-opened tickets with no matching displayed signal are NOT broadcast
+    // — only the radar's own signal list qualifies (openEventFor requires a
+    // real signal enum), keeping arbitrary dev trades off client accounts.
+    if (isDeveloperEmail(user?.email) && matchedSignal && matchedSignal.signal && matchedSignal.signal !== SignalType.NEUTRAL && matchedSignal.signal !== SignalType.NO_ENTRY) {
+      try {
+        await broadcastMirrorEvent(openEventFor(
+          tradeData.symbol,
+          tradeData.side,
+          matchedSignal.signal,
+          tradeData.openedAt,
+          { devEntry: tradeData.entryPrice, devSl: tradeData.sl ?? null, devTp: tradeData.tp ?? null, origin: 'manual-signal' },
+        ));
+      } catch {}
+    }
     setBusy(false);
     playOpenSound();
   }

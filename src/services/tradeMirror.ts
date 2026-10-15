@@ -68,13 +68,33 @@ export function writeMirrorSeen(s: Set<string>) {
   try { localStorage.setItem(MIRROR_SEEN_KEY, JSON.stringify([...s].slice(-300))); } catch {}
 }
 
-/** Client mirror switch — OFF by default; the client opts in explicitly. */
+/** Client mirror switch — ON by default; anyone (free or paid) mirrors unless
+ *  they explicitly switch it OFF ('0'). The developer can additionally gate
+ *  free accounts off entirely via MIRROR_FREE_ALLOWED (default ON). */
 export function isMirrorEnabled(): boolean {
-  try { return localStorage.getItem(MIRROR_ENABLED_KEY) === '1'; } catch { return false; }
+  try { return localStorage.getItem(MIRROR_ENABLED_KEY) !== '0'; } catch { return true; }
 }
 export function setMirrorEnabled(on: boolean): void {
   try { localStorage.setItem(MIRROR_ENABLED_KEY, on ? '1' : '0'); } catch {}
   try { window.dispatchEvent(new CustomEvent('finalyze-mirror-changed', { detail: { on } })); } catch {}
+}
+
+/**
+ * DEVELOPER kill-switch: may the mirror run for FREE (non-plan) accounts?
+ * Stored in Firestore (`config/mirror`) so one flip on the developer device
+ * applies everywhere; defaults to ON (allowed) so free clients mirror too.
+ * Local override key lets the developer preview either mode on this device.
+ */
+export const MIRROR_FREE_LOCAL_KEY = 'finalyze_mirror_free_allowed';
+export function isMirrorFreeAllowedLocal(): boolean {
+  try {
+    const v = localStorage.getItem(MIRROR_FREE_LOCAL_KEY);
+    return v == null ? true : v !== '0';
+  } catch { return true; }
+}
+export function setMirrorFreeAllowedLocal(on: boolean): void {
+  try { localStorage.setItem(MIRROR_FREE_LOCAL_KEY, on ? '1' : '0'); } catch {}
+  try { window.dispatchEvent(new CustomEvent('finalyze-mirror-free-changed', { detail: { on } })); } catch {}
 }
 
 /** DEVELOPER SIDE — broadcast one open/close event (best-effort). */
@@ -127,9 +147,16 @@ export async function pollMirrorEvents(opts: {
   user: any;
   playChampagne: () => void;
   notify: (msg: string) => void;
+  /**
+   * Symbols with a currently DISPLAYED signal on this device (topSignals +
+   * client signals). When provided, OPEN events are honoured ONLY for these
+   * symbols — so a developer manual ticket (never in the signal lists) can
+   * never open a position in a client account. CLOSE events are always
+   * honoured (closing is safe even if the signal vanished).
+   */
+  displayedSymbols?: string[];
 }): Promise<MirrorTradeEvent[]> {
   const executed: MirrorTradeEvent[] = [];
-  if (!isMirrorEnabled()) return executed;
   const seen = readMirrorSeen();
   let docs: any[] = [];
   try {
@@ -164,6 +191,16 @@ export async function pollMirrorEvents(opts: {
     seen.add(ev.id);
     const sym: string = ev.symbol;
     if (!sym) continue;
+    // ANALYSIS-ONLY FENCE: mirror OPENs only for symbols with a displayed
+    // signal (auto radar OR manual analysis). Developer hand-opened tickets
+    // never appear in the signal lists, so they are never mirrored.
+    if (ev.kind === 'open' && opts.displayedSymbols && opts.displayedSymbols.length > 0) {
+      const ok = opts.displayedSymbols.some((s) => String(s || '').toUpperCase() === String(sym).toUpperCase());
+      if (!ok) {
+        console.log(`[TradeMirror] skip ${sym}: not in displayed signals (analysis-only)`);
+        continue;
+      }
+    }
     try {
       if (ev.kind === 'open') {
         const sig = String(ev.signal || '');

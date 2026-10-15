@@ -81,6 +81,14 @@ service cloud.firestore {
       allow update, delete: if isDeveloper() || (isSignedIn() && request.auth.uid == userId);
     }
 
+    // Developer-side kill-switches surfaced to clients (mirrors config only).
+    // Clients READ `freeAllowed`; the developer is the only writer (via the
+    // Client Monitor toggle). The doc is created/overwritten by the dev only.
+    match /config/{docId} {
+      allow get, list: if true;  // public read — clients need freeAllowed
+      allow create, update, delete: if isDeveloper();
+    }
+
     // Payment sessions hold amounts and provider session ids — owner only.
     match /payment_sessions/{sessionId} {
       allow get: if isDeveloper()

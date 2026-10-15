@@ -1088,20 +1088,56 @@ const isDeveloperSession = () => {
   }, [lang]);
 
   // ── CLIENT trade mirror ──────────────────────────────────────────────────
-  // Subscribers (plan client + mirror switch ON) execute the developer's
-  // broadcast opens/closes locally, in sync. Free/developer sessions skip.
+  // FREE + PAID clients (mirror switch ON, default ON) execute the developer's
+  // broadcast opens/closes locally, in sync. Developer sessions skip.
+  // The developer can gate FREE accounts off via config/mirror in Firestore
+  // (default allowed). OPENs are honoured only for symbols with a currently
+  // DISPLAYED signal (analysis radar or manual) — hand-opened dev tickets
+  // are never mirrored.
+  const [mirrorFreeAllowed, setMirrorFreeAllowed] = useState<boolean>(() => {
+    try {
+      const v = localStorage.getItem('finalyze_mirror_free_allowed');
+      return v == null ? true : v !== '0';
+    } catch { return true; }
+  });
+  useEffect(() => {
+    let alive = true;
+    // Remote kill-switch (developer device writes config/mirror): one flip
+    // applies everywhere. Missing doc = allowed.
+    const loadRemote = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'config', 'mirror'));
+        if (!alive) return;
+        if (snap.exists()) {
+          const d: any = snap.data();
+          if (typeof d?.freeAllowed === 'boolean') setMirrorFreeAllowed(d.freeAllowed);
+        }
+      } catch {}
+    };
+    void loadRemote();
+    const iv = setInterval(loadRemote, 60000);
+    const onLocal = (e: Event) => {
+      try { setMirrorFreeAllowed((e as CustomEvent)?.detail?.on ?? true); } catch {}
+    };
+    try { window.addEventListener('finalyze-mirror-free-changed', onLocal as EventListener); } catch {}
+    return () => { alive = false; clearInterval(iv); try { window.removeEventListener('finalyze-mirror-free-changed', onLocal as EventListener); } catch {} };
+  }, []);
   useEffect(() => {
     if (isDeveloperSession()) return;
-    if (!isPlanClient) return;
-    if (!isMirrorEnabled()) return;
+    if (!isPlanClient && !mirrorFreeAllowed) return;
     let alive = true;
     let busy = false;
     const tick = async () => {
       if (!alive || busy) return;
       busy = true;
       try {
+        const displayed = [
+          ...(Array.isArray(topSignals) ? topSignals.map((s: any) => s?.symbol).filter(Boolean) : []),
+          ...(Array.isArray(clientSignals) ? clientSignals.map((s: any) => s?.symbol).filter(Boolean) : []),
+        ];
         await pollMirrorEvents({
           user,
+          displayedSymbols: displayed,
           playChampagne: () => {
             try { playChampagnePop(Math.max(0, Math.min(1, autoSettingsRef.current?.volume ?? 0.7))); } catch {}
           },
@@ -1120,7 +1156,7 @@ const isDeveloperSession = () => {
     try { window.addEventListener('finalyze-mirror-changed', onMirror as EventListener); } catch {}
     return () => { alive = false; clearInterval(iv); try { window.removeEventListener('finalyze-mirror-changed', onMirror as EventListener); } catch {} };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isPlanClient]);
+  }, [user, isPlanClient, mirrorFreeAllowed, topSignals, clientSignals]);
 
   useEffect(() => {
     signalsRef.current = topSignals;
@@ -2939,6 +2975,12 @@ const started = planGrants
                 onFreemiumToggle={(v: boolean) => { setFreemiumDisabled(v); localStorage.setItem('finalyze_freemium_disabled', v ? 'true' : 'false'); setDoc(doc(db, 'shared_settings', 'freemium'), { disabled: v, updatedAt: Date.now() }).catch(console.warn); }}
                 clientLoginRequired={clientLoginRequired}
                 onClientLoginToggle={(v: boolean) => { setClientLoginRequired(v); localStorage.setItem('finalyze_client_login_required', v ? 'true' : 'false'); setDoc(doc(db, 'shared_settings', 'clientLogin'), { required: v, updatedAt: Date.now() }).catch(console.warn); }}
+                 mirrorFreeAllowed={mirrorFreeAllowed}
+                 onMirrorFreeToggle={(v: boolean) => {
+                   setMirrorFreeAllowed(v);
+                   try { localStorage.setItem('finalyze_mirror_free_allowed', v ? '1' : '0'); } catch {}
+                   setDoc(doc(db, 'config', 'mirror'), { freeAllowed: v, updatedAt: Date.now() }).catch(console.warn);
+                 }}
               />
             )}
 
