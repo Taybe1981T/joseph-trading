@@ -231,7 +231,21 @@ export class AutoTradeEngine {
         }
         if (extra.length) openList = [...openList, ...extra];
       } catch { /* pending merge is best-effort */ }
+      // Symbols actually opened during THIS scan. `openAuto` is snapshotted once
+      // at the top of scan() and does NOT include trades opened earlier in this
+      // same loop, so it cannot be used alone to tell a "just opened" symbol from
+      // a "stuck guard" one. This set makes that distinction exact.
+      const openedThisScan = new Set<string>();
       for (const sig of openList) {
+        // ── NO-DUPLICATE GUARD ── Prevent a second auto position on the same
+        // symbol: never open a second trade if one is already open for this
+        // symbol. The displayed signal may redraw, but margin or a still-open
+        // position must not trigger a duplicate. The persistent guard (localStorage
+        // "opened" flag) is cleared once the position closes — never on refresh.
+        if (openAuto.some((t) => t.symbol === sym)) {
+          console.warn(`[AutoTradeEngine] skip ${sym}: open auto position already exists`);
+          continue;
+        }
         const isBuy = sig.signal === SignalType.STRONG_BUY || sig.signal === SignalType.BUY;
         const isSell = sig.signal === SignalType.STRONG_SELL || sig.signal === SignalType.SELL;
         if (!isBuy && !isSell) continue;
@@ -245,12 +259,17 @@ export class AutoTradeEngine {
         // says "opened" but there is genuinely no open auto position for it, we
         // clear the stale entry and let it re-open — matching the reality on the
         // trade page (no open position ⇒ nothing to protect against re-opening).
-        if (isOpened(sym) && !openAuto.some((t) => t.symbol === sym)) {
+        //
+        // `openAuto` is stale w.r.t. trades opened earlier in THIS loop, so the
+        // "no open position" test alone would also fire for a symbol we just
+        // opened a moment ago — clearing its fresh guard and opening a SECOND
+        // position on the same symbol. `openedThisScan` excludes those, so the
+        // repair only clears guards that are genuinely orphaned.
+        if (isOpened(sym) && !openAuto.some((t) => t.symbol === sym) && !openedThisScan.has(sym)) {
           console.warn(`[AutoTradeEngine] stuck guard for ${sym} — no open position, clearing so it can re-open`);
           clearOpened(sym);
         }
         if (isOpened(sym)) { console.warn(`[AutoTradeEngine] skip ${sym}: guard says opened`); continue; }
-        if (openAuto.some((t) => t.symbol === sym)) { console.warn(`[AutoTradeEngine] skip ${sym}: open auto position already exists`); continue; }
         const lastClose = lastClosedAt(sym);
         if (lastClose && Date.now() - lastClose < REOPEN_COOLDOWN_MS) { console.warn(`[AutoTradeEngine] skip ${sym}: reopen cooldown`); continue; }
 
@@ -304,6 +323,7 @@ export class AutoTradeEngine {
         try {
           await store.addTrade(tradeData);
           markOpened(sym);
+          openedThisScan.add(sym);
           console.log(`[AutoTradeEngine] opened ${side} ${sym} @ ${entryPrice} SL:${slPrice} TP:${tpPrice}`);
         } catch (e) { console.error(`[AutoTradeEngine] failed to open ${sym}:`, e); }
       }
