@@ -259,7 +259,7 @@ export class AutoTradeEngine {
         }
         if (extra.length) openList = [...openList, ...extra];
       } catch { /* pending merge is best-effort */ }
-      // Symbols actually opened during THIS scan. `openAuto` is snapshotted once
+      // Symbols actually opened during THIS scan. `allTrades` is snapshotted once
       // at the top of scan() and does NOT include trades opened earlier in this
       // same loop, so it cannot be used alone to tell a "just opened" symbol from
       // a "stuck guard" one. This set makes that distinction exact.
@@ -269,11 +269,12 @@ export class AutoTradeEngine {
         if (!sym) continue;
         // ── NO-DUPLICATE GUARD ── Prevent a second auto position on the same
         // symbol: never open a second trade if one is already open for this
-        // symbol. The displayed signal may redraw, but margin or a still-open
-        // position must not trigger a duplicate. The persistent guard (localStorage
-        // "opened" flag) is cleared once the position closes — never on refresh.
-        if (openAuto.some((t) => t.symbol === sym)) {
-          console.warn(`[AutoTradeEngine] skip ${sym}: open auto position already exists`);
+        // symbol — whether AUTO or MANUAL. The displayed signal may redraw, but
+        // an existing position (any source) must not trigger a duplicate. The
+        // persistent guard (localStorage "opened" flag) is cleared once the
+        // position closes — never on refresh.
+        if (allTrades.some((t) => t.status === 'open' && t.symbol === sym)) {
+          console.warn(`[AutoTradeEngine] skip ${sym}: open position already exists`);
           continue;
         }
         const isBuy = sig.signal === SignalType.STRONG_BUY || sig.signal === SignalType.BUY;
@@ -284,16 +285,23 @@ export class AutoTradeEngine {
         // closed manually / reset / cleared on the trade page without the engine
         // running. When that happens the symbol stays stuck in `opened` forever
         // and its (still-displayed) signal would NEVER open again. So if the guard
-        // says "opened" but there is genuinely no open auto position for it, we
-        // clear the stale entry and let it re-open — matching the reality on the
-        // trade page (no open position ⇒ nothing to protect against re-opening).
+        // says "opened" but there is genuinely no open position for it (any source
+        // — auto OR manual), we clear the stale entry and let it re-open —
+        // matching the reality on the trade page (no open position ⇒ nothing to
+        // protect against re-opening).
         //
-        // `openAuto` is stale w.r.t. trades opened earlier in THIS loop, so the
-        // "no open position" test alone would also fire for a symbol we just
-        // opened a moment ago — clearing its fresh guard and opening a SECOND
-        // position on the same symbol. `openedThisScan` excludes those, so the
-        // repair only clears guards that are genuinely orphaned.
-        if (isOpened(sym) && !openAuto.some((t) => t.symbol === sym) && !openedThisScan.has(sym)) {
+        // CRITICAL: we check ALL open trades, not just `openAuto`, because a
+        // manually-opened trade for this symbol MUST keep the guard intact —
+        // otherwise clearing it and opening a second auto position creates a
+        // duplicate (the duplicate-crypto-ticket bug).
+        //
+        // `allTrades` is snapshotted once at the top of scan() and is stale w.r.t.
+        // trades opened earlier in THIS loop, so the "no open position" test alone
+        // would also fire for a symbol we just opened a moment ago — clearing its
+        // fresh guard and opening a SECOND position on the same symbol.
+        // `openedThisScan` excludes those, so the repair only clears guards that
+        // are genuinely orphaned.
+        if (isOpened(sym) && !allTrades.some((t) => t.status === 'open' && t.symbol === sym) && !openedThisScan.has(sym)) {
           console.warn(`[AutoTradeEngine] stuck guard for ${sym} — no open position, clearing so it can re-open`);
           clearOpened(sym);
         }

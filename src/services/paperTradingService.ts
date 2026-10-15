@@ -154,7 +154,13 @@ async function fetchServerLastPrice(symbol: string): Promise<number | null> {
     // pulling a full 5m candle history. This makes open-trade P&L track the live
     // market instead of freezing to a delayed candle close, and reduces payload.
     const r = await fetch(`/api/quote?symbol=${encodeURIComponent(symbol)}`);
-    if (!r.ok) return null;
+    // Do NOT return null here — fall through to the candle fallback below.
+    // The /api/quote endpoint doesn't support every symbol (e.g. metals like
+    // XAUUSD sometimes 404), and /api/market-data (Yahoo Finance) DOES. Returning
+    // null immediately on a non-ok quote response would silently skip the
+    // fallback and cause metals/forex signals to never open (pending-queue
+    // starvation). Throwing routes us into the catch → candle fallback.
+    if (!r.ok) throw new Error(`quote endpoint returned ${r.status}`);
     const d = await r.json();
     const p = Number(d?.price);
     if (typeof p === 'number' && isFinite(p) && p > 0) return p;
