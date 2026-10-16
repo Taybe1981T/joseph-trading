@@ -1122,9 +1122,17 @@ const isDeveloperSession = () => {
     try { window.addEventListener('finalyze-mirror-free-changed', onLocal as EventListener); } catch {}
     return () => { alive = false; clearInterval(iv); try { window.removeEventListener('finalyze-mirror-free-changed', onLocal as EventListener); } catch {} };
   }, []);
+  // Client-side mirror toggle (user flips ON/OFF in MyPlanModal).
+  const [mirrorEnabledState, setMirrorEnabledState] = useState<boolean>(() => isMirrorEnabled());
+  useEffect(() => {
+    const onToggle = () => { try { setMirrorEnabledState(isMirrorEnabled()); } catch {} };
+    try { window.addEventListener('finalyze-mirror-changed', onToggle as EventListener); } catch {}
+    return () => { try { window.removeEventListener('finalyze-mirror-changed', onToggle as EventListener); } catch {} };
+  }, []);
   useEffect(() => {
     if (isDeveloperSession()) return;
     if (!isPlanClient && !mirrorFreeAllowed) return;
+    if (!mirrorEnabledState) return;
     let alive = true;
     let busy = false;
     const displayed = () => [
@@ -1166,7 +1174,7 @@ const isDeveloperSession = () => {
       try { window.removeEventListener('finalyze-mirror-changed', onMirror as EventListener); } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, isPlanClient, mirrorFreeAllowed, topSignals, clientSignals]);
+  }, [user, isPlanClient, mirrorFreeAllowed, topSignals, clientSignals, mirrorEnabledState]);
 
   useEffect(() => {
     signalsRef.current = topSignals;

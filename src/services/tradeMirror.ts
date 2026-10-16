@@ -157,6 +157,9 @@ export async function pollMirrorEvents(opts: {
   displayedSymbols?: string[];
 }): Promise<MirrorTradeEvent[]> {
   const executed: MirrorTradeEvent[] = [];
+  // Respect the user's mirror toggle — both the 10s poll and the real-time
+  // onSnapshot listener route through here, so this guards both paths.
+  if (!isMirrorEnabled()) return executed;
   const seen = readMirrorSeen();
   let docs: any[] = [];
   try {
@@ -187,6 +190,12 @@ export async function pollMirrorEvents(opts: {
 
   const openFor = (sym: string) => allTrades.find((t: any) => t.status === 'open' && t.symbol === sym);
 
+  // Track symbols mirrored-opened during THIS poll pass so we don't clear
+  // their guard mid-loop (allTrades may be stale if listTrades() failed
+  // after an earlier open in this same pass). Mirrors the autoTradeEngine
+  // `openedThisScan` pattern.
+  const openedThisPoll = new Set<string>();
+
   for (const ev of fresh) {
     const sym: string = ev.symbol;
     if (!sym) { seen.add(ev.id); continue; } // malformed event — definitive
@@ -210,7 +219,16 @@ export async function pollMirrorEvents(opts: {
         const isSell = sig === 'strong_sell' || sig === 'sell' || ev.side === 'sell';
         if (!isBuy && !isSell) { seen.add(ev.id); continue; } // invalid signal — definitive
         if (openFor(sym)) { seen.add(ev.id); continue; } // already have the position
-        if (guardIsOpened(sym)) { seen.add(ev.id); continue; } // guard says we opened it
+        // At this point openFor(sym) already returned null (no open position).
+        // If the guard still says "opened", it's a stuck guard from a position
+        // that was closed manually without the engine clearing the flag.
+        // If we opened it earlier THIS poll pass, skip to avoid a duplicate.
+        // Otherwise, clear the stale guard so the mirror open can proceed.
+        if (guardIsOpened(sym) && openedThisPoll.has(sym)) { seen.add(ev.id); continue; } // just opened this pass — skip duplicate
+        if (guardIsOpened(sym)) {
+          guardClearOpened(sym);
+          console.warn(`[TradeMirror] stuck guard for ${sym} — clearing so mirror open can proceed`);
+        }
         const lastClose = guardLastClosedAt(sym);
         if (lastClose && Date.now() - lastClose < 8000) continue; // retry after cooldown
         const cat = detectMirrorCategory(sym);
@@ -231,6 +249,7 @@ export async function pollMirrorEvents(opts: {
           source: 'auto',
         });
         guardMarkOpened(sym);
+        openedThisPoll.add(sym);
         seen.add(ev.id); // executed — never reprocess
         allTrades = await store.listTrades().catch(() => allTrades);
         const acc2 = await store.getAccount().catch(() => null);
