@@ -1,0 +1,41 @@
+@media (max-width: 768px) {
+  .mt5-signal-card { background: var(--mt5-panel); border: 1px solid var(--mt5-border); border-radius: 14px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .mt5-signal-info { flex: 1; }
+  .mt5-signal-symbol { font-size: 17px; font-weight: 700; color: var(--mt5-text); }
+  .mt5-signal-type { font-size: 12px; font-weight: 600; text-transform: uppercase; margin-top: 4px; }
+  .mt5-signal-type.buy { color: var(--mt5-buy); }
+  .mt5-signal-type.sell { color: var(--mt5-sell); }
+  .mt5-signal-price { font-size: 15px; font-weight: 700; color: var(--mt5-text); text-align: right; }
+  .mt5-signal-change { font-size: 12px; font-weight: 600; margin-top: 2px; text-align: right; }
+  .mt5-signal-change.positive { color: var(--mt5-buy); }
+  .mt5-signal-change.negative { color: var(--mt5-sell); }
+  .mt5-signal-badge { padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .mt5-signal-badge.buy { background: rgba(0,255,136,0.15); color: var(--mt5-buy); border: 1px solid rgba(0,255,136,0.3); }
+  .mt5-signal-badge.sell { background: rgba(255,51,51,0.15); color: var(--mt5-sell); border: 1px solid rgba(255,51,51,0.3); }
+  .mt5-position-card { background: var(--mt5-panel); border: 1px solid var(--mt5-border); border-radius: 14px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .mt5-position-info { flex: 1; }
+  .mt5-position-symbol { font-size: 16px; font-weight: 700; color: var(--mt5-text); }
+  .mt5-position-type { font-size: 11px; font-weight: 600; text-transform: uppercase; margin-top: 2px; }
+  .mt5-position-type.buy { color: var(--mt5-buy); }
+  .mt5-position-type.sell { color: var(--mt5-sell); }
+  .mt5-position-profit { font-size: 14px; font-weight: 700; text-align: right; }
+  .mt5-position-profit.positive { color: var(--mt5-buy); }
+  .mt5-position-profit.negative { color: var(--mt5-sell); }
+  .mt5-position-actions { display: flex; gap: 8px; }
+  .mt5-trade-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 300; padding: 20px; }
+  .mt5-trade-panel { background: var(--mt5-panel); border-radius: 20px; padding: 24px 20px; width: 100%; max-width: 360px; max-height: 90vh; overflow-y: auto; border: 1px solid var(--mt5-border); }
+  .mt5-trade-title { font-size: 20px; font-weight: 700; color: var(--mt5-text); text-align: center; margin-bottom: 20px; }
+  .mt5-trade-row { display: flex; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--mt5-border); }
+  .mt5-trade-label { font-size: 13px; color: var(--mt5-text-muted); }
+  .mt5-trade-value { font-size: 15px; font-weight: 700; color: var(--mt5-text); }
+  .mt5-trade-buttons { display: flex; gap: 12px; margin-top: 28px; }
+  .mt5-btn-buy { flex: 1; background: var(--mt5-buy); color: #000; border: none; border-radius: 12px; padding: 16px; font-size: 17px; font-weight: 700; cursor: pointer; }
+  .mt5-btn-sell { flex: 1; background: var(--mt5-sell); color: #fff; border: none; border-radius: 12px; padding: 16px; font-size: 17px; font-weight: 700; cursor: pointer; }
+  .mt5-btn-close { width: 100%; background: transparent; color: var(--mt5-text-muted); border: 1px solid var(--mt5-border); border-radius: 12px; padding: 14px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 12px; }
+  .mt5-ticker { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.25); border-radius: 10px; padding: 10px 16px; font-size: 13px; font-weight: 600; color: var(--mt5-buy); display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .mt5-empty-state { text-align: center; padding: 60px 20px; color: var(--mt5-text-muted); }
+  .mt5-empty-icon { font-size: 56px; margin-bottom: 20px; opacity: 0.4; }
+  .mt5-empty-title { font-size: 17px; font-weight: 700; color: var(--mt5-text); margin-bottom: 8px; }
+  .mt5-empty-subtitle { font-size: 13px; color: var(--mt5-text-muted); }
+  .mt5-signal-alert { position: fixed; top: 68px; left: 16px; right: 16px; background: rgba(0,255,136,0.95); color: #000; padding: 12px 16px; border-radius: 12px; font-size: 13px; font-weight: 700; z-index: 250; }
+}

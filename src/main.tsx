@@ -5,7 +5,8 @@ import ErrorBoundary from './components/ErrorBoundary';
 import { MobileLayout } from './components/mobile/MobileLayout';
 import { initMoneytizer } from './lib/moneytizer';
 import './index.css';
-import './styles/mobile.css';
+import './styles/mobile_pt1.css';
+import './styles/mobile_pt2.css';
 
 (window as any).__BUILD = 'v3.1.0';
 initMoneytizer();

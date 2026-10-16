@@ -1,17 +1,19 @@
 import React from 'react';
-import { Activity, Monitor, Clock, History, Settings } from 'lucide-react';
+import { Home, List, Briefcase, PlusCircle, Settings } from 'lucide-react';
+
+export type MobileTab = 'home' | 'quotes' | 'positions' | 'trade' | 'settings';
 
 interface MobileBottomNavProps {
-  activeTab: 'quotes' | 'trade' | 'history' | 'news' | 'settings';
-  onTabChange: (tab: 'quotes' | 'trade' | 'history' | 'news' | 'settings') => void;
+  activeTab: MobileTab;
+  onTabChange: (tab: MobileTab) => void;
 }
 
-const NAV_ITEMS: { id: 'quotes' | 'trade' | 'history' | 'news' | 'settings'; label: string; icon: React.ElementType }[] = [
-  { id: 'quotes', label: 'Quotes', icon: Activity },
-  { id: 'trade', label: 'Trade', icon: Monitor },
-  { id: 'history', label: 'History', icon: History },
-  { id: 'news', label: 'News', icon: Clock },
-  { id: 'settings', label: 'Settings', icon: Settings },
+const NAV_ITEMS: { id: MobileTab; label: string; icon: React.ElementType }[] = [
+  { id: 'home', label: 'Home', icon: Home },
+  { id: 'quotes', label: 'Quotes', icon: List },
+  { id: 'positions', label: 'Trade', icon: Briefcase },
+  { id: 'trade', label: 'New', icon: PlusCircle },
+  { id: 'settings', label: 'Setup', icon: Settings },
 ];
 
 export function MobileBottomNav({ activeTab, onTabChange }: MobileBottomNavProps) {
@@ -24,7 +26,7 @@ export function MobileBottomNav({ activeTab, onTabChange }: MobileBottomNavProps
           onClick={() => onTabChange(item.id)}
           aria-pressed={activeTab === item.id}
         >
-          <item.icon className="mt5-nav-icon" />
+          <item.icon className="mt5-nav-icon" size={24} />
           <span className="mt5-nav-label">{item.label}</span>
         </button>
       ))}

@@ -66,7 +66,8 @@ import MyPlanModal from './components/MyPlanModal';
 import { StorePlan, fetchPlans, planLabel, planFeatures } from './services/storePlans';
 import { clientDocId, isDeveloperEmail, DEVELOPER_EMAILS } from './lib/clientIds';
 import { useMobile } from './lib/mobileDetect';
-import { MobileLayout } from './components/mobile/MobileLayout';
+import './styles/mobile_pt1.css';
+import './styles/mobile_pt2.css';
 import { clientScopeKey, writeClientOwnKey, readClientOwnKey, clearClientOwnKey, rememberBuyerEmail, clientEmailsFor, readClientOwnKeyForEmails, applyRuntimeAnalysisKey, replaceClientOwnKey, forgetClientOwnKey, purgeOwnKeyForEmail, detectKeyProvider, setCurrentUserEmail, currentUserEmail } from './lib/clientScope';
 import { isGoogleOrMicrosoftEmail, AuthProviderId } from './lib/authPolicy';
 
