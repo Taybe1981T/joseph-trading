@@ -65,6 +65,8 @@ import RadarSettingsPage from './components/RadarSettingsPage';
 import MyPlanModal from './components/MyPlanModal';
 import { StorePlan, fetchPlans, planLabel, planFeatures } from './services/storePlans';
 import { clientDocId, isDeveloperEmail, DEVELOPER_EMAILS } from './lib/clientIds';
+import { useMobile } from './lib/mobileDetect';
+import { MobileLayout } from './components/mobile/MobileLayout';
 import { clientScopeKey, writeClientOwnKey, readClientOwnKey, clearClientOwnKey, rememberBuyerEmail, clientEmailsFor, readClientOwnKeyForEmails, applyRuntimeAnalysisKey, replaceClientOwnKey, forgetClientOwnKey, purgeOwnKeyForEmail, detectKeyProvider, setCurrentUserEmail, currentUserEmail } from './lib/clientScope';
 import { isGoogleOrMicrosoftEmail, AuthProviderId } from './lib/authPolicy';
 
@@ -119,6 +121,7 @@ export default function App() {
   const [newSuggestionsCount, setNewSuggestionsCount] = useState(0);
   const [paymentRequestsCount, setPaymentRequestsCount] = useState(0);
   const [siteRequestsCount, setSiteRequestsCount] = useState(0);
+  const isMobileDevice = useMobile();
 
   useEffect(() => {
     const standalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true;
