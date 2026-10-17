@@ -133,13 +133,14 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     if (q) setDialog(q); else { setSelSym(s); setTab('trade'); }
   };
 
-  const runManual = (sym: string) => {
-    setShowManual(false);
-    try { sessionStorage.setItem('joseph_session_ui', JSON.stringify({ symbol: sym })); } catch {}
-    try { window.dispatchEvent(new CustomEvent('mobile-manual-analysis', { detail: { symbol: sym } })); } catch {}
+  const runManual = (results: any[]) => {
+    loadAll();
+    const first = results && results[0];
+    const sym = first ? String(first.symbol || '') : '';
     ping(660);
-    setAlert((lang === 'ar' ? 'تحليل يدوي: ' : 'Manual analysis: ') + sym);
-    setTimeout(() => setAlert(null), 4000);
+    setAlert((lang === 'ar' ? 'تحليل يدوي مكتمل: ' : 'Manual analysis done: ') + (sym || (results ? results.length : 0) + ' signals'));
+    setTimeout(() => setAlert(null), 5000);
+    setTab('home');
   };
 
   return (
@@ -164,7 +165,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       </div>
       <MobileBottomNav activeTab={tab} onTabChange={setTab} isDeveloper={isDev} lang={lang} />
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
-      {showManual && isDev && <MobileManualSheet lang={lang} onClose={() => setShowManual(false)} onAnalyze={runManual} />}
+      {showManual && isDev && <MobileManualSheet lang={lang} onClose={() => setShowManual(false)} onDone={runManual} />}
       {alert && <div className="mt5-signal-alert">{alert}</div>}
     </div>
   );

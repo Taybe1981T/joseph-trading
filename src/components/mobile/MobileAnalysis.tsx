@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, Hand, Play, Square, Activity, Settings2 } from 'lucide-react';
+import { Zap, Hand, Play, Activity, Settings2, Loader2 } from 'lucide-react';
+import { MobileProgress, readMobileAuto, startMobileRadar, stopMobileRadar, isMobileRadarOn } from '../../services/mobileAnalysisEngine';
 
 interface MobileAnalysisProps {
   lang: 'en' | 'ar';
@@ -7,51 +8,73 @@ interface MobileAnalysisProps {
   compact?: boolean;
 }
 
-function readAuto(): { on: boolean; iv: number; last: string | null } {
-  try {
-    const raw = localStorage.getItem('auto_settings');
-    if (raw) {
-      const s = JSON.parse(raw);
-      return {
-        on: !!s.isEnabled,
-        iv: typeof s.interval === 'number' ? s.interval : 15,
-        last: s.lastFinishedAt ? new Date(s.lastFinishedAt).toLocaleTimeString() : null,
-      };
-    }
-  } catch {}
-  return { on: false, iv: 15, last: null };
-}
-
-function writeAuto(patch: any) {
-  try {
-    const raw = localStorage.getItem('auto_settings');
-    const s = raw ? JSON.parse(raw) : {};
-    localStorage.setItem('auto_settings', JSON.stringify({ ...s, ...patch }));
-  } catch {}
-}
-
 export function MobileAnalysis({ lang, onManualAnalyze, compact = false }: MobileAnalysisProps) {
   const isAr = lang === 'ar';
-  const [autoOn, setAutoOn] = useState(false);
-  const [intervalMin, setIntervalMin] = useState(15);
-  const [lastRun, setLastRun] = useState<string | null>(null);
+  const [autoOn, setAutoOn] = useState(() => readMobileAuto().isEnabled);
+  const [intervalMin, setIntervalMin] = useState(() => readMobileAuto().interval || 15);
+  const [lastRun, setLastRun] = useState<string | null>(() => {
+    const t = readMobileAuto().lastFinishedAt;
+    return t ? new Date(t).toLocaleTimeString() : null;
+  });
+  const [prog, setProg] = useState<MobileProgress | null>(null);
+  const [doneMsg, setDoneMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    const sync = () => { const r = readAuto(); setAutoOn(r.on); setIntervalMin(r.iv); setLastRun(r.last); };
+    const sync = () => {
+      const r = readMobileAuto();
+      setAutoOn(r.isEnabled);
+      setIntervalMin(r.interval || 15);
+      setLastRun(r.lastFinishedAt ? new Date(r.lastFinishedAt).toLocaleTimeString() : null);
+    };
     sync();
     window.addEventListener('storage', sync);
     const iv = setInterval(sync, 5000);
     return () => { window.removeEventListener('storage', sync); clearInterval(iv); };
   }, []);
 
-  const toggleAuto = () => {
-    const v = !autoOn;
-    writeAuto({ isEnabled: v });
-    setAutoOn(v);
-    try { window.dispatchEvent(new CustomEvent('mobile-auto-analysis', { detail: { enabled: v } })); } catch {}
+  const uidEmail = () => {
+    try {
+      const raw = localStorage.getItem('finalyze_user');
+      const o = raw ? JSON.parse(raw) : {};
+      return { uid: String(o.uid || 'anonymous'), email: String(o.email || '') };
+    } catch { return { uid: 'anonymous', email: '' }; }
   };
-  const setIv = (m: number) => { writeAuto({ interval: m }); setIntervalMin(m); };
+
+  const toggleAuto = async () => {
+    const v = !autoOn;
+    try {
+      const raw = localStorage.getItem('auto_settings');
+      const s = raw ? JSON.parse(raw) : {};
+      localStorage.setItem('auto_settings', JSON.stringify({ ...s, isEnabled: v }));
+    } catch {}
+    setAutoOn(v);
+    if (v) {
+      setDoneMsg(null);
+      const { uid, email } = uidEmail();
+      startMobileRadar(uid, email,
+        (p) => setProg(p),
+        (r) => {
+          setProg(null);
+          setLastRun(new Date().toLocaleTimeString());
+          setDoneMsg(isAr ? `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد` : `Done: ${r.scanned} scanned, ${r.fresh} fresh`);
+          setTimeout(() => setDoneMsg(null), 15000);
+        }
+      );
+    } else {
+      stopMobileRadar();
+      setProg(null);
+    }
+  };
+  const setIv = (m: number) => {
+    try {
+      const raw = localStorage.getItem('auto_settings');
+      const s = raw ? JSON.parse(raw) : {};
+      localStorage.setItem('auto_settings', JSON.stringify({ ...s, interval: m }));
+    } catch {}
+    setIntervalMin(m);
+  };
   const IVS = [5, 15, 30, 60];
+  const pct = prog && prog.total > 0 ? Math.round((prog.index / prog.total) * 100) : 0;
 
   if (compact) {
     return (
@@ -93,7 +116,23 @@ export function MobileAnalysis({ lang, onManualAnalyze, compact = false }: Mobil
             ? (isAr ? 'الرادار نشط — يفحص كل ' + intervalMin + ' دقيقة' : 'Radar active — every ' + intervalMin + ' min')
             : (isAr ? 'الرادار متوقف' : 'Radar off')}
           {lastRun && autoOn && <span style={{ display: 'block', marginTop: 4 }}>{isAr ? 'آخر فحص: ' : 'Last: '}{lastRun}</span>}
+          {doneMsg && <span style={{ display: 'block', marginTop: 4, color: '#00ff88' }}>{doneMsg}</span>}
         </div>
+        {prog && (
+          <div style={{ background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '10px 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#e0e0e0' }}>
+              <Loader2 size={14} style={{ animation: 'spin 1s linear infinite', color: '#00ff88' }} />
+              <span style={{ flex: 1 }}>{prog.current}{prog.exchange ? ' · ' + prog.exchange : ''}</span>
+              <span style={{ color: '#00ff88' }}>{pct}%</span>
+            </div>
+            <div style={{ height: 6, borderRadius: 3, background: '#2a2a2a', marginTop: 8, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: pct + '%', background: '#00ff88', transition: 'width 0.3s' }} />
+            </div>
+            <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>
+              {prog.index}/{prog.total}{prog.failed > 0 ? ' · ' + prog.failed + (isAr ? ' فشل' : ' failed') : ''}
+            </div>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <Settings2 size={14} style={{ color: '#888' }} />
           {IVS.map((m) => (
