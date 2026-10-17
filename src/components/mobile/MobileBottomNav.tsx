@@ -1,30 +1,34 @@
 import React from 'react';
-import { Home, List, Briefcase, PlusCircle, Settings } from 'lucide-react';
+import { Home, List, Briefcase, PlusCircle, Settings, Zap } from 'lucide-react';
 
-export type MobileTab = 'home' | 'quotes' | 'positions' | 'trade' | 'settings';
+export type MobileTab = 'home' | 'quotes' | 'positions' | 'trade' | 'settings' | 'analysis';
 
 interface MobileBottomNavProps {
   activeTab: MobileTab;
   onTabChange: (tab: MobileTab) => void;
+  isDeveloper: boolean;
+  lang: 'en' | 'ar';
 }
 
-const NAV_ITEMS: { id: MobileTab; label: string; icon: React.ElementType }[] = [
-  { id: 'home', label: 'Home', icon: Home },
-  { id: 'quotes', label: 'Quotes', icon: List },
-  { id: 'positions', label: 'Trade', icon: Briefcase },
-  { id: 'trade', label: 'New', icon: PlusCircle },
-  { id: 'settings', label: 'Setup', icon: Settings },
-];
-
-export function MobileBottomNav({ activeTab, onTabChange }: MobileBottomNavProps) {
+export function MobileBottomNav({ activeTab, onTabChange, isDeveloper, lang }: MobileBottomNavProps) {
+  const isAr = lang === 'ar';
+  const items: { id: MobileTab; label: string; icon: React.ElementType; dev?: boolean }[] = [
+    { id: 'home', label: isAr ? 'الرئيسية' : 'Home', icon: Home },
+    { id: 'quotes', label: isAr ? 'الرموز' : 'Quotes', icon: List },
+    ...(isDeveloper ? [{ id: 'analysis' as MobileTab, label: isAr ? 'تحليل' : 'AI', icon: Zap, dev: true }] : []),
+    { id: 'positions', label: isAr ? 'صفقات' : 'Trade', icon: Briefcase },
+    { id: 'trade', label: isAr ? 'جديد' : 'New', icon: PlusCircle },
+    { id: 'settings', label: isAr ? 'إعداد' : 'Setup', icon: Settings },
+  ];
   return (
     <nav className="mt5-bottom-nav" role="navigation" aria-label="Main navigation">
-      {NAV_ITEMS.map((item) => (
+      {items.map((item) => (
         <button
           key={item.id}
           className={`mt5-nav-item ${activeTab === item.id ? 'active' : ''}`}
           onClick={() => onTabChange(item.id)}
           aria-pressed={activeTab === item.id}
+          style={item.dev ? { color: activeTab === item.id ? '#F59E0B' : '#a16207' } : undefined}
         >
           <item.icon className="mt5-nav-icon" size={24} />
           <span className="mt5-nav-label">{item.label}</span>

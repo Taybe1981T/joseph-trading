@@ -8,10 +8,13 @@ import { MobileNewTrade } from './MobileNewTrade';
 import { MobileSettings } from './MobileSettings';
 import { MobileTradeDialog } from './MobileTradeDialog';
 import { Language } from '../../lib/i18n';
+import { isDeveloperEmail, DEVELOPER_EMAILS } from '../../lib/clientIds';
+import { MobileAnalysis } from './MobileAnalysis';
+import { MobileManualSheet } from './MobileManualSheet';
 
 const TITLES: Record<MobileTab, string> = {
   home: 'Joseph.Trading', quotes: 'Market Watch', positions: 'Trade',
-  trade: 'New Order', settings: 'Settings',
+  trade: 'New Order', settings: 'Settings', analysis: 'AI Analysis',
 };
 
 const QUOTES: MobileQuote[] = [
@@ -45,6 +48,23 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [balance, setBalance] = useState(10000);
   const [equity, setEquity] = useState(10000);
   const [selSym, setSelSym] = useState<string | null>(null);
+  const [showManual, setShowManual] = useState(false);
+  const [isDev, setIsDev] = useState(false);
+
+  useEffect(() => {
+    const check = () => {
+      try {
+        const raw = localStorage.getItem('finalyze_user');
+        const email = raw ? String(JSON.parse(raw)?.email || '').toLowerCase().trim() : '';
+        const devEmail = (localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0] || '').toLowerCase();
+        setIsDev(!!email && (email === devEmail || isDeveloperEmail(email) || email.includes('dev')));
+      } catch { setIsDev(false); }
+    };
+    check();
+    window.addEventListener('storage', check);
+    const iv = setInterval(check, 5000);
+    return () => { window.removeEventListener('storage', check); clearInterval(iv); };
+  }, []);
 
   const loadAll = useCallback(() => {
     try {
@@ -113,6 +133,15 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     if (q) setDialog(q); else { setSelSym(s); setTab('trade'); }
   };
 
+  const runManual = (sym: string) => {
+    setShowManual(false);
+    try { sessionStorage.setItem('joseph_session_ui', JSON.stringify({ symbol: sym })); } catch {}
+    try { window.dispatchEvent(new CustomEvent('mobile-manual-analysis', { detail: { symbol: sym } })); } catch {}
+    ping(660);
+    setAlert((lang === 'ar' ? 'تحليل يدوي: ' : 'Manual analysis: ') + sym);
+    setTimeout(() => setAlert(null), 4000);
+  };
+
   return (
     <div className="mobile-only" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', paddingBottom: 72 }}>
       <MobileHeader title={TITLES[tab]} lang={lang}
@@ -129,11 +158,13 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'quotes' && <MobileQuotes quotes={QUOTES} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} onClose={(id) => { try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {} setPositions((p) => p.filter((x) => x.id !== id)); }} />}
         {tab === 'trade' && <MobileNewTrade quotes={QUOTES} defaultSymbol={selSym} onOpen={openTrade} />}
+        {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} onManualAnalyze={() => setShowManual(true)} />}
         {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" />}
         {children}
       </div>
-      <MobileBottomNav activeTab={tab} onTabChange={setTab} />
+      <MobileBottomNav activeTab={tab} onTabChange={setTab} isDeveloper={isDev} lang={lang} />
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
+      {showManual && isDev && <MobileManualSheet lang={lang} onClose={() => setShowManual(false)} onAnalyze={runManual} />}
       {alert && <div className="mt5-signal-alert">{alert}</div>}
     </div>
   );
