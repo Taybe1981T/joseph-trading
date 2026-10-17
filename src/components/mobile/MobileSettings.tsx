@@ -1,13 +1,14 @@
 import React from 'react';
 import { Bell, Volume2, Globe, Shield, LogOut, RefreshCw } from 'lucide-react';
+import { Language } from '../../lib/i18n';
 
 interface MobileSettingsProps {
   autoTradeEnabled: boolean;
   soundEnabled: boolean;
-  language: 'en' | 'ar';
+  language: Language;
   onAutoTradeToggle: (v: boolean) => void;
   onSoundToggle: (v: boolean) => void;
-  onLanguageChange: (v: 'en' | 'ar') => void;
+  onLanguageChange: (v: Language) => void;
   onClearCache: () => void;
   version: string;
 }

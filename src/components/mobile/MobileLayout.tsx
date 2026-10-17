@@ -7,6 +7,7 @@ import { MobilePositions, MobilePosition } from './MobilePositions';
 import { MobileNewTrade } from './MobileNewTrade';
 import { MobileSettings } from './MobileSettings';
 import { MobileTradeDialog } from './MobileTradeDialog';
+import { Language } from '../../lib/i18n';
 
 const TITLES: Record<MobileTab, string> = {
   home: 'Joseph.Trading', quotes: 'Market Watch', positions: 'Trade',
@@ -30,7 +31,15 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [alert, setAlert] = useState<string | null>(null);
   const [auto, setAuto] = useState(() => { try { return localStorage.getItem('paper_trading_auto_trade') !== '0'; } catch { return true; } });
   const [sound, setSound] = useState(true);
-  const [lang, setLang] = useState<'en' | 'ar'>('en');
+  const [lang, setLang] = useState<Language>(() => {
+    try {
+      const s = localStorage.getItem('language');
+      return (s === 'ar' || s === 'en') ? (s as Language) : 'en';
+    } catch { return 'en'; }
+  });
+  const [isDark, setIsDark] = useState(() => {
+    try { return localStorage.getItem('theme') !== 'light'; } catch { return true; }
+  });
   const [signals, setSignals] = useState<MobileSignal[]>([]);
   const [positions, setPositions] = useState<MobilePosition[]>([]);
   const [balance, setBalance] = useState(10000);
@@ -106,7 +115,15 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
 
   return (
     <div className="mobile-only" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', paddingBottom: 72 }}>
-      <MobileHeader title={TITLES[tab]} onNotificationsClick={() => setTab('home')} onProfileClick={() => setTab('settings')} />
+      <MobileHeader title={TITLES[tab]} lang={lang}
+        onLangChange={(l) => { setLang(l); try { localStorage.setItem('language', l); } catch {} }}
+        isDark={isDark}
+        toggleTheme={() => {
+          const v = !isDark; setIsDark(v);
+          try { localStorage.setItem('theme', v ? 'dark' : 'light'); } catch {}
+          try { if (v) document.body.classList.remove('light'); else document.body.classList.add('light'); } catch {}
+        }}
+        onNotificationsClick={() => setTab('home')} onProfileClick={() => setTab('settings')} />
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {tab === 'home' && <MobileHome signals={signals} balance={balance} equity={equity} openCount={positions.length} autoTradeEnabled={auto} onSignalClick={pickSymbol} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} />}
         {tab === 'quotes' && <MobileQuotes quotes={QUOTES} onSelect={pickSymbol} />}
