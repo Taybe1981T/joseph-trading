@@ -1,16 +1,28 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { MobileBottomNav, MobileTab } from './MobileBottomNav';
 import { MobileHeader } from './MobileHeader';
-import { MobileHome, MobileSignal } from './MobileHome';
+import { MobileHome } from './MobileHome';
 import { MobileQuotes, MobileQuote } from './MobileQuotes';
 import { MobilePositions, MobilePosition } from './MobilePositions';
 import { MobileNewTrade } from './MobileNewTrade';
 import { MobileSettings } from './MobileSettings';
 import { MobileTradeDialog } from './MobileTradeDialog';
+import { MobileSignalDetail } from './MobileSignalDetail';
 import { Language } from '../../lib/i18n';
 import { isDeveloperEmail, DEVELOPER_EMAILS } from '../../lib/clientIds';
+import { useMobileMode, mobileT } from '../../lib/mobileMode';
 import { MobileAnalysis } from './MobileAnalysis';
 import { MobileManualSheet } from './MobileManualSheet';
+import { useMobileSignalAlert } from './useMobileSignalAlert';
+import { AnalysisResult, SignalType } from '../../types';
+
+interface MobileSignal {
+  symbol: string;
+  type: 'buy' | 'sell';
+  price: number;
+  change: number;
+  changePercent: number;
+}
 
 const TITLES: Record<MobileTab, string> = {
   home: 'Joseph.Trading', quotes: 'Market Watch', positions: 'Trade',
@@ -44,6 +56,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     try { return localStorage.getItem('theme') !== 'light'; } catch { return true; }
   });
   const [signals, setSignals] = useState<MobileSignal[]>([]);
+  const [fullSignals, setFullSignals] = useState<AnalysisResult[]>([]);
+  const [detail, setDetail] = useState<AnalysisResult | null>(null);
   const [positions, setPositions] = useState<MobilePosition[]>([]);
   const [balance, setBalance] = useState(10000);
   const [equity, setEquity] = useState(10000);
@@ -72,7 +86,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       if (raw) {
         const arr = JSON.parse(raw);
         if (Array.isArray(arr)) {
-          setSignals(arr.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).slice(0, 30).map((s: any) => ({
+          const full = arr.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).slice(0, 30);
+          setFullSignals(full);
+          setSignals(full.map((s: any) => ({
             symbol: String(s.symbol || ''),
             type: (String(s.signal || '').includes('sell') ? 'sell' : 'buy') as 'buy' | 'sell',
             price: Number(s.entryPrice ?? s.price ?? 0),
@@ -133,6 +149,27 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     if (q) setDialog(q); else { setSelSym(s); setTab('trade'); }
   };
 
+  const removeSignal = (sym: string) => {
+    try {
+      const raw = localStorage.getItem('top_signals_persistent');
+      const arr = raw ? JSON.parse(raw) : [];
+      const next = (Array.isArray(arr) ? arr : []).filter((s: any) => String(s.symbol) !== sym);
+      localStorage.setItem('top_signals_persistent', JSON.stringify(next));
+      loadAll();
+    } catch {}
+  };
+
+  const signalFor = useCallback((sym: string) => fullSignals.find((r) => r.symbol === sym), [fullSignals]);
+
+  const [freshCount, setFreshCount] = useState(0);
+  useMobileSignalAlert(useCallback((n: number) => {
+    loadAll();
+    setFreshCount(n);
+    ping(880);
+    setAlert((lang === 'ar' ? 'إشارة جديدة: ' : 'New signal: ') + n);
+    setTimeout(() => { setAlert(null); setFreshCount(0); }, 8000);
+  }, [loadAll, lang]));
+
   const runManual = (results: any[]) => {
     loadAll();
     const first = results && results[0];
@@ -155,16 +192,17 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         }}
         onNotificationsClick={() => setTab('home')} onProfileClick={() => setTab('settings')} />
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {tab === 'home' && <MobileHome signals={signals} balance={balance} equity={equity} openCount={positions.length} autoTradeEnabled={auto} onSignalClick={pickSymbol} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} />}
+        {tab === 'home' && <MobileHome fullSignals={fullSignals} balance={balance} equity={equity} openCount={positions.length} autoTradeEnabled={auto} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); setTab('trade'); }} onRemove={removeSignal} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
         {tab === 'quotes' && <MobileQuotes quotes={QUOTES} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} onClose={(id) => { try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {} setPositions((p) => p.filter((x) => x.id !== id)); }} />}
-        {tab === 'trade' && <MobileNewTrade quotes={QUOTES} defaultSymbol={selSym} onOpen={openTrade} />}
+        {tab === 'trade' && <MobileNewTrade quotes={QUOTES} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
         {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} onManualAnalyze={() => setShowManual(true)} />}
         {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" />}
         {children}
       </div>
       <MobileBottomNav activeTab={tab} onTabChange={setTab} isDeveloper={isDev} lang={lang} />
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
+      {detail && <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />}
       {showManual && isDev && <MobileManualSheet lang={lang} onClose={() => setShowManual(false)} onDone={runManual} />}
       {alert && <div className="mt5-signal-alert">{alert}</div>}
     </div>

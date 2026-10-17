@@ -1,24 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { MobileQuote } from './MobileQuotes';
+import { AnalysisResult } from '../../types';
+import { Language } from '../../lib/i18n';
+import { MobileLotCalc } from './MobileLotCalc';
 
 interface MobileNewTradeProps {
   quotes: MobileQuote[];
   defaultSymbol: string | null;
+  lang: Language;
+  balance: number;
+  signalFor?: (symbol: string) => AnalysisResult | undefined;
   onOpen: (symbol: string, type: 'buy' | 'sell', volume: number) => void;
 }
 
-export function MobileNewTrade({ quotes, defaultSymbol, onOpen }: MobileNewTradeProps) {
+export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor, onOpen }: MobileNewTradeProps) {
+  const isAr = lang === 'ar';
   const [symbol, setSymbol] = useState(defaultSymbol || (quotes[0]?.symbol || ''));
   const [volume, setVolume] = useState(0.01);
 
   const current = quotes.find((q) => q.symbol === symbol);
+  const sig = useMemo(() => (signalFor ? signalFor(symbol) : undefined), [signalFor, symbol]);
 
   return (
     <div className="mt5-page-container">
-      <div className="mt5-section-title">New Trade</div>
+      <div className="mt5-section-title">{isAr ? 'صفقة جديدة' : 'New Trade'}</div>
 
       <div className="mt5-card">
-        <div className="mt5-card-title">Symbol</div>
+        <div className="mt5-card-title">{isAr ? 'الرمز' : 'Symbol'}</div>
         <select
           value={symbol}
           onChange={(e) => setSymbol(e.target.value)}
@@ -34,6 +42,11 @@ export function MobileNewTrade({ quotes, defaultSymbol, onOpen }: MobileNewTrade
           ))}
         </select>
       </div>
+
+      {sig && sig.stopLoss && sig.takeProfit && (
+        <MobileLotCalc symbol={symbol} stopLoss={sig.stopLoss} takeProfit={sig.takeProfit}
+          entryPrice={sig.entryPrice} lang={lang} balance={balance} onPickLot={setVolume} />
+      )}
 
       {current && (
         <div className="mt5-status-bar">
@@ -59,7 +72,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, onOpen }: MobileNewTrade
       )}
 
       <div className="mt5-card">
-        <div className="mt5-card-title">Volume (Lot)</div>
+        <div className="mt5-card-title">{isAr ? 'الحجم (لوت)' : 'Volume (Lot)'}</div>
         <input
           type="number"
           step="0.01"
