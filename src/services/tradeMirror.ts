@@ -28,6 +28,7 @@ import {
   getTradeStore,
 } from './paperTradingService';
 import { notionalInUSD, usdToPrice } from '../lib/positionMath';
+import type { AnalysisResult } from '../types';
 import {
   isOpened as guardIsOpened,
   markOpened as guardMarkOpened,
@@ -317,5 +318,71 @@ export function listenMirrorEvents(opts: {
   return () => {
     try { unsub(); } catch { /* already unsubscribed */ }
   };
+}
+
+/**
+ * DEVELOPER SIDE â€” bulk-publish manual-analysis results as mirror OPEN events
+ * so subscribed clients can copy them into their own accounts.
+ *
+ * - Keeps only executable signals (buy/sell/strong_buy/strong_sell).
+ * - One event per symbol (the strongest by confidence) â€” no duplicates.
+ * - Honours a per-symbol cooldown (default 15 min) so the same symbol isn't
+ *   re-broadcast every cycle.
+ * - Writes directly to `shared_trades` (public); clients execute via
+ *   `pollMirrorEvents` / `listenMirrorEvents` with their own guards.
+ */
+export async function publishMirrorEventsFor(
+  signals: AnalysisResult[],
+  opts: { maxPerSymbol?: number; cooldownMs?: number; origin?: string } = {},
+): Promise<{ published: number; skipped: number }> {
+  const { maxPerSymbol = 1, cooldownMs = 15 * 60 * 1000, origin = 'mobile' } = opts;
+  const now = Date.now();
+
+  const bySymbol = new Map<string, AnalysisResult[]>();
+  for (const s of signals || []) {
+    const sig = String(s.signal || '').toLowerCase();
+    if (sig !== 'strong_buy' && sig !== 'strong_sell' && sig !== 'buy' && sig !== 'sell') continue;
+    const arr = bySymbol.get(s.symbol) || [];
+    arr.push(s);
+    bySymbol.set(s.symbol, arr);
+  }
+
+  const lastRaw = localStorage.getItem('finalyze_mirror_last_publish_v1');
+  const lastPublish: Record<string, number> = lastRaw ? JSON.parse(lastRaw) : {};
+
+  let published = 0;
+  let skipped = 0;
+
+  for (const [sym, arr] of bySymbol) {
+    arr.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+    const best = arr[0];
+    const side: 'buy' | 'sell' = best.signal === 'strong_sell' || best.signal === 'sell' ? 'sell' : 'buy';
+
+    const last = lastPublish[sym] || 0;
+    if (now - last < cooldownMs) { skipped++; continue; }
+
+    const openedAt = now;
+    try {
+      await broadcastMirrorEvent({
+        id: `open:${sym}:${openedAt}`,
+        kind: 'open',
+        symbol: sym,
+        side,
+        signal: best.signal,
+        openedAt,
+        devEntry: best.entryPrice ?? null,
+        devSl: best.stopLoss ?? null,
+        devTp: best.takeProfit ?? null,
+        origin,
+      });
+      lastPublish[sym] = now;
+      published++;
+    } catch {
+      skipped++;
+    }
+  }
+
+  try { localStorage.setItem('finalyze_mirror_last_publish_v1', JSON.stringify(lastPublish)); } catch {}
+  return { published, skipped };
 }
 

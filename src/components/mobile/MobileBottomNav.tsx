@@ -1,7 +1,7 @@
 import React from 'react';
-import { Home, List, Briefcase, PlusCircle, Settings, Zap } from 'lucide-react';
+import { Home, List, Briefcase, PlusCircle, Settings, Zap, Users } from 'lucide-react';
 
-export type MobileTab = 'home' | 'quotes' | 'positions' | 'trade' | 'settings' | 'analysis';
+export type MobileTab = 'home' | 'quotes' | 'positions' | 'trade' | 'settings' | 'analysis' | 'clients';
 
 interface MobileBottomNavProps {
   activeTab: MobileTab;
@@ -15,7 +15,8 @@ export function MobileBottomNav({ activeTab, onTabChange, isDeveloper, lang }: M
   const items: { id: MobileTab; label: string; icon: React.ElementType; dev?: boolean }[] = [
     { id: 'home', label: isAr ? 'الرئيسية' : 'Home', icon: Home },
     { id: 'quotes', label: isAr ? 'الرموز' : 'Quotes', icon: List },
-    ...(isDeveloper ? [{ id: 'analysis' as MobileTab, label: isAr ? 'تحليل' : 'AI', icon: Zap, dev: true }] : []),
+    ...(isDeveloper ? [{ id: 'analysis' as MobileTab, label: isAr ? 'التحليل' : 'AI', icon: Zap, dev: true }] : []),
+    ...(isDeveloper ? [{ id: 'clients' as MobileTab, label: isAr ? 'العملاء' : 'Clients', icon: Users, dev: true }] : []),
     { id: 'positions', label: isAr ? 'صفقات' : 'Trade', icon: Briefcase },
     { id: 'trade', label: isAr ? 'جديد' : 'New', icon: PlusCircle },
     { id: 'settings', label: isAr ? 'إعداد' : 'Setup', icon: Settings },

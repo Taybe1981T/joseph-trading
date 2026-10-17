@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Globe, Sun, Moon, Bell, User } from 'lucide-react';
+import { Globe, Sun, Moon, Bell, User, Users } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { getOpenStockExchanges } from '../../lib/marketHours';
 import { BASE_URL } from '../../lib/firebase';
@@ -10,6 +10,8 @@ interface MobileHeaderProps {
   onLangChange: (l: Language) => void;
   isDark: boolean;
   toggleTheme: () => void;
+  clientCount?: number;
+  onClientsClick?: () => void;
   onNotificationsClick?: () => void;
   onProfileClick?: () => void;
 }
@@ -29,7 +31,7 @@ const CATS = [
 ];
 
 export function MobileHeader({
-  title, lang, onLangChange, isDark, toggleTheme,
+  title, lang, onLangChange, isDark, toggleTheme, clientCount, onClientsClick,
   onNotificationsClick, onProfileClick,
 }: MobileHeaderProps) {
   const [logo, setLogo] = useState<string | null>(null);
@@ -84,6 +86,14 @@ export function MobileHeader({
         {onProfileClick && (
           <button className="mt5-icon-btn" style={{ width: 36, height: 36 }} onClick={onProfileClick} aria-label="Profile">
             <User size={17} />
+          </button>
+        )}
+        {clientCount && clientCount > 0 && onClientsClick && (
+          <button className="mt5-icon-btn" style={{ width: 36, height: 36, position: 'relative' }} onClick={onClientsClick} aria-label="Clients">
+            <Users size={16} />
+            <span style={{ position: 'absolute', top: 2, right: 2, width: 14, height: 14, borderRadius: '50%', background: '#F59E0B', color: '#000', fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {clientCount}
+            </span>
           </button>
         )}
       </div>

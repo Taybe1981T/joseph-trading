@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, Hand, Play, Activity, Settings2, Loader2 } from 'lucide-react';
+import { Zap, Hand, Play, Activity, Settings2, Loader2, Upload } from 'lucide-react';
 import { MobileProgress, readMobileAuto, startMobileRadar, stopMobileRadar, isMobileRadarOn } from '../../services/mobileAnalysisEngine';
 
 interface MobileAnalysisProps {
   lang: 'en' | 'ar';
   onManualAnalyze: () => void;
+  onPublish?: () => void;
   compact?: boolean;
 }
 
-export function MobileAnalysis({ lang, onManualAnalyze, compact = false }: MobileAnalysisProps) {
+export function MobileAnalysis({ lang, onManualAnalyze, onPublish, compact = false }: MobileAnalysisProps) {
   const isAr = lang === 'ar';
   const [autoOn, setAutoOn] = useState(() => readMobileAuto().isEnabled);
   const [intervalMin, setIntervalMin] = useState(() => readMobileAuto().interval || 15);
@@ -156,6 +157,11 @@ export function MobileAnalysis({ lang, onManualAnalyze, compact = false }: Mobil
         <button className="mt5-btn mt5-btn-block" style={{ background: '#F59E0B', color: '#000' }} onClick={onManualAnalyze}>
           <Play size={15} /> {isAr ? 'بدء تحليل يدوي' : 'Start Manual Analysis'}
         </button>
+        {onPublish && (
+          <button className="mt5-btn mt5-btn-block" style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: '#F59E0B', marginTop: 8 }} onClick={onPublish}>
+            <Upload size={15} /> {isAr ? 'نشر الإشارات للعملاء' : 'Publish Signals to Clients'}
+          </button>
+        )}
       </div>
     </div>
   );

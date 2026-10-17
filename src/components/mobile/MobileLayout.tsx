@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import { MobileBottomNav, MobileTab } from './MobileBottomNav';
 import { MobileHeader } from './MobileHeader';
 import { MobileHome } from './MobileHome';
@@ -13,6 +13,8 @@ import { isDeveloperEmail, DEVELOPER_EMAILS } from '../../lib/clientIds';
 import { useMobileMode, mobileT } from '../../lib/mobileMode';
 import { MobileAnalysis } from './MobileAnalysis';
 import { MobileManualSheet } from './MobileManualSheet';
+import { MobileClientMonitor } from './MobileClientMonitor';
+import { MobileBulkPublish } from './MobileBulkPublish';
 import { useMobileSignalAlert } from './useMobileSignalAlert';
 import { AnalysisResult, SignalType } from '../../types';
 
@@ -26,7 +28,7 @@ interface MobileSignal {
 
 const TITLES: Record<MobileTab, string> = {
   home: 'Joseph.Trading', quotes: 'Market Watch', positions: 'Trade',
-  trade: 'New Order', settings: 'Settings', analysis: 'AI Analysis',
+  trade: 'New Order', settings: 'Settings', analysis: 'AI Analysis', clients: 'Clients',
 };
 
 const QUOTES: MobileQuote[] = [
@@ -64,6 +66,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [selSym, setSelSym] = useState<string | null>(null);
   const [showManual, setShowManual] = useState(false);
   const [isDev, setIsDev] = useState(false);
+  const [clientCount, setClientCount] = useState(0);
+  const [showPublish, setShowPublish] = useState(false);
 
   useEffect(() => {
     const check = () => {
@@ -73,13 +77,17 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         const devEmail = (localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0] || '').toLowerCase();
         setIsDev(!!email && (email === devEmail || isDeveloperEmail(email) || email.includes('dev')));
       } catch { setIsDev(false); }
+      try {
+        const raw = localStorage.getItem('finalyze_clients');
+        const arr = raw ? JSON.parse(raw) : [];
+        setClientCount(Array.isArray(arr) ? arr.length : 0);
+      } catch { setClientCount(0); }
     };
     check();
     window.addEventListener('storage', check);
     const iv = setInterval(check, 5000);
     return () => { window.removeEventListener('storage', check); clearInterval(iv); };
   }, []);
-
   const loadAll = useCallback(() => {
     try {
       const raw = localStorage.getItem('top_signals_persistent');
@@ -190,14 +198,18 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
           try { localStorage.setItem('theme', v ? 'dark' : 'light'); } catch {}
           try { if (v) document.body.classList.remove('light'); else document.body.classList.add('light'); } catch {}
         }}
+        clientCount={isDev ? clientCount : 0}
+        onClientsClick={() => setTab('clients')}
         onNotificationsClick={() => setTab('home')} onProfileClick={() => setTab('settings')} />
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {tab === 'home' && <MobileHome fullSignals={fullSignals} balance={balance} equity={equity} openCount={positions.length} autoTradeEnabled={auto} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); setTab('trade'); }} onRemove={removeSignal} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
         {tab === 'quotes' && <MobileQuotes quotes={QUOTES} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} onClose={(id) => { try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {} setPositions((p) => p.filter((x) => x.id !== id)); }} />}
         {tab === 'trade' && <MobileNewTrade quotes={QUOTES} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
-        {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} onManualAnalyze={() => setShowManual(true)} />}
+        {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} onManualAnalyze={() => setShowManual(true)} onPublish={() => setShowPublish(true)} />}
         {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" />}
+        {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={() => setTab('home')} />}
+        {showPublish && isDev && <MobileBulkPublish lang={lang} onClose={() => setShowPublish(false)} />}
         {children}
       </div>
       <MobileBottomNav activeTab={tab} onTabChange={setTab} isDeveloper={isDev} lang={lang} />
