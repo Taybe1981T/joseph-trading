@@ -1,24 +1,37 @@
-import React, { useState } from 'react';
-import { X, Play, Search, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { X, Play, Search, Loader2, CheckCircle2, XCircle, Layers } from 'lucide-react';
 import { AnalysisResult } from '../../types';
-import { MobileProgress, runMobileManual } from '../../services/mobileAnalysisEngine';
+import { MobileProgress, runMobileManual, getMobileSymbolGroups } from '../../services/mobileAnalysisEngine';
+import { Language } from '../../lib/i18n';
+import { mobileT } from '../../lib/mobileMode';
 
 interface MobileManualSheetProps {
-  lang: 'en' | 'ar';
+  lang: Language;
   onClose: () => void;
   onDone: (results: AnalysisResult[]) => void;
 }
 
-const POPULAR = ['BTCUSD', 'ETHUSD', 'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY'];
+const GROUP_LABELS: Record<string, string> = {
+  forex: 'Forex',
+  crypto: 'Crypto',
+  stocks: 'Stocks',
+  metals: 'Metals',
+  custom: 'Custom',
+};
 
 export function MobileManualSheet({ lang, onClose, onDone }: MobileManualSheetProps) {
   const isAr = lang === 'ar';
+  const groups = getMobileSymbolGroups();
+  const [catId, setCatId] = useState<string>(groups[0]?.id || 'forex');
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<MobileProgress | null>(null);
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [failed, setFailed] = useState<string[]>([]);
-  const list = POPULAR.filter((s) => s.toLowerCase().includes(q.toLowerCase()));
+
+  const currentGroup = useMemo(() => groups.find((g) => g.id === catId), [groups, catId]);
+  const list = useMemo(() => (currentGroup?.symbols || [])
+    .filter((s) => s.toLowerCase().includes(q.toLowerCase())), [currentGroup, q]);
 
   const uid = () => {
     try {
@@ -49,10 +62,20 @@ export function MobileManualSheet({ lang, onClose, onDone }: MobileManualSheetPr
           </div>
           <button className="mt5-icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <div style={{ position: 'relative', flex: 1 }}>
-            <Search size={15} style={{ position: 'absolute', left: 10, top: 11, color: '#888' }} />
-            <input value={q} onChange={(e) => setQ(e.target.value.toUpperCase())}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10, overflowX: 'auto' }}>
+          {groups.map((g) => {
+            const on = g.id === catId;
+            return (
+              <button key={g.id} onClick={() => { setCatId(g.id); setQ(''); }}
+                style={{ whiteSpace: 'nowrap', padding: '8px 12px', borderRadius: 10, border: '1px solid ' + (on ? '#F59E0B' : '#2a2a2a'), background: on ? 'rgba(245,158,11,0.14)' : '#0a0a0a', color: on ? '#F59E0B' : '#888', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
+                <Layers size={13} style={{ marginRight: 6 }} /> {mobileT(lang, g.id.toLowerCase(), GROUP_LABELS[g.id] || g.id)}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ position: 'relative', marginBottom: 12 }}>
+          <Search size={15} style={{ position: 'absolute', left: 10, top: 11, color: '#888' }} />
+          <input value={q} onChange={(e) => setQ(e.target.value.toUpperCase())}
               placeholder={isAr ? 'ابحث عن رمز...' : 'Search symbol...'}
               style={{ width: '100%', padding: '9px 10px 9px 32px', borderRadius: 10, border: '1px solid #2a2a2a', background: '#0a0a0a', color: '#e0e0e0', fontSize: 14, outline: 'none' }} />
           </div>

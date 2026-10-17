@@ -3,6 +3,7 @@ import { MobileBottomNav, MobileTab } from './MobileBottomNav';
 import { MobileHeader } from './MobileHeader';
 import { MobileHome } from './MobileHome';
 import { MobileQuotes, MobileQuote } from './MobileQuotes';
+import { useLiveQuotes } from './useLiveQuotes';
 import { MobilePositions, MobilePosition } from './MobilePositions';
 import { MobileNewTrade } from './MobileNewTrade';
 import { MobileSettings } from './MobileSettings';
@@ -13,6 +14,7 @@ import { isDeveloperEmail, DEVELOPER_EMAILS } from '../../lib/clientIds';
 import { useMobileMode, mobileT } from '../../lib/mobileMode';
 import { MobileAnalysis } from './MobileAnalysis';
 import { MobileManualSheet } from './MobileManualSheet';
+import { MobileStore } from './MobileStore';
 import { MobileClientMonitor } from './MobileClientMonitor';
 import { MobileBulkPublish } from './MobileBulkPublish';
 import { useMobileSignalAlert } from './useMobileSignalAlert';
@@ -31,18 +33,8 @@ const TITLES: Record<MobileTab, string> = {
   trade: 'New Order', settings: 'Settings', analysis: 'AI Analysis', clients: 'Clients',
 };
 
-const QUOTES: MobileQuote[] = [
-  { symbol: 'BTCUSD', category: 'Crypto', bid: 97240.5, ask: 97245.2, change: 1250.3, changePercent: 1.89 },
-  { symbol: 'ETHUSD', category: 'Crypto', bid: 3450.2, ask: 3451.4, change: -45.2, changePercent: -1.29 },
-  { symbol: 'XAUUSD', category: 'Metals', bid: 2650.15, ask: 2650.45, change: 8.75, changePercent: 0.33 },
-  { symbol: 'EURUSD', category: 'Forex', bid: 1.0852, ask: 1.0854, change: -0.0012, changePercent: -0.11 },
-  { symbol: 'GBPUSD', category: 'Forex', bid: 1.2654, ask: 1.2657, change: 0.0023, changePercent: 0.18 },
-  { symbol: 'USDJPY', category: 'Forex', bid: 149.85, ask: 149.88, change: -0.12, changePercent: -0.08 },
-  { symbol: 'US30', category: 'Indices', bid: 44210, ask: 44215, change: 120, changePercent: 0.27 },
-  { symbol: 'NAS100', category: 'Indices', bid: 19250, ask: 19255, change: -45, changePercent: -0.23 },
-];
-
 export function MobileLayout({ children }: { children?: React.ReactNode }) {
+  const quotes = useLiveQuotes();
   const [tab, setTab] = useState<MobileTab>('home');
   const [dialog, setDialog] = useState<MobileQuote | null>(null);
   const [alert, setAlert] = useState<string | null>(null);
@@ -64,6 +56,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [balance, setBalance] = useState(10000);
   const [equity, setEquity] = useState(10000);
   const [selSym, setSelSym] = useState<string | null>(null);
+  const [showPublish, setShowPublish] = useState(false);
+  const [showStore, setShowStore] = useState(false);
+  const [showStore, setShowStore] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [isDev, setIsDev] = useState(false);
   const [clientCount, setClientCount] = useState(0);
@@ -153,7 +148,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   };
 
   const pickSymbol = (s: string) => {
-    const q = QUOTES.find((x) => x.symbol === s);
+    const q = quotes.find((x) => x.symbol === s);
     if (q) setDialog(q); else { setSelSym(s); setTab('trade'); }
   };
 
@@ -203,10 +198,11 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         onNotificationsClick={() => setTab('home')} onProfileClick={() => setTab('settings')} />
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {tab === 'home' && <MobileHome fullSignals={fullSignals} balance={balance} equity={equity} openCount={positions.length} autoTradeEnabled={auto} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); setTab('trade'); }} onRemove={removeSignal} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
-        {tab === 'quotes' && <MobileQuotes quotes={QUOTES} onSelect={pickSymbol} />}
+        {tab === 'quotes' && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} onClose={(id) => { try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {} setPositions((p) => p.filter((x) => x.id !== id)); }} />}
-        {tab === 'trade' && <MobileNewTrade quotes={QUOTES} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
+        {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
         {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} onManualAnalyze={() => setShowManual(true)} onPublish={() => setShowPublish(true)} />}
+        {tab === 'store' && isDev && <MobileStore lang={lang} onClose={() => setTab('home')} />}
         {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={() => setTab('home')} />}
         {showPublish && isDev && <MobileBulkPublish lang={lang} onClose={() => setShowPublish(false)} />}

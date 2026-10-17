@@ -19,6 +19,24 @@ export function readMobileAuto(): AutoAnalysisSettings {
   return { isEnabled: false, interval: 15, timeframe: '1d', category: 'all', tradingStyle: TradingStyle.DAY_TRADING, volume: 0.8, showAllSignals: false } as AutoAnalysisSettings;
 }
 
+/** ── Category-aware symbol picker (same groups as AnalysisForm) ── */
+export function getMobileSymbolGroups(): { id: string; label: string; symbols: string[] }[] {
+  try {
+    const raw = localStorage.getItem('finalyze_custom_symbols');
+    const custom = raw ? JSON.parse(raw) : [];
+    const groups: { id: string; label: string; symbols: string[] }[] = [];
+    const map: Record<string, { label: string; symbols: string[] }> = {
+      forex: { label: 'EUR Pairs', symbols: ['EURUSD', 'EURGBP', 'EURJPY', 'EURAUD', 'EURNZD', 'EURCAD', 'EURCHF'] },
+      crypto: { label: 'Top Crypto', symbols: ['BTCUSD', 'ETHUSD', 'SOLUSD', 'BNBUSD', 'XRPUSD', 'ADAUSD', 'AVAXUSD', 'TONUSD'] },
+      stocks: { label: 'US Tech', symbols: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'NFLX'] },
+      metals: { label: 'Precious Metals', symbols: ['XAUUSD', 'XAGUSD', 'XPTUSD'] },
+    };
+    for (const [k, v] of Object.entries(map)) groups.push({ id: k, label: v.label, symbols: v.symbols });
+    if (custom.length) groups.push({ id: 'custom', label: 'Custom', symbols: custom });
+    return groups;
+  } catch { return []; }
+}
+
 export function readMobileStrategy(): StrategySettings {
   try {
     const raw = localStorage.getItem('strategy_settings');
