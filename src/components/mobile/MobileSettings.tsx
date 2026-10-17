@@ -113,7 +113,11 @@ export function MobileSettings({
         Clear Cache
       </button>
 
-      <button className="mt5-btn mt5-btn-danger mt5-btn-block">
+      <button className="mt5-btn mt5-btn-danger mt5-btn-block" onClick={() => {
+        if (confirm('Logout from Joseph.Trading?')) {
+          try { window.dispatchEvent(new Event('mobile-logout')); } catch {}
+        }
+      }}>
         <LogOut size={16} /> Logout
       </button>
 

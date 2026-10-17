@@ -1,8 +1,12 @@
-import {StrictMode, useState, useEffect} from 'react';
-import {createRoot} from 'react-dom/client';
+import { StrictMode, useState, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { auth } from './lib/firebase';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary';
 import { MobileLayout } from './components/mobile/MobileLayout';
+import { MobileLogin } from './components/mobile/MobileLogin';
+import { Language } from './lib/i18n';
 import { initMoneytizer } from './lib/moneytizer';
 import './index.css';
 import './styles/mobile_pt1.css';
@@ -13,6 +17,16 @@ initMoneytizer();
 
 function AppWrapper() {
   const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [lang, setLang] = useState<Language>(() => {
+    try {
+      const s = localStorage.getItem('language');
+      return (s === 'ar' || s === 'en') ? (s as Language) : 'en';
+    } catch { return 'en'; }
+  });
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
@@ -21,6 +35,45 @@ function AppWrapper() {
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+      try {
+        if (u?.email) {
+          localStorage.setItem('finalyze_user', JSON.stringify({ email: u.email.toLowerCase().trim(), uid: u.uid }));
+          localStorage.setItem('finalyze_auth_user', JSON.stringify({ email: u.email.toLowerCase().trim(), uid: u.uid }));
+        }
+      } catch {}
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const h = () => {
+      signOut(auth).catch(() => {});
+      try { localStorage.removeItem('finalyze_user'); localStorage.removeItem('finalyze_auth_user'); } catch {}
+    };
+    window.addEventListener('mobile-logout', h);
+    return () => window.removeEventListener('mobile-logout', h);
+  }, []);
+
+  const doLogin = async () => {
+    setLoginBusy(true);
+    setLoginError(null);
+    try {
+      await signInWithPopup(auth, new GoogleAuthProvider());
+    } catch (e: any) {
+      const code = String(e?.code || '');
+      if (code.includes('popup-closed') || code.includes('cancelled')) setLoginError(null);
+      else if (code.includes('popup-blocked')) setLoginError(lang === 'ar' ? 'النافذة محظورة — اسمح بالنوافذ المنبثقة' : 'Popup blocked — allow popups and retry');
+      else if (code.includes('network')) setLoginError(lang === 'ar' ? 'خطأ شبكة — تحقق من الاتصال' : 'Network error — check connection');
+      else setLoginError(lang === 'ar' ? 'فشل الدخول — حاول مجدداً' : 'Sign-in failed — try again');
+    } finally {
+      setLoginBusy(false);
+    }
+  };
 
   // على أجهزة سطح المكتب (≥769px): التطبيق الحالي بدون أي تغيير
   if (!isMobile) {
@@ -33,7 +86,25 @@ function AppWrapper() {
     );
   }
 
-  // على الجوال (≤768px): واجهة MT5 الخاصة بالهاتف فقط — لا تؤثر على سطح المكتب
+  // على الجوال (≤768px): يتطلب تسجيل الدخول أولاً مثل الموقع
+  if (authLoading) {
+    return (
+      <div className="mobile-only" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10B981', fontSize: 15, fontWeight: 700 }}>
+        Joseph.Trading...
+      </div>
+    );
+  }
+  if (!user) {
+    return (
+      <StrictMode>
+        <ErrorBoundary>
+          <MobileLogin lang={lang} onLangChange={(l) => { setLang(l); try { localStorage.setItem('language', l); } catch {} }} onLogin={doLogin} busy={loginBusy} error={loginError} />
+        </ErrorBoundary>
+      </StrictMode>
+    );
+  }
+
+  // مسجل الدخول: واجهة MT5 الخاصة بالهاتف فقط — لا تؤثر على سطح المكتب
   return (
     <StrictMode>
       <ErrorBoundary>
