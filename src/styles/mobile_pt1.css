@@ -4,6 +4,25 @@
   --mt5-sell: #ff3333; --mt5-accent: #10B981; --mt5-header: #141414;
   --mt5-nav-bg: #121212; --mt5-nav-active: #00ff88; --mt5-danger: #ff4444;
 }
+/* ── LIGHT THEME (phone day mode): App.tsx toggles body.light ── */
+body.light {
+  --mt5-bg: #eef1f6; --mt5-panel: #ffffff; --mt5-border: #d8dde6;
+  --mt5-text: #16181d; --mt5-text-muted: #5b6270; --mt5-accent: #0d9668;
+  --mt5-header: #ffffff; --mt5-nav-bg: #ffffff; --mt5-nav-active: #0d9668;
+}
+@media (max-width: 768px) {
+  body.light { background: var(--mt5-bg) !important; color: var(--mt5-text) !important; }
+  body.light #root { background: var(--mt5-bg) !important; }
+  body.light .mt5-header { background: var(--mt5-header); border-bottom-color: var(--mt5-border); box-shadow: 0 1px 6px rgba(0,0,0,.06); }
+  body.light .mt5-header-title, body.light .mt5-header [style*="Joseph"], body.light .mt5-section-title { color: var(--mt5-text); }
+  body.light .mt5-bottom-nav { background: var(--mt5-nav-bg); border-top-color: var(--mt5-border); box-shadow: 0 -1px 8px rgba(0,0,0,.06); }
+  body.light .mt5-nav-item { color: var(--mt5-text-muted); }
+  body.light .mt5-card, body.light .mt5-status-bar, body.light .mt5-signal-card, body.light .mt5-position-card { background: var(--mt5-panel); border-color: var(--mt5-border); }
+  body.light .mt5-card-title, body.light .mt5-section-title, body.light .mt5-signal-symbol, body.light .mt5-status-value, body.light .mt5-position-symbol { color: var(--mt5-text); }
+  body.light .mt5-card-subtitle, body.light .mt5-status-label { color: var(--mt5-text-muted); }
+  body.light .mt5-icon-btn { background: var(--mt5-panel); border-color: var(--mt5-border); color: var(--mt5-text); }
+  body.light .mt5-empty-title { color: var(--mt5-text); }
+}
 @media (max-width: 768px) {
   .desktop-only { display: none !important; }
   .mobile-only { display: block !important; }

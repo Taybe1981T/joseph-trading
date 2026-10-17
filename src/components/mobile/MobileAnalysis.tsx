@@ -1,36 +1,43 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, Hand, Play, Activity, Settings2, Loader2, Upload } from 'lucide-react';
-import { MobileProgress, readMobileAuto, startMobileRadar, stopMobileRadar, isMobileRadarOn } from '../../services/mobileAnalysisEngine';
+import { Zap, Hand, Play, Loader2, Upload, Settings } from 'lucide-react';
+import { MobileProgress, readMobileAuto, startMobileRadar, stopMobileRadar } from '../../services/mobileAnalysisEngine';
+import { MobileRadarSettings } from './MobileRadarSettings';
+import { Language } from '../../lib/i18n';
+import { mobileT } from '../../lib/mobileMode';
 
-interface MobileAnalysisProps {
-  lang: 'en' | 'ar';
+interface Props {
+  lang: Language;
   onManualAnalyze: () => void;
   onPublish?: () => void;
-  compact?: boolean;
 }
 
-export function MobileAnalysis({ lang, onManualAnalyze, onPublish, compact = false }: MobileAnalysisProps) {
+export function MobileAnalysis({ lang, onManualAnalyze, onPublish }: Props) {
   const isAr = lang === 'ar';
   const [autoOn, setAutoOn] = useState(() => readMobileAuto().isEnabled);
-  const [intervalMin, setIntervalMin] = useState(() => readMobileAuto().interval || 15);
   const [lastRun, setLastRun] = useState<string | null>(() => {
     const t = readMobileAuto().lastFinishedAt;
     return t ? new Date(t).toLocaleTimeString() : null;
   });
   const [prog, setProg] = useState<MobileProgress | null>(null);
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     const sync = () => {
       const r = readMobileAuto();
       setAutoOn(r.isEnabled);
-      setIntervalMin(r.interval || 15);
       setLastRun(r.lastFinishedAt ? new Date(r.lastFinishedAt).toLocaleTimeString() : null);
     };
     sync();
+    const onSettings = () => sync();
     window.addEventListener('storage', sync);
+    window.addEventListener('mobile-radar-settings', onSettings);
     const iv = setInterval(sync, 5000);
-    return () => { window.removeEventListener('storage', sync); clearInterval(iv); };
+    return () => {
+      window.removeEventListener('storage', sync);
+      window.removeEventListener('mobile-radar-settings', onSettings);
+      clearInterval(iv);
+    };
   }, []);
 
   const uidEmail = () => {
@@ -41,7 +48,7 @@ export function MobileAnalysis({ lang, onManualAnalyze, onPublish, compact = fal
     } catch { return { uid: 'anonymous', email: '' }; }
   };
 
-  const toggleAuto = async () => {
+  const toggleAuto = () => {
     const v = !autoOn;
     try {
       const raw = localStorage.getItem('auto_settings');
@@ -52,50 +59,19 @@ export function MobileAnalysis({ lang, onManualAnalyze, onPublish, compact = fal
     if (v) {
       setDoneMsg(null);
       const { uid, email } = uidEmail();
-      startMobileRadar(uid, email,
-        (p) => setProg(p),
-        (r) => {
-          setProg(null);
-          setLastRun(new Date().toLocaleTimeString());
-          setDoneMsg(isAr ? `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد` : `Done: ${r.scanned} scanned, ${r.fresh} fresh`);
-          setTimeout(() => setDoneMsg(null), 15000);
-        }
-      );
+      startMobileRadar(uid, email, (p) => setProg(p), (r) => {
+        setProg(null);
+        setLastRun(new Date().toLocaleTimeString());
+        setDoneMsg(mobileT(lang, `Done: ${r.scanned} scanned, ${r.fresh} fresh`, `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد`));
+        setTimeout(() => setDoneMsg(null), 15000);
+      });
     } else {
       stopMobileRadar();
       setProg(null);
     }
   };
-  const setIv = (m: number) => {
-    try {
-      const raw = localStorage.getItem('auto_settings');
-      const s = raw ? JSON.parse(raw) : {};
-      localStorage.setItem('auto_settings', JSON.stringify({ ...s, interval: m }));
-    } catch {}
-    setIntervalMin(m);
-  };
-  const IVS = [5, 15, 30, 60];
-  const pct = prog && prog.total > 0 ? Math.round((prog.index / prog.total) * 100) : 0;
 
-  if (compact) {
-    return (
-      <div className="mt5-card">
-        <div className="mt5-card-header">
-          <div className="mt5-card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Activity size={15} /> {isAr ? 'التحليل' : 'Analysis'}
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button className="mt5-btn mt5-btn-secondary" style={{ padding: '7px 12px', fontSize: 12 }} onClick={onManualAnalyze}>
-              <Hand size={13} /> {isAr ? 'يدوي' : 'Manual'}
-            </button>
-            <button className={`mt5-btn ${autoOn ? 'mt5-btn-primary' : 'mt5-btn-secondary'}`} style={{ padding: '7px 12px', fontSize: 12 }} onClick={toggleAuto}>
-              <Zap size={13} /> {autoOn ? 'ON' : 'OFF'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const pct = prog && prog.total > 0 ? Math.round((prog.index / prog.total) * 100) : 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -106,17 +82,20 @@ export function MobileAnalysis({ lang, onManualAnalyze, onPublish, compact = fal
               <Zap size={18} style={{ color: autoOn ? '#00ff88' : '#888' }} fill={autoOn ? 'currentColor' : 'none'} />
               {autoOn && <span style={{ position: 'absolute', top: -2, right: -2, width: 9, height: 9, borderRadius: '50%', background: '#fff' }} />}
             </span>
-            {isAr ? 'التحليل التلقائي' : 'Auto Analysis'}
+            {mobileT(lang, 'Auto Analysis', 'التحليل التلقائي')}
           </div>
-          <button className={`mt5-btn ${autoOn ? 'mt5-btn-primary' : 'mt5-btn-secondary'}`} style={{ padding: '8px 18px', fontSize: 13, minWidth: 76 }} onClick={toggleAuto}>
-            {autoOn ? 'ON' : 'OFF'}
-          </button>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="mt5-btn mt5-btn-secondary" style={{ padding: '7px 12px', fontSize: 12 }} onClick={() => setShowSettings(!showSettings)}>
+              <Settings size={14} />
+            </button>
+            <button className={`mt5-btn ${autoOn ? 'mt5-btn-primary' : 'mt5-btn-secondary'}`} style={{ padding: '8px 16px', fontSize: 13 }} onClick={toggleAuto}>
+              {autoOn ? 'ON' : 'OFF'}
+            </button>
+          </div>
         </div>
         <div className="mt5-card-subtitle">
-          {autoOn
-            ? (isAr ? 'الرادار نشط — يفحص كل ' + intervalMin + ' دقيقة' : 'Radar active — every ' + intervalMin + ' min')
-            : (isAr ? 'الرادار متوقف' : 'Radar off')}
-          {lastRun && autoOn && <span style={{ display: 'block', marginTop: 4 }}>{isAr ? 'آخر فحص: ' : 'Last: '}{lastRun}</span>}
+          {autoOn ? mobileT(lang, 'Radar active', 'الرادار نشط') : mobileT(lang, 'Radar off', 'الرادار متوقف')}
+          {lastRun && autoOn && <span style={{ display: 'block', marginTop: 4 }}>{mobileT(lang, 'Last: ', 'آخر فحص: ')}{lastRun}</span>}
           {doneMsg && <span style={{ display: 'block', marginTop: 4, color: '#00ff88' }}>{doneMsg}</span>}
         </div>
         {prog && (
@@ -129,37 +108,26 @@ export function MobileAnalysis({ lang, onManualAnalyze, onPublish, compact = fal
             <div style={{ height: 6, borderRadius: 3, background: '#2a2a2a', marginTop: 8, overflow: 'hidden' }}>
               <div style={{ height: '100%', width: pct + '%', background: '#00ff88', transition: 'width 0.3s' }} />
             </div>
-            <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>
-              {prog.index}/{prog.total}{prog.failed > 0 ? ' · ' + prog.failed + (isAr ? ' فشل' : ' failed') : ''}
-            </div>
+            <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>{prog.index}/{prog.total}{prog.failed > 0 ? ' · ' + prog.failed + (isAr ? ' فشل' : ' failed') : ''}</div>
           </div>
         )}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <Settings2 size={14} style={{ color: '#888' }} />
-          {IVS.map((m) => (
-            <button key={m} onClick={() => setIv(m)}
-              style={{ padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', border: '1px solid ' + (intervalMin === m ? '#10B981' : '#2a2a2a'), background: intervalMin === m ? 'rgba(16,185,129,0.15)' : '#1a1a1a', color: intervalMin === m ? '#00ff88' : '#888' }}>
-              {m}m
-            </button>
-          ))}
-        </div>
       </div>
+
+      {showSettings && <MobileRadarSettings lang={lang} />}
+
       <div className="mt5-card">
         <div className="mt5-card-header">
           <div className="mt5-card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Hand size={18} style={{ color: '#F59E0B' }} />
-            {isAr ? 'التحليل اليدوي' : 'Manual Analysis'}
+            <Hand size={18} style={{ color: '#F59E0B' }} /> {mobileT(lang, 'Manual Analysis', 'التحليل اليدوي')}
           </div>
         </div>
-        <div className="mt5-card-subtitle">
-          {isAr ? 'حلّل أي رمز فوراً بمحرك الذكاء الاصطناعي' : 'Analyze any symbol instantly with AI'}
-        </div>
+        <div className="mt5-card-subtitle">{mobileT(lang, 'Pick symbols and analyze instantly with AI', 'اختر الرموز وحلّلها فوراً بالذكاء الاصطناعي')}</div>
         <button className="mt5-btn mt5-btn-block" style={{ background: '#F59E0B', color: '#000' }} onClick={onManualAnalyze}>
-          <Play size={15} /> {isAr ? 'بدء تحليل يدوي' : 'Start Manual Analysis'}
+          <Play size={15} /> {mobileT(lang, 'Start Manual Analysis', 'بدء تحليل يدوي')}
         </button>
         {onPublish && (
           <button className="mt5-btn mt5-btn-block" style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: '#F59E0B', marginTop: 8 }} onClick={onPublish}>
-            <Upload size={15} /> {isAr ? 'نشر الإشارات للعملاء' : 'Publish Signals to Clients'}
+            <Upload size={15} /> {mobileT(lang, 'Publish Signals to Clients', 'نشر الإشارات للعملاء')}
           </button>
         )}
       </div>
