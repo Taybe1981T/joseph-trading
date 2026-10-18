@@ -30,7 +30,7 @@ interface MobileSignal {
 
 const TITLES: Record<MobileTab, string> = {
   home: 'Joseph.Trading', quotes: 'Market Watch', positions: 'Trade',
-  trade: 'New Order', settings: 'Settings', analysis: 'AI Analysis', clients: 'Clients',
+  trade: 'New Order', settings: 'Settings', analysis: 'AI Analysis', store: 'Store', clients: 'Clients',
 };
 
 export function MobileLayout({ children }: { children?: React.ReactNode }) {
@@ -58,11 +58,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [selSym, setSelSym] = useState<string | null>(null);
   const [showPublish, setShowPublish] = useState(false);
   const [showStore, setShowStore] = useState(false);
-  const [showStore, setShowStore] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [isDev, setIsDev] = useState(false);
   const [clientCount, setClientCount] = useState(0);
-  const [showPublish, setShowPublish] = useState(false);
 
   useEffect(() => {
     const check = () => {

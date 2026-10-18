@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, List, Briefcase, PlusCircle, Settings, Zap, Users } from 'lucide-react';
+import { Home, List, Briefcase, PlusCircle, Settings, Zap, Users, Package } from 'lucide-react';
 
 export type MobileTab = 'home' | 'quotes' | 'positions' | 'trade' | 'settings' | 'analysis' | 'store' | 'clients';
 
