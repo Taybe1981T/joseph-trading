@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Zap, Layers, Sparkles, Clock, Music, Volume2, Check } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
-import { playSuccess, playFail, playCompletion } from '../../lib/audioEngine';
+import { playStart, playSuccess, playFail, playCompletion, playCategoryChange } from '../../lib/audioEngine';
 
 interface AutoSettings {
   isEnabled: boolean; interval: number; timeframe: string; category: string;
@@ -11,9 +11,9 @@ interface AutoSettings {
 function readAuto(): AutoSettings {
   try {
     const raw = localStorage.getItem('auto_settings');
-    if (raw) return { volume: 0.8, timeframe: '1d', category: 'all', tradingStyle: 'day_trading', interval: 15, isEnabled: false, ...JSON.parse(raw) };
+    if (raw) return { volume: 0.8, timeframe: '1d', category: 'all', tradingStyle: 'day_trading', interval: 15, isEnabled: false, successSound: '1', failSound: '3', completionSound: '2', ...JSON.parse(raw) };
   } catch {}
-  return { isEnabled: false, interval: 15, timeframe: '1d', category: 'all', tradingStyle: 'day_trading', volume: 0.8 };
+  return { isEnabled: false, interval: 15, timeframe: '1d', category: 'all', tradingStyle: 'day_trading', volume: 0.8, successSound: '1', failSound: '3', completionSound: '2' };
 }
 function writeAuto(s: AutoSettings) { try { localStorage.setItem('auto_settings', JSON.stringify(s)); } catch {} }
 
@@ -81,7 +81,47 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
         </div>
       </Row>
 
-      <Row icon={<Layers size={16} style={{ color: '#F59E0B' }} />} label={mobileT(lang, 'Market', 'السوق')}>
+      
+      <Row icon={<Music size={16} style={{ color: '#F59E0B' }} />} label={mobileT(lang, 'Sound', 'الصوت')}>
+        <select value={s.volume} onChange={(e) => commit({ volume: parseFloat(e.target.value) })} style={{ width: '100%', background: '#0a0a0a', border: '1px solid #333', color: '#fff', borderRadius: 10, padding: '10px 12px', fontSize: 14, fontWeight: 700 }}>
+          <option value={0.1}>{mobileT(lang, 'Muted (0.1)', 'كتم (0.1)')}</option>
+          <option value={0.3}>{mobileT(lang, 'Quiet (0.3)', 'هادئ (0.3)')}</option>
+          <option value={0.5}>{mobileT(lang, 'Normal (0.5)', 'عادي (0.5)')}</option>
+          <option value={0.7}>{mobileT(lang, 'Loud (0.7)', 'عالي (0.7)')}</option>
+          <option value={1.0}>{mobileT(lang, 'Full (1.0)', 'اقصى (1.0)')}</option>
+        </select>
+      </Row>
+
+      <Row icon={<Volume2 size={16} style={{ color: '#F59E0B' }} />} label={mobileT(lang, 'Alerts', 'التنبيهات')}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div data-x="AlertsRowX" style={{ display: 'none' }} />
+          {[
+            { id: '1', en: 'Alert 1', ar: 'تنبيه 1' },
+            { id: '2', en: 'Alert 2', ar: 'تنبيه 2' },
+            { id: '3', en: 'Alert 3', ar: 'تنبيه 3' },
+          ].map((a) => (
+            <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '9px 12px' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#e0e0e0' }}>{isAr ? a.ar : a.en}</span>
+              <button onClick={() => { if (a.id === '1') playSuccess(s.volume || 0.5); else if (a.id === '2') playCompletion(s.volume || 0.5); else playFail(s.volume || 0.5); }} style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.4)', color: '#F59E0B', borderRadius: 8, padding: '6px 14px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
+                {mobileT(lang, 'Preview', 'تجربة')}
+              </button>
+            </div>
+          ))}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '9px 12px' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#e0e0e0' }}>{isAr ? 'تنبيه البداية' : 'Start Alert'}</span>
+            <button onClick={() => playStart(s.volume || 0.5)} style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.4)', color: '#F59E0B', borderRadius: 8, padding: '6px 14px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
+              {mobileT(lang, 'Preview', 'تجربة')}
+            </button>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '9px 12px' }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: '#e0e0e0' }}>{isAr ? 'تنبيه الفئة' : 'Category Alert'}</span>
+            <button onClick={() => playCategoryChange(s.volume || 0.6)} style={{ background: 'rgba(245,158,11,0.15)', border: '1px solid rgba(245,158,11,0.4)', color: '#F59E0B', borderRadius: 8, padding: '6px 14px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
+              {mobileT(lang, 'Preview', 'تجربة')}
+            </button>
+          </div>
+        </div>
+      </Row>
+<Row icon={<Layers size={16} style={{ color: '#F59E0B' }} />} label={mobileT(lang, 'Market', 'السوق')}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           {CATS.map((c) => {
             const on = selectedList.includes(c.id);

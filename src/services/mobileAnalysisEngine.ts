@@ -6,6 +6,7 @@ import { waitIfRateLimited } from './rateLimitTracker';
 import { collection, addDoc, serverTimestamp, doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Language } from '../lib/i18n';
+import { initAudio, playStart, playCompletion, playCategoryChange } from '../lib/audioEngine';
 
 export interface MobileProgress {
   current: string; total: number; index: number; failed: number; exchange?: string;
@@ -99,6 +100,8 @@ export function mergeMobileTopSignals(all: AnalysisResult[], showAll: boolean): 
 
 export async function runMobileManual(symbols: string[], uid: string, onProgress?: (p: MobileProgress) => void): Promise<{ results: AnalysisResult[]; failed: string[] }> {
   const auto = readMobileAuto();
+  try { initAudio(); } catch {}
+  try { playStart(Math.max(0, Math.min(1, Number((auto as any).volume ?? 0.5)))); } catch {}
   const strategy = readMobileStrategy();
   const lang = readMobileLang();
   const results: AnalysisResult[] = [];
@@ -186,6 +189,8 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
       } catch { failed++; await new Promise((r) => setTimeout(r, 3000)); }
     }
   }
+  try { initAudio(); } catch {}
+  try { playCompletion(Math.max(0, Math.min(1, Number((auto as any).volume ?? 0.5)))); } catch {}
   const fresh = mergeMobileTopSignals(scanned, !!auto.showAllSignals);
   const top = scanned.filter((s) => {
     const sig = String(s.signal || '');
