@@ -46,12 +46,6 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
     else list.push(id);
     commit({ category: list.length === 4 ? 'all' : list.join(',') } as any);
   };
-  const toggleCat = (id: string) => {
-    let list = [...selectedList];
-    if (list.includes(id)) { if (list.length > 1) list = list.filter((x) => x !== id); }
-    else list.push(id);
-    commit({ category: list.length === 4 ? 'all' : list.join(',') } as any);
-  };
   const Row = ({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) => (
     <div className="mt5-card">
       <div className="mt5-card-header">
