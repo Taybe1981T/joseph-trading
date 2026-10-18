@@ -1,6 +1,6 @@
 import { analyzeMarketBatch } from './geminiService';
 import { MarketType, TradingStyle, StrategySettings, AutoAnalysisSettings, AnalysisResult } from '../types';
-import { DEFAULT_STRATEGY_SETTINGS, SYMBOL_CATEGORIES } from '../constants';
+import { DEFAULT_STRATEGY_SETTINGS, SYMBOL_CATEGORIES, SYMBOL_GROUPS, ALL_SYMBOLS_DB, TIMEFRAMES, TRADING_STYLES } from '../constants';
 import { getOpenStockExchanges, exchangeLabel } from '../lib/marketHours';
 import { waitIfRateLimited } from './rateLimitTracker';
 import { collection, addDoc, serverTimestamp, doc, setDoc } from 'firebase/firestore';
@@ -20,22 +20,89 @@ export function readMobileAuto(): AutoAnalysisSettings {
   return { isEnabled: false, interval: 15, timeframe: '1d', category: 'all', tradingStyle: TradingStyle.DAY_TRADING, volume: 0.8, showAllSignals: false } as AutoAnalysisSettings;
 }
 
-/** ── Category-aware symbol picker (same groups as AnalysisForm) ── */
+/** ── Category-aware symbol picker (same groups as AnalysisForm) ──
+ * Ported from desktop AnalysisForm logic:
+ * - same visible groups (SYMBOL_GROUPS) + same full symbol universe (ALL_SYMBOLS_DB)
+ * - honors finalyze_hidden_symbols + finalyze_custom_symbols just like desktop
+ * - helper below to add/remove custom or hide/unhide symbols (mirrors desktop modals)
+ */
 export function getMobileSymbolGroups(): { id: string; label: string; symbols: string[] }[] {
   try {
-    const raw = localStorage.getItem('finalyze_custom_symbols');
-    const custom = raw ? JSON.parse(raw) : [];
-    const groups: { id: string; label: string; symbols: string[] }[] = [];
-    const map: Record<string, { label: string; symbols: string[] }> = {
-      forex: { label: 'EUR Pairs', symbols: ['EURUSD', 'EURGBP', 'EURJPY', 'EURAUD', 'EURNZD', 'EURCAD', 'EURCHF'] },
-      crypto: { label: 'Top Crypto', symbols: ['BTCUSD', 'ETHUSD', 'SOLUSD', 'BNBUSD', 'XRPUSD', 'ADAUSD', 'AVAXUSD', 'TONUSD'] },
-      stocks: { label: 'US Tech', symbols: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'NFLX'] },
-      metals: { label: 'Precious Metals', symbols: ['XAUUSD', 'XAGUSD', 'XPTUSD'] },
-    };
-    for (const [k, v] of Object.entries(map)) groups.push({ id: k, label: v.label, symbols: v.symbols });
-    if (custom.length) groups.push({ id: 'custom', label: 'Custom', symbols: custom });
-    return groups;
+    const hidden: string[] = JSON.parse(localStorage.getItem('finalyze_hidden_symbols') || '[]');
+    const custom: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');
+    const cats = [
+      { id: 'forex', label: 'Forex' },
+      { id: 'crypto', label: 'Crypto' },
+      { id: 'stocks', label: 'Stocks' },
+      { id: 'metals', label: 'Metals' },
+    ];
+    const out = cats.map((c) => ({
+      id: c.id,
+      label: c.label,
+      // Desktop parity: SYMBOL_GROUPS[cat]?.flatMap(g => g.symbols)
+      symbols: ((SYMBOL_GROUPS as any)[c.id] || []).flatMap((g: any) => g.symbols || []).filter((s: string) => !hidden.includes(s)),
+    })).filter((g) => g.symbols.length > 0);
+    // Desktop parity: custom symbols merged per category via ALL_SYMBOLS_DB
+    const allKnown = new Set<string>();
+    for (const v of Object.values(ALL_SYMBOLS_DB as any)) for (const s of (v as string[])) allKnown.add(s);
+    for (const g of out) for (const s of g.symbols) allKnown.add(s);
+    const extraCustom = custom.filter((s) => !hidden.includes(s) && !allKnown.has(s));
+    if (extraCustom.length) out.push({ id: 'custom', label: 'Custom', symbols: extraCustom });
+    return out;
   } catch { return []; }
+}
+
+/** All known symbols (visible + hidden + custom) — mirrors desktop ALL_SYMBOLS_DB (record). */
+export function getMobileAllSymbols(): string[] {
+  try {
+    const custom: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');
+    const base = Object.values(ALL_SYMBOLS_DB as any).flat() as string[];
+    const set = new Set<string>(base);
+    for (const s of custom) set.add(s);
+    return [...set];
+  } catch {
+    try { return Object.values(ALL_SYMBOLS_DB as any).flat() as string[]; }
+    catch { return []; }
+  }
+}
+
+/** Add a custom symbol (desktop: manual add via modal) — persists to finalyze_custom_symbols. */
+export function addMobileCustomSymbol(sym: string): string[] {
+  const s = (sym || '').trim().toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+  if (!s) return getMobileAllSymbols();
+  try {
+    const raw: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');
+    if (!raw.includes(s)) {
+      const next = [...raw, s];
+      localStorage.setItem('finalyze_custom_symbols', JSON.stringify(next));
+    }
+  } catch {}
+  return getMobileAllSymbols();
+}
+
+/** Hide a symbol (desktop: delete icon) — persists to finalyze_hidden_symbols. */
+export function hideMobileSymbol(sym: string): void {
+  try {
+    const raw: string[] = JSON.parse(localStorage.getItem('finalyze_hidden_symbols') || '[]');
+    if (!raw.includes(sym)) localStorage.setItem('finalyze_hidden_symbols', JSON.stringify([...raw, sym]));
+  } catch {}
+}
+
+/** Unhide a symbol previously hidden. */
+export function unhideMobileSymbol(sym: string): void {
+  try {
+    const raw: string[] = JSON.parse(localStorage.getItem('finalyze_hidden_symbols') || '[]');
+    localStorage.setItem('finalyze_hidden_symbols', JSON.stringify(raw.filter((s) => s !== sym)));
+  } catch {}
+}
+
+/** Remove a custom symbol entirely (desktop: delete in custom section). */
+export function removeMobileCustomSymbol(sym: string): void {
+  try {
+    const raw: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');
+    localStorage.setItem('finalyze_custom_symbols', JSON.stringify(raw.filter((s) => s !== sym)));
+  } catch {}
+  unhideMobileSymbol(sym);
 }
 
 export function readMobileStrategy(): StrategySettings {
@@ -98,32 +165,23 @@ export function mergeMobileTopSignals(all: AnalysisResult[], showAll: boolean): 
   return 0;
 }
 
-export async function runMobileManual(symbols: string[], uid: string, onProgress?: (p: MobileProgress) => void): Promise<{ results: AnalysisResult[]; failed: string[] }> {
+export async function runMobileManual(symbols: string[], uid: string, onProgress?: (p: MobileProgress) => void, opts?: { timeframe?: string; tradingStyle?: TradingStyle }): Promise<{ results: AnalysisResult[]; failed: string[] }> {
   const auto = readMobileAuto();
+  const timeframe = opts?.timeframe || auto.timeframe || '1d';
+  const tradingStyle = opts?.tradingStyle || auto.tradingStyle || TradingStyle.DAY_TRADING;
   try { initAudio(); } catch {}
   try { playStart(Math.max(0, Math.min(1, Number((auto as any).volume ?? 0.5)))); } catch {}
   const strategy = readMobileStrategy();
   const lang = readMobileLang();
-  const results: AnalysisResult[] = [];
-  const failed: string[] = [];
   const list = (symbols || []).map((s) => String(s || '').toUpperCase().trim()).filter(Boolean).slice(0, 10);
-  for (let i = 0; i < list.length; i++) {
-    const sym = list[i];
-    onProgress?.({ current: sym, total: list.length, index: i, failed: failed.length });
-    try {
-      await waitIfRateLimited();
-      const batch = await analyzeMarketBatch(
-        [{ symbol: sym, type: detectMobileType(sym), timeframe: auto.timeframe || '1d', tradingStyle: auto.tradingStyle || TradingStyle.DAY_TRADING }],
-        strategy, lang,
-        (cur, tot, idx) => onProgress?.({ current: cur, total: tot, index: idx, failed: failed.length })
-      );
-      for (const r of batch.results) { r.userId = uid || 'anonymous'; results.push(r); }
-      for (const e of batch.errors) failed.push(`${e.symbol}: ${e.error}`);
-      await persistMobileResults(batch.results, uid || 'anonymous');
-    } catch (e: any) {
-      failed.push(`${sym}: ${e?.message || 'error'}`);
-    }
-  }
+  const { results, errors } = await analyzeMarketBatch(
+    list.map((sym) => ({ symbol: sym, type: detectMobileType(sym), timeframe, tradingStyle })),
+    strategy, lang,
+    (cur, tot, idx, failed) => onProgress?.({ current: cur, total: tot, index: idx, failed: failed || 0 })
+  );
+  const failed: string[] = errors.map((e) => `${e.symbol}: ${e.error}`);
+  for (const r of results) r.userId = uid || 'anonymous';
+  if (results.length > 0) await persistMobileResults(results, uid || 'anonymous');
   if (results.length > 0) {
     try {
       const strong = results.filter((r) => r.signal === 'strong_buy' || r.signal === 'strong_sell');

@@ -1,104 +1,186 @@
 import React, { useState, useMemo } from 'react';
-import { X, Play, Search, Loader2, CheckCircle2, XCircle, Layers } from 'lucide-react';
-import { AnalysisResult } from '../../types';
-import { MobileProgress, runMobileManual, getMobileSymbolGroups } from '../../services/mobileAnalysisEngine';
+import { X, Play, Search, Loader2, CheckCircle2, XCircle, Plus, Trash2, Zap, Clock } from 'lucide-react';
+import { AnalysisResult, TradingStyle } from '../../types';
+import { MobileProgress, runMobileManual, getMobileSymbolGroups, addMobileCustomSymbol, hideMobileSymbol } from '../../services/mobileAnalysisEngine';
+import { TIMEFRAMES, TRADING_STYLES, FREE_SYMBOLS } from '../../constants';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
 
-interface MobileManualSheetProps {
-  lang: Language;
-  onClose: () => void;
-  onDone: (results: AnalysisResult[]) => void;
-}
+interface Props { lang: Language; onClose: () => void; onDone: (r: AnalysisResult[]) => void; }
 
-const GROUP_LABELS: Record<string, string> = {
-  forex: 'Forex',
-  crypto: 'Crypto',
-  stocks: 'Stocks',
-  metals: 'Metals',
-  custom: 'Custom',
+const STYLE_LBL: Record<string, { en: string; ar: string }> = {
+  scalping: { en: 'Scalping', ar: 'سكالبينج' },
+  day_trading: { en: 'Day Trading', ar: 'تداول يومي' },
+  swing_trading: { en: 'Swing', ar: 'سوينج' },
 };
 
-export function MobileManualSheet({ lang, onClose, onDone }: MobileManualSheetProps) {
+function hasPlan(): boolean {
+  try {
+    const o = JSON.parse(localStorage.getItem('finalyze_user') || '{}');
+    if (o?.isDeveloper) return true;
+    return !!localStorage.getItem('active_subscription');
+  } catch { return false; }
+}
+
+/** Manual analysis sheet — mobile port of desktop AnalysisForm:
+ * multi-category select + symbol checkbox grid + add/remove custom
+ * + timeframe + trading style + single batched analyze call. */
+export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const isAr = lang === 'ar';
-  const groups = getMobileSymbolGroups();
-  const [catId, setCatId] = useState<string>(groups[0]?.id || 'forex');
+  const paid = hasPlan();
+  const [groups, setGroups] = useState(getMobileSymbolGroups);
+  const [cats, setCats] = useState<string[]>(() => [getMobileSymbolGroups()[0]?.id || 'forex']);
+  const [sel, setSel] = useState<string[]>([]);
   const [q, setQ] = useState('');
+  const [tf, setTf] = useState('1d');
+  const [style, setStyle] = useState<TradingStyle>(TradingStyle.DAY_TRADING);
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<MobileProgress | null>(null);
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [failed, setFailed] = useState<string[]>([]);
+  const [custom, setCustom] = useState('');
+  const [showAll, setShowAll] = useState(false);
 
-  const currentGroup = useMemo(() => groups.find((g) => g.id === catId), [groups, catId]);
-  const list = useMemo(() => (currentGroup?.symbols || [])
-    .filter((s) => s.toLowerCase().includes(q.toLowerCase())), [currentGroup, q]);
+  const universe = useMemo(() => {
+    const out: string[] = [];
+    for (const g of groups) if (cats.includes(g.id)) out.push(...g.symbols);
+    return [...new Set(out)];
+  }, [groups, cats]);
+  const visible = useMemo(() => {
+    const f = universe.filter((s) => s.toLowerCase().includes(q.toLowerCase()));
+    return showAll ? f : f.slice(0, 60);
+  }, [universe, q, showAll]);
 
-  const uid = () => {
-    try {
-      const raw = localStorage.getItem('finalyze_user');
-      return String(JSON.parse(raw || '{}')?.uid || 'anonymous');
-    } catch { return 'anonymous'; }
+  const toggleCat = (id: string) => setCats((p) => p.includes(id) ? (p.length > 1 ? p.filter((x) => x !== id) : p) : [...p, id]);
+  const toggleSym = (s: string) => setSel((p) => p.includes(s) ? p.filter((x) => x !== s) : [...p, s]);
+  const FREE_ALL: string[] = useMemo(() => Object.values(FREE_SYMBOLS as Record<string, string[]>).flat(), []);
+  const lockedSym = (s: string) => !paid && !FREE_ALL.includes(s);
+
+  const doAdd = () => {
+    const s = custom.trim().toUpperCase();
+    if (!s) return;
+    addMobileCustomSymbol(s);
+    setGroups(getMobileSymbolGroups());
+    setSel((p) => p.includes(s) ? p : [...p, s]);
+    if (!cats.includes('custom')) setCats((p) => [...p, 'custom']);
+    setCustom('');
   };
-
-  const analyze = async (sym: string) => {
-    if (busy) return;
+  const doHide = (s: string) => {
+    hideMobileSymbol(s);
+    setGroups(getMobileSymbolGroups());
+    setSel((p) => p.filter((x) => x !== s));
+  };
+  const uid = () => {
+    try { return String(JSON.parse(localStorage.getItem('finalyze_user') || '{}')?.uid || 'anonymous'); }
+    catch { return 'anonymous'; }
+  };
+  const analyze = async () => {
+    const syms = sel.filter((s) => !lockedSym(s));
+    if (busy || syms.length === 0) return;
     setBusy(true); setProg(null); setResults([]); setFailed([]);
     try {
-      const r = await runMobileManual([sym], uid(), (p) => setProg(p));
-      setResults(r.results);
-      setFailed(r.failed);
+      const r = await runMobileManual(syms, uid(), (p) => setProg(p), { timeframe: tf, tradingStyle: style });
+      setResults(r.results); setFailed(r.failed);
       if (r.results.length > 0) onDone(r.results);
-    } finally {
-      setBusy(false); setProg(null);
-    }
+    } finally { setBusy(false); setProg(null); }
   };
   const pct = prog && prog.total > 0 ? Math.round((prog.index / prog.total) * 100) : 0;
+
   return (
     <div className="mt5-trade-overlay" onClick={onClose}>
-      <div className="mt5-trade-panel" onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div className="mt5-trade-title" style={{ margin: 0, textAlign: 'left' }}>
-            {isAr ? 'تحليل يدوي' : 'Manual Analysis'}
-          </div>
-          <button className="mt5-icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
+      <div className="mt5-trade-panel" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '92vh' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div className="mt5-trade-title" style={{ margin: 0, textAlign: 'left' }}>{mobileT(lang, 'Manual Analysis', 'التحليل اليدوي')}</div>
+          <button className="mt5-icon-btn" onClick={onClose}><X size={18} /></button>
         </div>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 10, overflowX: 'auto' }}>
+        <div style={{ fontSize: 12, fontWeight: 800, color: '#F59E0B', marginBottom: 6 }}>{mobileT(lang, 'Categories', 'الفئات')}</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
           {groups.map((g) => {
-            const on = g.id === catId;
+            const on = cats.includes(g.id);
             return (
-              <button key={g.id} onClick={() => { setCatId(g.id); setQ(''); }}
-                style={{ whiteSpace: 'nowrap', padding: '8px 12px', borderRadius: 10, border: '1px solid ' + (on ? '#F59E0B' : '#2a2a2a'), background: on ? 'rgba(245,158,11,0.14)' : '#0a0a0a', color: on ? '#F59E0B' : '#888', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
-                <Layers size={13} style={{ marginRight: 6 }} /> {mobileT(lang, g.id.toLowerCase(), GROUP_LABELS[g.id] || g.id)}
+              <button key={g.id} onClick={() => toggleCat(g.id)}
+                style={{ padding: '8px 14px', borderRadius: 999, border: '1px solid ' + (on ? '#F59E0B' : '#2a2a2a'), background: on ? 'rgba(245,158,11,0.15)' : '#0a0a0a', color: on ? '#F59E0B' : '#888', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+                {g.label}
               </button>
             );
           })}
         </div>
-        <div style={{ position: 'relative', marginBottom: 12 }}>
-          <Search size={15} style={{ position: 'absolute', left: 10, top: 11, color: '#888' }} />
-          <input value={q} onChange={(e) => setQ(e.target.value.toUpperCase())}
-              placeholder={isAr ? 'ابحث عن رمز...' : 'Search symbol...'}
-              style={{ width: '100%', padding: '9px 10px 9px 32px', borderRadius: 10, border: '1px solid #2a2a2a', background: '#0a0a0a', color: '#e0e0e0', fontSize: 14, outline: 'none' }} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, color: '#F59E0B', marginBottom: 6 }}>TF</div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {TIMEFRAMES.map((t) => {
+                const locked = !paid && t.id !== '1d';
+                const on = tf === t.id;
+                return (
+                  <button key={t.id} disabled={locked} onClick={() => setTf(t.id)}
+                    style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid ' + (on ? '#F59E0B' : '#2a2a2a'), background: on ? 'rgba(245,158,11,0.15)' : '#0a0a0a', color: locked ? '#444' : on ? '#F59E0B' : '#bbb', fontSize: 12, fontWeight: 800, opacity: locked ? 0.4 : 1 }}>
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
-          {list.map((s) => (
-            <button key={s} onClick={() => analyze(s)} disabled={busy}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 10, border: '1px solid #2a2a2a', background: '#0a0a0a', color: '#e0e0e0', fontSize: 15, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.5 : 1 }}>
-              <span>{s}</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#F59E0B', fontSize: 13 }}>
-                {busy ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={14} />} {isAr ? 'حلّل' : 'Analyze'}
-              </span>
-            </button>
-          ))}
-          {q && !list.includes(q) && (
-            <button onClick={() => analyze(q)} disabled={busy}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 10, border: '1px solid #F59E0B', background: 'rgba(245,158,11,0.1)', color: '#e0e0e0', fontSize: 15, fontWeight: 700, cursor: busy ? 'wait' : 'pointer' }}>
-              <span>{q}</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#F59E0B', fontSize: 13 }}>
-                {busy ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={14} />} {isAr ? 'حلّل' : 'Analyze'}
-              </span>
-            </button>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, color: '#F59E0B', marginBottom: 6 }}>Style</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {TRADING_STYLES.map((st) => {
+                const locked = !paid && st.id !== 'day_trading';
+                const on = style === st.id;
+                const lbl = STYLE_LBL[st.id] || { en: st.label, ar: st.label };
+                return (
+                  <button key={st.id} disabled={locked} onClick={() => setStyle(st.id as TradingStyle)}
+                    style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid ' + (on ? '#F59E0B' : '#2a2a2a'), background: on ? 'rgba(245,158,11,0.15)' : '#0a0a0a', color: locked ? '#444' : on ? '#F59E0B' : '#bbb', fontSize: 12, fontWeight: 800, opacity: locked ? 0.4 : 1, textAlign: 'left' }}>
+                    {isAr ? lbl.ar : lbl.en}{locked ? ' 🔒' : ''}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 6, marginTop: 8 }}>{universe.length} symbols · <b style={{ color: '#F59E0B' }}>{sel.length}</b> selected</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <div style={{ position: 'relative', flex: 1 }}>
+            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#666' }} />
+            <input value={q} onChange={(e) => setQ(e.target.value.toUpperCase())} placeholder={mobileT(lang, 'Search symbol...', 'ابحث عن رمز...')}
+              style={{ width: '100%', background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '10px 10px 10px 32px', color: '#fff', fontSize: 14, outline: 'none' }} />
+          </div>
+          <button onClick={() => setSel((p) => [...new Set([...p, ...visible])])} style={{ background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '10px 12px', color: '#F59E0B', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' }}>{isAr ? 'الكل' : 'All'}</button>
+          {sel.length > 0 && (
+            <button onClick={() => setSel([])} style={{ background: 'none', border: 'none', color: '#888', fontSize: 12 }}>{isAr ? 'مسح' : 'Clear'}</button>
           )}
         </div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          <input value={custom} onChange={(e) => setCustom(e.target.value.toUpperCase())} placeholder={mobileT(lang, 'New symbol...', 'رمز جديد...')}
+            onKeyDown={(e) => { if (e.key === 'Enter') doAdd(); }}
+            style={{ flex: 1, background: '#0a0a0a', border: '1px dashed #444', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none' }} />
+          <button onClick={doAdd} style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 10, padding: '9px 14px', color: '#F59E0B', fontSize: 13, fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <Plus size={14} /> {isAr ? 'أضف' : 'Add'}
+          </button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, maxHeight: 200, overflowY: 'auto', marginBottom: 12 }}>
+          {visible.map((s) => {
+            const on = sel.includes(s);
+            const locked = lockedSym(s);
+            return (
+              <div key={s} onClick={() => { if (!locked) toggleSym(s); }}
+                style={{ position: 'relative', padding: '10px 6px', borderRadius: 10, border: '1px solid ' + (on ? '#F59E0B' : '#2a2a2a'), background: locked ? '#151515' : on ? 'rgba(245,158,11,0.15)' : '#0a0a0a', color: locked ? '#555' : on ? '#F59E0B' : '#ddd', fontSize: 12, fontWeight: 800, textAlign: 'center', opacity: locked ? 0.55 : 1 }}>
+                {on && <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 10, color: '#F59E0B' }}>✓</span>}
+                {locked && <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 10 }}>🔒</span>}
+                {s}
+                {!locked && (
+                  <span onClick={(e) => { e.stopPropagation(); doHide(s); }} style={{ position: 'absolute', bottom: 2, right: 5, color: '#666' }}><Trash2 size={10} /></span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <button onClick={analyze} disabled={busy || sel.length === 0}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px', borderRadius: 12, border: 'none', background: sel.length === 0 ? '#2a2a2a' : '#F59E0B', color: sel.length === 0 ? '#666' : '#000', fontSize: 15, fontWeight: 900, opacity: busy ? 0.6 : 1 }}>
+          {busy ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={16} />}
+          {busy ? mobileT(lang, 'Analyzing...', 'جارٍ التحليل...') : mobileT(lang, 'Analyze (' + sel.length + ')', 'حلّل (' + sel.length + ')')}
+        </button>
         {prog && (
           <div style={{ marginTop: 12, background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '10px 12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700 }}>
@@ -121,11 +203,6 @@ export function MobileManualSheet({ lang, onClose, onDone }: MobileManualSheetPr
               </span>
             </div>
             <div style={{ fontSize: 12, color: '#aaa', marginTop: 6 }}>{(r.summary || '').slice(0, 200)}</div>
-            <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 12, color: '#888' }}>
-              {r.entryPrice ? <span>Entry {r.entryPrice}</span> : null}
-              {r.stopLoss ? <span style={{ color: '#ff5555' }}>SL {r.stopLoss}</span> : null}
-              {r.takeProfit ? <span style={{ color: '#00ff88' }}>TP {r.takeProfit}</span> : null}
-            </div>
           </div>
         ))}
         {failed.length > 0 && failed.map((f, i) => (
