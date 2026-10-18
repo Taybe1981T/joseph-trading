@@ -79,7 +79,6 @@ export function MobileManualSheet({ lang, onClose, onDone }: MobileManualSheetPr
               placeholder={isAr ? 'ابحث عن رمز...' : 'Search symbol...'}
               style={{ width: '100%', padding: '9px 10px 9px 32px', borderRadius: 10, border: '1px solid #2a2a2a', background: '#0a0a0a', color: '#e0e0e0', fontSize: 14, outline: 'none' }} />
           </div>
-        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
           {list.map((s) => (
             <button key={s} onClick={() => analyze(s)} disabled={busy}
