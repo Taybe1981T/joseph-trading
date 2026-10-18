@@ -132,7 +132,7 @@ export function MobileStore({ lang, onClose }: MobileStoreProps) {
 
       {PLANS.map((plan) => (
         <div key={plan.key} style={{ marginBottom: 16 }}>
-          <div className="mt5-card" style={plan.popular ? { borderColor: '#F59E0B', boxShadow: '0 0 20px rgba(245,158,11,0.3)' } : undefined }}>
+          <div className="mt5-card" style={plan.popular ? { borderColor: '#F59E0B', boxShadow: '0 0 20px rgba(245,158,11,0.3)' } : undefined }>
             {plan.popular && (
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
                 <span style={{ background: '#F59E0B', color: '#000', padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700, textTransform: 'uppercase' }}>
