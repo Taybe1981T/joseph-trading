@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Zap, Layers, Sparkles, Clock, Music, Volume2, Check } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
@@ -39,7 +39,13 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
     const next = { ...s, ...patch }; setS(next); writeAuto(next);
     try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
   };
-  const selectedList = s.category === 'all' ? ['forex', 'crypto', 'stocks', 'metals'] : s.category.split(',');
+  const selectedList = useMemo(() => s.category === 'all' ? ['forex', 'crypto', 'stocks', 'metals'] : s.category.split(',').filter(Boolean), [s.category]);
+  const toggleCat = (id: string) => {
+    let list = [...selectedList];
+    if (list.includes(id)) { if (list.length > 1) list = list.filter((x) => x !== id); }
+    else list.push(id);
+    commit({ category: list.length === 4 ? 'all' : list.join(',') } as any);
+  };
   const toggleCat = (id: string) => {
     let list = [...selectedList];
     if (list.includes(id)) { if (list.length > 1) list = list.filter((x) => x !== id); }
@@ -126,8 +132,8 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
           {CATS.map((c) => {
             const on = selectedList.includes(c.id);
             return (
-              <button key={c.id} onClick={() => toggleCat(c.id)}
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 12, border: '1px solid ' + (on ? '#10B981' : '#2a2a2a'), background: on ? 'rgba(16,185,129,0.12)' : '#0a0a0a', color: on ? '#00ff88' : '#888', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
+              <button key={c.id} onClick={(e) => { e.stopPropagation(); toggleCat(c.id); }}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 12, border: '1px solid ' + (on ? '#10B981' : '#2a2a2a'), background: on ? 'rgba(16,185,129,0.12)' : '#0a0a0a', color: on ? '#00ff88' : '#888', fontSize: 13, fontWeight: 800, cursor: 'pointer', minHeight: 52 }}>
                 <span>{isAr ? c.ar : c.en}</span>
                 <span style={{ width: 16, height: 16, borderRadius: 4, border: '1px solid ' + (on ? '#10B981' : '#444'), background: on ? '#10B981' : 'transparent', color: '#fff', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{on ? '✓' : ''}</span>
               </button>

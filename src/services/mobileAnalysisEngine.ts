@@ -216,13 +216,23 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
   const auto = readMobileAuto();
   const strategy = readMobileStrategy();
   const lang = readMobileLang();
-  const cats = (auto.category || 'all') === 'all' ? ['forex', 'crypto', 'stocks', 'metals'] : [auto.category];
+  // Unified symbol source: same groups as Manual Analysis (SYMBOL_GROUPS flatMap + custom symbols, minus hidden)
+  const groups = getMobileSymbolGroups();
+  const rawCat = auto.category || 'all';
+  const catSet = rawCat === 'all' ? groups.map((g) => g.id) : rawCat.split(',').filter(Boolean);
   const jobs: { cat: string; syms: string[]; exKey?: any }[] = [];
-  for (const cat of cats) {
+  for (const cat of catSet) {
+    const g = groups.find((x) => x.id === cat);
+    if (!g) continue;
     if (cat === 'stocks') {
-      for (const ex of getOpenStockExchanges()) jobs.push({ cat, syms: (ex.symbols as string[]).slice(0, 15), exKey: ex.key });
+      const exs = getOpenStockExchanges();
+      if (exs.length > 0) {
+        for (const ex of exs) jobs.push({ cat, syms: (ex.symbols as string[]).slice(0, 15), exKey: ex.key });
+      } else {
+        jobs.push({ cat, syms: g.symbols.slice(0, 15) });
+      }
     } else {
-      jobs.push({ cat, syms: ((SYMBOL_CATEGORIES as any)[cat] || []).slice(0, 15) });
+      jobs.push({ cat, syms: g.symbols.slice(0, 15) });
     }
   }
   let scanned: AnalysisResult[] = [];
