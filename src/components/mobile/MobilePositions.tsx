@@ -12,6 +12,12 @@ interface MobilePosition {
   openPrice: number;
   currentPrice: number;
   profit: number;
+  // Full original-account details (desktop parity: TradeNowPage table).
+  category?: string;
+  sl?: number | null;
+  tp?: number | null;
+  openedAt?: number;
+  source?: 'auto' | 'manual';
 }
 
 interface MobilePositionsProps {
@@ -71,23 +77,46 @@ export function MobilePositions({ positions, onClose, onSelect }: MobilePosition
       {positions.map((p) => {
         const cur = live[p.symbol] ?? p.currentPrice;
         const pnl = p.profit;
+        const dec = cur < 10 ? 4 : 2;
+        const d = p.openedAt ? new Date(p.openedAt) : null;
+        const dateStr = d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '—';
         return (
           <div key={p.id} className="mt5-position-card"
             onClick={() => onSelect?.(p.symbol)}
-            style={{ cursor: onSelect ? 'pointer' : undefined }}
+            style={{ cursor: onSelect ? 'pointer' : undefined, alignItems: 'flex-start' }}
             title={onSelect ? (p.symbol + ' — tap to open chart') : undefined}>
-            <div className="mt5-position-info">
-              <div className="mt5-position-symbol">{p.symbol}</div>
-              <div className={`mt5-position-type ${p.type}`}>
-                {p.type.toUpperCase()} {p.volume.toFixed(2)}
+            <div className="mt5-position-info" style={{ flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span className="mt5-position-symbol">{p.symbol}</span>
+                <span className={`mt5-position-type ${p.type}`} style={{ fontSize: 11 }}>
+                  {p.type.toUpperCase()} {p.volume.toFixed(2)}
+                </span>
+                {p.category && (
+                  <span style={{ fontSize: 10, color: '#666', fontWeight: 700, background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 6, padding: '1px 6px' }}>
+                    {p.category}
+                  </span>
+                )}
+                {p.source && (
+                  <span style={{ fontSize: 10, color: p.source === 'auto' ? '#00ff88' : '#60a5fa', fontWeight: 700 }}>
+                    {p.source === 'auto' ? (lang === 'ar' ? 'تلقائي' : 'AUTO') : (lang === 'ar' ? 'يدوي' : 'MANUAL')}
+                  </span>
+                )}
               </div>
-              <div className="mt5-card-subtitle">
-                {p.openPrice.toFixed(4)} → {cur.toFixed(4)}
+              {/* Dates + prices — exactly like the original account table */}
+              <div className="mt5-card-subtitle" style={{ marginTop: 4, fontSize: 11 }}>
+                📅 {mobileT(lang, 'Opened', 'الفتح')}: {dateStr}
+              </div>
+              <div className="mt5-card-subtitle" style={{ fontSize: 12, color: '#ccc' }}>
+                {mobileT(lang, 'Entry', 'الدخول')}: {p.openPrice.toFixed(dec)} → {mobileT(lang, 'Now', 'الحالي')}: {cur.toFixed(dec)}
+              </div>
+              <div style={{ display: 'flex', gap: 10, marginTop: 2, fontSize: 11, fontWeight: 700 }}>
+                <span style={{ color: '#ff8888' }}>SL: {p.sl != null ? Number(p.sl).toFixed(dec) : '—'}</span>
+                <span style={{ color: '#88ffaa' }}>TP: {p.tp != null ? Number(p.tp).toFixed(dec) : '—'}</span>
               </div>
             </div>
-            <div>
+            <div style={{ textAlign: 'right' }}>
               <div className={`mt5-position-profit ${pnl >= 0 ? 'positive' : 'negative'}`}>
-                {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}
+                {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}$
               </div>
               <div className="mt5-position-actions" style={{ marginTop: 8 }}>
                 <button

@@ -20,7 +20,26 @@ const SYMBOL_TV: Record<string, string> = (() => {
 })();
 
 // Explicit one-off mappings (kept for symbols that do not follow a suffix rule).
+// NOTE: index-CFD aliases used by the mobile watchlist/trade ticket. These must
+// resolve to a real TradingView symbol or the embed shows an empty search box.
 const EXPLICIT: Record<string, string> = {
+  // Index CFDs (broker names → real TV symbols)
+  'US30': 'DJ:DJI',
+  'US500': 'SP:SPX',
+  'US100': 'NASDAQ:NDX',
+  'NAS100': 'NASDAQ:NDX',
+  'USTEC': 'NASDAQ:NDX',
+  'US500CASH': 'SP:SPX',
+  'DJ30': 'DJ:DJI',
+  'SPX500': 'SP:SPX',
+  'UK100': 'FTSE:UKX',
+  'DE40': 'XETR:DAX',
+  'GER40': 'XETR:DAX',
+  'JP225': 'TVC:NI225',
+  'JPN225': 'TVC:NI225',
+  'HK50': 'HSI:HSI',
+  'AU200': 'ASX:XJO',
+  'VIX': 'TVC:VIX',
   // Japanese stocks (Yahoo .T → Tokyo Stock Exchange)
   '7203.T': 'TSE:7203', '6758.T': 'TSE:6758', '8306.T': 'TSE:8306',
   '9984.T': 'TSE:9984', '7974.T': 'TSE:7974', '7267.T': 'TSE:7267',
@@ -93,8 +112,9 @@ export function toTvSymbol(symbol: string): string {
   const db = SYMBOL_TV[upper];
   if (db) return db;
 
-  // Explicit one-off mapping wins.
-  if (EXPLICIT[sym]) return EXPLICIT[sym];
+  // Explicit one-off mapping wins (case-insensitive — mobile sends upper-case).
+  const exKey = Object.keys(EXPLICIT).find((k) => k.toUpperCase() === upper);
+  if (exKey) return EXPLICIT[exKey];
 
   // Japanese numeric tickers not in the explicit map → Tokyo.
   if (/^\d{4}\.T$/.test(sym)) return `TSE:${sym.replace('.T', '')}`;

@@ -173,6 +173,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
           type: (t.side === 'sell' ? 'sell' : 'buy') as 'buy' | 'sell',
           volume: Number(t.qty ?? t.volume ?? 0.01), openPrice: op, currentPrice: cur,
           profit: 0, // live P&L is computed in MobilePositions via the same quote path
+          // Full original-account details (desktop parity: TradeNowPage table)
+          category: t.category ? String(t.category) : undefined,
+          sl: t.sl != null ? Number(t.sl) : null,
+          tp: t.tp != null ? Number(t.tp) : null,
+          openedAt: t.openedAt != null ? Number(t.openedAt) : undefined,
+          source: t.source === 'manual' ? 'manual' : 'auto',
         };
       });
       // Hydrate live prices once for an instant accurate display.

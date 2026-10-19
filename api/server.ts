@@ -718,7 +718,7 @@ app.get("/api/quote", async (req, res) => {
       'XCUUSD': 'HG=F', 'XALUSD': 'ALI=F',
     };
     const indexCfds: Record<string, string> = {
-      'US500': '^GSPC', 'US30': '^DJI', 'US100': '^NDX',
+      'US500': '^GSPC', 'US30': '^DJI', 'US100': '^NDX', 'NAS100': '^NDX', 'USTEC': '^NDX',
       'UK100': '^FTSE', 'DE40': '^GDAXI', 'JP225': '^N225',
       'HK50': '^HSI', 'AU200': '^AXJO',
     };
@@ -820,7 +820,7 @@ app.get("/api/market-data", async (req, res) => {
 
     // Index CFDs → Yahoo Finance tickers
     const indexCfds: Record<string, string> = {
-      'US500': '^GSPC', 'US30': '^DJI', 'US100': '^NDX',
+      'US500': '^GSPC', 'US30': '^DJI', 'US100': '^NDX', 'NAS100': '^NDX', 'USTEC': '^NDX',
       'UK100': '^FTSE', 'DE40': '^GDAXI', 'JP225': '^N225',
       'HK50': '^HSI', 'AU200': '^AXJO',
     };

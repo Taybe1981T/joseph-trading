@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Zap, BarChart2 } from 'lucide-react';
+import { Zap, BarChart2, RefreshCw, RotateCcw } from 'lucide-react';
 import type { MobileQuote } from './MobileQuotes';
 import { AnalysisResult } from '../../types';
 import { Language } from '../../lib/i18n';
@@ -10,7 +10,11 @@ import {
   setMobileAutoTrade,
   openMobileManualTrade,
   detectMobileTradeCategory,
+  mobileLivePrice,
+  mobileTradeUser,
 } from '../../services/mobileTradeBridge';
+import { getTradeStore, calcPnl, START_BALANCE } from '../../services/paperTradingService';
+import { notionalInUSD } from '../../lib/positionMath';
 import TradingViewEmbed from '../TradingViewEmbed';
 
 interface MobileNewTradeProps {
@@ -64,6 +68,70 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   const current = quotes.find((q) => q.symbol === symbol);
   const sig = useMemo(() => (signalFor ? signalFor(symbol) : undefined), [signalFor, symbol]);
 
+  // ── Account header: balance + equity + margin + margin level + floating P&L
+  //    (desktop parity: TradeNowPage header — same live math, refresh + reset)
+  const [acct, setAcct] = useState({ balance, equity: balance, margin: 0, free: balance, level: 0, floating: 0, leverage: 100 });
+  const [acctBusy, setAcctBusy] = useState(false);
+  const refreshAccount = async () => {
+    setAcctBusy(true);
+    try {
+      const store = getTradeStore(mobileTradeUser() as any);
+      const [a, all] = await Promise.all([store.getAccount(), store.listTrades().catch(() => [] as any[])]);
+      const open = (all as any[]).filter((t) => t.status === 'open');
+      // Live floating P&L across ALL open positions (same quote path as desktop).
+      let floating = 0;
+      for (const t of open) {
+        try {
+          const p = await mobileLivePrice(t.symbol);
+          const cur = p ?? t.entryPrice;
+          floating += calcPnl(t as any, cur);
+        } catch {}
+      }
+      // Used margin = Σ notional / leverage (same formula as TradeNowPage).
+      const lev = (a as any).leverage || 100;
+      let margin = 0;
+      for (const t of open) {
+        try {
+          const p = await mobileLivePrice(t.symbol);
+          const px = p ?? t.entryPrice;
+          margin += notionalInUSD(t.category || detectMobileTradeCategory(t.symbol), t.symbol, px, t.qty) / lev;
+        } catch {}
+      }
+      const bal = (a as any).balance ?? balance;
+      const equity = bal + floating;
+      const free = equity - margin;
+      const level = margin > 0 ? (equity / margin) * 100 : 0;
+      setAcct({ balance: bal, equity, margin, free, level, floating, leverage: lev });
+    } catch {} finally { setAcctBusy(false); }
+  };
+  useEffect(() => { refreshAccount(); }, [balance]);
+  useEffect(() => {
+    refreshAccount();
+    const iv = setInterval(refreshAccount, 15000);
+    const onCh = () => refreshAccount();
+    try {
+      window.addEventListener('mobile-trades-changed', onCh);
+      window.addEventListener('mobile-close-trade', onCh as any);
+    } catch {}
+    return () => {
+      clearInterval(iv);
+      try {
+        window.removeEventListener('mobile-trades-changed', onCh);
+        window.removeEventListener('mobile-close-trade', onCh as any);
+      } catch {}
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const resetBalance = async () => {
+    if (!confirm(isAr ? 'إعادة تعيين الرصيد إلى $10,000 وحذف كل الصفقات؟' : 'Reset balance to $10,000 and clear all trades?')) return;
+    try {
+      const store = getTradeStore(mobileTradeUser() as any);
+      await store.resetAccount(START_BALANCE);
+      try { window.dispatchEvent(new CustomEvent('mobile-trades-changed', { detail: { action: 'reset' } })); } catch {}
+      await refreshAccount();
+    } catch {}
+  };
+
   const toggleAuto = () => {
     const v = !autoTrade;
     setAutoTrade(v);
@@ -85,11 +153,60 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   };
   return (
     <div className="mt5-page-container">
+      {/* ── Account summary header (desktop parity: balance/equity/margin/level/floating) ── */}
+      <div className="mt5-card" style={{ background: 'linear-gradient(135deg,#0d1f16,#0a0a0a)', borderColor: 'rgba(0,255,136,0.25)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <span style={{ fontSize: 14, fontWeight: 900, color: '#fff' }}>
+            {isAr ? 'ملخص الحساب' : 'Account Summary'}
+            <span style={{ marginRight: 6, fontSize: 11, color: '#666', fontWeight: 600 }}> 1:{acct.leverage}</span>
+          </span>
+          <span style={{ display: 'flex', gap: 6 }}>
+            <button type="button" onClick={refreshAccount} disabled={acctBusy}
+              title={isAr ? 'تحديث الرصيد' : 'Refresh balance'}
+              style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #2a2a2a', background: '#0a0a0a', color: '#00ff88', fontSize: 12, fontWeight: 800, cursor: acctBusy ? 'wait' : 'pointer', opacity: acctBusy ? 0.5 : 1 }}>
+              <RefreshCw size={13} style={{ verticalAlign: -2 }} /> {acctBusy ? '...' : (isAr ? 'تحديث' : 'Refresh')}
+            </button>
+            <button type="button" onClick={resetBalance}
+              title={isAr ? 'إعادة تعيين الرصيد' : 'Reset balance'}
+              style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(255,150,50,0.35)', background: 'rgba(255,150,50,0.08)', color: '#ffaa44', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
+              <RotateCcw size={13} style={{ verticalAlign: -2 }} /> {isAr ? 'تجديد' : 'Reset'}
+            </button>
+          </span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+          <div style={{ background: '#0a0a0a', border: '1px solid #1f1f1f', borderRadius: 10, padding: '8px 10px' }}>
+            <div style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>{isAr ? 'الرصيد' : 'Balance'}</div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: '#00ff88' }}>${acct.balance.toFixed(2)}</div>
+          </div>
+          <div style={{ background: '#0a0a0a', border: '1px solid #1f1f1f', borderRadius: 10, padding: '8px 10px' }}>
+            <div style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>{isAr ? 'الحقوق (Equity)' : 'Equity'}</div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: '#fff' }}>${acct.equity.toFixed(2)}</div>
+          </div>
+          <div style={{ background: '#0a0a0a', border: `1px solid ${acct.floating >= 0 ? 'rgba(0,255,136,0.3)' : 'rgba(255,51,51,0.3)'}`, borderRadius: 10, padding: '8px 10px' }}>
+            <div style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>{isAr ? 'العائم (صفقات)' : 'Floating'}</div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: acct.floating >= 0 ? '#00ff88' : '#ff5555' }}>
+              {acct.floating >= 0 ? '+' : ''}{acct.floating.toFixed(2)}$
+            </div>
+          </div>
+          <div style={{ background: '#0a0a0a', border: '1px solid #1f1f1f', borderRadius: 10, padding: '8px 10px' }}>
+            <div style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>{isAr ? 'الهامش المستخدم' : 'Used Margin'}</div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: '#ffaa44' }}>${acct.margin.toFixed(2)}</div>
+          </div>
+          <div style={{ background: '#0a0a0a', border: '1px solid #1f1f1f', borderRadius: 10, padding: '8px 10px' }}>
+            <div style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>{isAr ? 'الهامش الحر' : 'Free Margin'}</div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: '#60a5fa' }}>${acct.free.toFixed(2)}</div>
+          </div>
+          <div style={{ background: '#0a0a0a', border: '1px solid #1f1f1f', borderRadius: 10, padding: '8px 10px' }}>
+            <div style={{ fontSize: 10, color: '#888', fontWeight: 700 }}>{isAr ? 'مستوى الهامش' : 'Margin Level'}</div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: acct.margin > 0 ? (acct.level < 100 ? '#ff5555' : '#00ff88') : '#888' }}>
+              {acct.margin > 0 ? `${acct.level.toFixed(0)}%` : '—'}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="mt5-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>{isAr ? 'صفقة جديدة' : 'New Trade'}</span>
-        <span style={{ fontSize: 13, color: '#888', fontWeight: 700 }}>
-          {isAr ? 'الرصيد' : 'Balance'}: <span style={{ color: '#00ff88', fontSize: 15 }}>${balance.toFixed(2)}</span>
-        </span>
       </div>
 
       {/* Auto trading toggle — desktop parity (default ON, key paper_trading_auto_trade) */}

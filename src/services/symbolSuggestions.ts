@@ -77,11 +77,12 @@ export const SYMBOL_DB: SuggestedSymbol[] = [
   S('NATGAS', 'NYMEX:NG1!', 'Natural Gas Futures', 'metals'),
 
   // ---------- Indices ----------
-  S('US500', 'FOREXCOM:SPXUSD', 'S&P 500 Index', 'indices'),
-  S('US30', 'FOREXCOM:NSXUSD', 'Dow Jones Industrial Average', 'indices'),
-  S('US100', 'FOREXCOM:NDXUSD', 'Nasdaq 100 Index', 'indices'),
+  S('US500', 'SP:SPX', 'S&P 500 Index', 'indices'),
+  S('US30', 'DJ:DJI', 'Dow Jones Industrial Average', 'indices'),
+  S('US100', 'NASDAQ:NDX', 'Nasdaq 100 Index', 'indices'),
+  S('NAS100', 'NASDAQ:NDX', 'Nasdaq 100 Index', 'indices'),
   S('DE40', 'XETR:DAX', 'DAX Index (Germany)', 'indices'),
-  S('UK100', 'FOREXCOM:UKXGBP', 'FTSE 100 Index (UK)', 'indices'),
+  S('UK100', 'FTSE:UKX', 'FTSE 100 Index (UK)', 'indices'),
   S('JP225', 'TVC:NI225', 'Nikkei 225 (Japan)', 'indices'),
   S('VIX', 'TVC:VIX', 'Volatility Index', 'indices'),
 
