@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { X, Play, Search, Loader2, CheckCircle2, XCircle, Plus, Trash2, Zap, Clock } from 'lucide-react';
 import { AnalysisResult, TradingStyle } from '../../types';
-import { MobileProgress, runMobileManual, getMobileSymbolGroups, addMobileCustomSymbol } from '../../services/mobileAnalysisEngine';
+import { MobileProgress, runMobileManual, getMobileSymbolGroups, getMobileAllSymbols, addMobileCustomSymbol, unhideMobileSymbol } from '../../services/mobileAnalysisEngine';
 import { TIMEFRAMES, TRADING_STYLES, FREE_SYMBOLS, ALL_SYMBOLS_DB } from '../../constants';
 import { Language } from '../../lib/i18n';
 import { mobileT, detectMobileMode, hasClientPlan } from '../../lib/mobileMode';
@@ -35,7 +35,6 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [failed, setFailed] = useState<string[]>([]);
   const [customInput, setCustomInput] = useState('');
-  const [manualInput, setManualInput] = useState('');
   const [hiddenTick, setHiddenTick] = useState(0);
 
   const allCategorySymbols = useMemo(() => {
@@ -71,6 +70,35 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const visibleSymbols = useMemo(() => {
     return allCategorySymbols.filter(s => !hidden.includes(s) && s.toLowerCase().includes(q.toLowerCase()));
   }, [allCategorySymbols, hidden, q]);
+
+  // Expanded suggestions: ALL symbols across the 4 category markets + custom + hidden (desktop parity)
+  const suggestions = useMemo(() => {
+    const term = customInput.trim().toUpperCase();
+    if (!term) return [] as { sym: string; hidden: boolean; known: boolean }[];
+    const hiddenSet = new Set(hidden);
+    const visibleSet = new Set(allCategorySymbols);
+    const out = getMobileAllSymbols()
+      .filter((s) => s.includes(term) && !visibleSet.has(s))
+      .slice(0, 24)
+      .map((s) => ({ sym: s, hidden: hiddenSet.has(s), known: true }));
+    // brand-new ticker (not in any market DB) — allow adding it anyway
+    if (!out.some((o) => o.sym === term) && !getMobileAllSymbols().includes(term) && /^[A-Z0-9.\-=]+$/.test(term)) {
+      out.unshift({ sym: term, hidden: false, known: false });
+    }
+    return out;
+  }, [customInput, hidden, allCategorySymbols]);
+
+  // Add a symbol: restore it if hidden, persist as custom, select it for analysis
+  const addSymbol = (raw: string) => {
+    const s = (raw || '').trim().toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+    if (!s) return;
+    try { unhideMobileSymbol(s); } catch {}
+    try { addMobileCustomSymbol(s); } catch {}
+    setGroups(getMobileSymbolGroups());
+    setSelectedSymbols((prev) => (prev.includes(s) ? prev : [...prev, s]));
+    setCustomInput('');
+    setHiddenTick((t) => t + 1);
+  };
 
   const toggleSymbol = (sym: string) => {
     setSelectedSymbols(prev => prev.includes(sym) ? prev.filter(s => s !== sym) : [...prev, sym]);
@@ -110,8 +138,7 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   };
 
   const analyze = async () => {
-    const manualSyms = manualInput.split(/[,\s]+/).map(s => s.trim().toUpperCase()).filter(s => s.length > 1);
-    const allSyms = [...new Set([...selectedSymbols, ...manualSyms])];
+    const allSyms = [...new Set(selectedSymbols)];
     if (busy || allSyms.length === 0) return;
     setBusy(true); setProg(null); setResults([]); setFailed([]);
     try {
@@ -189,18 +216,33 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
               style={{ background: 'none', border: 'none', color: '#888', fontSize: 12, cursor: paid ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap', opacity: paid ? 1 : 0.5 }}>{mobileT(lang, 'Clear', 'مسح')}</button>
           )}
         </div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-          <input value={customInput} onChange={(e) => setCustomInput(e.target.value.toUpperCase())} placeholder={mobileT(lang, 'New symbol (e.g. TSLA)...', 'رمز جديد (مثال: TSLA)...')}
-            onKeyDown={(e) => { if (e.key === 'Enter') { const s = customInput.trim().toUpperCase(); if (s) { addMobileCustomSymbol(s); setGroups(getMobileSymbolGroups()); setCustomInput(''); } } }}
-            style={{ flex: 1, background: '#0a0a0a', border: '1px dashed #444', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none' }} />
-          <button onClick={() => { const s = customInput.trim().toUpperCase(); if (s) { addMobileCustomSymbol(s); setGroups(getMobileSymbolGroups()); setCustomInput(''); } }}
-            style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 10, padding: '9px 14px', color: '#F59E0B', fontSize: 13, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Plus size={14} /> {isAr ? 'أضف' : 'Add'}
-          </button>
-        </div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-          <input value={manualInput} onChange={(e) => setManualInput(e.target.value.toUpperCase())} placeholder={mobileT(lang, 'Or type symbols separated by comma...', 'أو اكتب رموز مفصولة بفاصلة...')}
-            style={{ flex: 1, background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none' }} />
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <Plus size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#F59E0B' }} />
+              <input value={customInput} onChange={(e) => setCustomInput(e.target.value.toUpperCase())}
+                placeholder={mobileT(lang, 'Add any symbol from all markets (search suggestions)...', 'أضف أي رمز من كل الأسواق (ابحث واختر)...')}
+                onKeyDown={(e) => { if (e.key === 'Enter') addSymbol(customInput); }}
+                style={{ width: '100%', background: '#0a0a0a', border: '1px dashed rgba(245,158,11,0.4)', borderRadius: 10, padding: '9px 12px 9px 30px', color: '#fff', fontSize: 13, outline: 'none' }} />
+            </div>
+            <button onClick={() => addSymbol(customInput)}
+              style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 10, padding: '9px 14px', color: '#F59E0B', fontSize: 13, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Plus size={14} /> {isAr ? 'أضف' : 'Add'}
+            </button>
+          </div>
+          {suggestions.length > 0 && (
+            <div style={{ marginTop: 6, display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, maxHeight: 170, overflowY: 'auto', padding: 6, background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10 }}>
+              {suggestions.map((sg) => (
+                <div key={sg.sym} onClick={() => addSymbol(sg.sym)}
+                  style={{ padding: '8px 6px', borderRadius: 8, border: '1px solid #2a2a2a', background: '#111', color: sg.hidden ? '#60A5FA' : '#ddd', fontSize: 12, fontWeight: 800, cursor: 'pointer', textAlign: 'center' }}>
+                  {sg.sym}
+                  <div style={{ fontSize: 9, color: '#666', fontWeight: 600 }}>
+                    {sg.hidden ? (isAr ? '↩ مسترد' : 'restore') : (!sg.known ? (isAr ? '✚ جديد' : 'new') : (isAr ? 'من الأسواق' : 'from markets'))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span>{visibleSymbols.length} {mobileT(lang, 'symbols', 'رموز')} · {mobileT(lang, 'selected', 'المحدد')} <b style={{ color: '#F59E0B' }}>{selectedSymbols.length}</b></span>
@@ -228,8 +270,8 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
             );
           })}
         </div>
-        <button onClick={analyze} disabled={busy || (selectedSymbols.length === 0 && manualInput.trim() === '')}
-          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px', borderRadius: 12, border: 'none', background: (selectedSymbols.length === 0 && manualInput.trim() === '') ? '#2a2a2a' : '#F59E0B', color: (selectedSymbols.length === 0 && manualInput.trim() === '') ? '#666' : '#000', fontSize: 15, fontWeight: 900, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.6 : 1 }}>
+        <button onClick={analyze} disabled={busy || selectedSymbols.length === 0}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px', borderRadius: 12, border: 'none', background: (selectedSymbols.length === 0) ? '#2a2a2a' : '#F59E0B', color: (selectedSymbols.length === 0) ? '#666' : '#000', fontSize: 15, fontWeight: 900, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.6 : 1 }}>
           {busy ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={16} />}
           {busy ? mobileT(lang, 'Analyzing...', 'جارٍ التحليل...') : mobileT(lang, 'Analyze', 'حلّل')}
         </button>

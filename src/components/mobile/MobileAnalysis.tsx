@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, Loader2, Upload, Settings } from 'lucide-react';
+import { Zap, Loader2, Settings } from 'lucide-react';
 import { MobileProgress, readMobileAuto, startMobileRadar, stopMobileRadar } from '../../services/mobileAnalysisEngine';
 import { MobileRadarSettings } from './MobileRadarSettings';
 import { Language } from '../../lib/i18n';
@@ -7,10 +7,9 @@ import { mobileT } from '../../lib/mobileMode';
 
 interface Props {
   lang: Language;
-  onPublish?: () => void;
 }
 
-export function MobileAnalysis({ lang, onPublish }: Props) {
+export function MobileAnalysis({ lang }: Props) {
   const isAr = lang === 'ar';
   const [autoOn, setAutoOn] = useState(() => readMobileAuto().isEnabled);
   const [lastRun, setLastRun] = useState<string | null>(() => {
@@ -113,14 +112,6 @@ export function MobileAnalysis({ lang, onPublish }: Props) {
       </div>
 
       {showSettings && <MobileRadarSettings lang={lang} />}
-
-      {onPublish && (
-        <div className="mt5-card">
-          <button className="mt5-btn mt5-btn-block" style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: '#F59E0B' }} onClick={onPublish}>
-            <Upload size={15} /> {mobileT(lang, 'Publish Signals to Clients', 'نشر الإشارات للعملاء')}
-          </button>
-        </div>
-      )}
     </div>
   );
 }
