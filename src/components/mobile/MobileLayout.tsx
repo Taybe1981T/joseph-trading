@@ -1,4 +1,5 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { MobileBottomNav, MobileTab } from './MobileBottomNav';
 import { MobileHeader } from './MobileHeader';
 import { MobileHome } from './MobileHome';
@@ -36,6 +37,22 @@ const TITLES: Record<MobileTab, string> = {
 export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const quotes = useLiveQuotes();
   const [tab, setTab] = useState<MobileTab>('home');
+  // Back-navigation history: every section jump pushes the previous tab, Back pops it (desktop parity: always a way back)
+  const histRef = useRef<MobileTab[]>([]);
+  const goTab = useCallback((t: MobileTab) => {
+    setTab((cur) => {
+      if (cur !== t && histRef.current[histRef.current.length - 1] !== cur) histRef.current.push(cur);
+      return t;
+    });
+  }, []);
+  const goBack = useCallback(() => {
+    const prev = histRef.current.pop();
+    setTab(prev || 'home');
+  }, []);
+  const goHome = useCallback(() => {
+    histRef.current = [];
+    setTab('home');
+  }, []);
   const [dialog, setDialog] = useState<MobileQuote | null>(null);
   const [alert, setAlert] = useState<string | null>(null);
   const [auto, setAuto] = useState(() => { try { return localStorage.getItem('paper_trading_auto_trade') !== '0'; } catch { return true; } });
@@ -162,12 +179,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     ping(type === 'buy' ? 880 : 440);
     setAlert('Order sent: ' + type.toUpperCase() + ' ' + vol.toFixed(2) + ' ' + sym);
     setTimeout(() => setAlert(null), 4000);
-    if (tab === 'trade') setTab('positions');
+    if (tab === 'trade') goTab('positions');
   };
 
   const pickSymbol = (s: string) => {
     const q = quotes.find((x) => x.symbol === s);
-    if (q) setDialog(q); else { setSelSym(s); setTab('trade'); }
+    if (q) setDialog(q); else { setSelSym(s); goTab('trade'); }
   };
 
   const removeSignal = (sym: string) => {
@@ -204,7 +221,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     ping(660);
     setAlert((lang === 'ar' ? 'تحليل يدوي مكتمل: ' : 'Manual analysis done: ') + (sym || (results ? results.length : 0) + ' signals'));
     setTimeout(() => setAlert(null), 5000);
-    setTab('home');
+    goHome();
   };
 
   return (
@@ -218,22 +235,31 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
           try { if (v) document.body.classList.remove('light'); else document.body.classList.add('light'); } catch {}
         }}
         clientCount={isDev ? clientCount : 0}
-        onClientsClick={() => setTab('clients')}
-        onNotificationsClick={() => setTab('home')} onProfileClick={() => setTab('settings')} />
+        onClientsClick={() => goTab('clients')}
+        onNotificationsClick={goHome} onProfileClick={() => goTab('settings')} />
+      {tab !== 'home' && (
+        <button
+          type="button"
+          onClick={goBack}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#F59E0B', fontSize: 13, fontWeight: 800, cursor: 'pointer', padding: '8px 16px 0', alignSelf: 'flex-start' }}
+        >
+          <ArrowLeft size={15} /> {lang === 'ar' ? 'عودة' : 'Back'}
+        </button>
+      )}
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
-        {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); setTab('trade'); }} onRemove={removeSignal} autoTradeEnabled={auto} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
+        {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} autoTradeEnabled={auto} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
         {tab === 'quotes' && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
-        {tab === 'positions' && <MobilePositions positions={positions} onClose={(id) => { try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {} setPositions((p) => p.filter((x) => x.id !== id)); }} onSelect={(sym) => { setSelSym(sym); setTab('trade'); }} />}
+        {tab === 'positions' && <MobilePositions positions={positions} onClose={(id) => { try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {} setPositions((p) => p.filter((x) => x.id !== id)); }} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
         {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} />}
-        {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={() => setTab('home')} onDone={runManual} />}
-        {tab === 'transactions' && <TransactionsPage lang={lang} onBack={() => setTab('home')} autoEmail={email} isDeveloper={isDev} />}
-        {tab === 'store' && isDev && <MobileStore lang={lang} onClose={() => setTab('home')} />}
+        {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
+        {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} />}
+        {tab === 'store' && isDev && <MobileStore lang={lang} onClose={goHome} />}
         {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" />}
-        {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={() => setTab('home')} />}
+        {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} />}
         {children}
       </div>
-      <MobileBottomNav activeTab={tab} onTabChange={setTab} isDeveloper={isDev} lang={lang} />
+      <MobileBottomNav activeTab={tab} onTabChange={goTab} isDeveloper={isDev} lang={lang} />
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
       {detail && <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />}
       {alert && <div className="mt5-signal-alert">{alert}</div>}
