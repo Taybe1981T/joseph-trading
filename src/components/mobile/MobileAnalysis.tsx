@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Zap, Hand, Play, Loader2, Upload, Settings } from 'lucide-react';
+import { Zap, Loader2, Upload, Settings } from 'lucide-react';
 import { MobileProgress, readMobileAuto, startMobileRadar, stopMobileRadar } from '../../services/mobileAnalysisEngine';
 import { MobileRadarSettings } from './MobileRadarSettings';
 import { Language } from '../../lib/i18n';
@@ -7,11 +7,10 @@ import { mobileT } from '../../lib/mobileMode';
 
 interface Props {
   lang: Language;
-  onManualAnalyze: () => void;
   onPublish?: () => void;
 }
 
-export function MobileAnalysis({ lang, onManualAnalyze, onPublish }: Props) {
+export function MobileAnalysis({ lang, onPublish }: Props) {
   const isAr = lang === 'ar';
   const [autoOn, setAutoOn] = useState(() => readMobileAuto().isEnabled);
   const [lastRun, setLastRun] = useState<string | null>(() => {
@@ -115,22 +114,13 @@ export function MobileAnalysis({ lang, onManualAnalyze, onPublish }: Props) {
 
       {showSettings && <MobileRadarSettings lang={lang} />}
 
-      <div className="mt5-card">
-        <div className="mt5-card-header">
-          <div className="mt5-card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Hand size={18} style={{ color: '#F59E0B' }} /> {mobileT(lang, 'Manual Analysis', 'التحليل اليدوي')}
-          </div>
-        </div>
-        <div className="mt5-card-subtitle">{mobileT(lang, 'Pick symbols and analyze instantly with AI', 'اختر الرموز وحلّلها فوراً بالذكاء الاصطناعي')}</div>
-        <button className="mt5-btn mt5-btn-block" style={{ background: '#F59E0B', color: '#000' }} onClick={onManualAnalyze}>
-          <Play size={15} /> {mobileT(lang, 'Start Manual Analysis', 'بدء تحليل يدوي')}
-        </button>
-        {onPublish && (
-          <button className="mt5-btn mt5-btn-block" style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: '#F59E0B', marginTop: 8 }} onClick={onPublish}>
+      {onPublish && (
+        <div className="mt5-card">
+          <button className="mt5-btn mt5-btn-block" style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.4)', color: '#F59E0B' }} onClick={onPublish}>
             <Upload size={15} /> {mobileT(lang, 'Publish Signals to Clients', 'نشر الإشارات للعملاء')}
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

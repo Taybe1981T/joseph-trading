@@ -85,21 +85,41 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   }, []);
   const loadAll = useCallback(() => {
     try {
-      const raw = localStorage.getItem('top_signals_persistent');
-      if (raw) {
-        const arr = JSON.parse(raw);
-        if (Array.isArray(arr)) {
-          const full = arr.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).slice(0, 30);
-          setFullSignals(full);
-          setSignals(full.map((s: any) => ({
-            symbol: String(s.symbol || ''),
-            type: (String(s.signal || '').includes('sell') ? 'sell' : 'buy') as 'buy' | 'sell',
-            price: Number(s.entryPrice ?? s.price ?? 0),
-            change: Number(s.change ?? 0),
-            changePercent: Number(s.changePercent ?? 0),
-          })).filter((s) => s.symbol));
+      const merged: any[] = [];
+      // Auto radar signals (same as desktop AnalysisResults)
+      try {
+        const raw = localStorage.getItem('top_signals_persistent');
+        const auto = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(auto)) {
+          merged.push(...auto.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).map((s: any) => ({ ...s, source: s.source || 'auto' })));
         }
+      } catch {}
+      // Manual analysis results (same as desktop — always in sync)
+      try {
+        const mraw = localStorage.getItem('manual_results');
+        const man = mraw ? JSON.parse(mraw) : [];
+        if (Array.isArray(man)) {
+          merged.push(...man.filter((s: any) => s && s.signal && s.signal !== 'neutral').map((s: any) => ({ ...s, source: 'manual' })));
+        }
+      } catch {}
+      // de-dup by symbol+timeframe (first occurrence wins)
+      const seen = new Set<string>();
+      const full: any[] = [];
+      for (const s of merged) {
+        const k = `${s.symbol}_${s.timeframe || ''}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        full.push(s);
       }
+      full.sort((a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+      setFullSignals(full.slice(0, 40));
+      setSignals(full.map((s: any) => ({
+        symbol: String(s.symbol || ''),
+        type: (String(s.signal || '').includes('sell') ? 'sell' : 'buy') as 'buy' | 'sell',
+        price: Number(s.entryPrice ?? s.price ?? 0),
+        change: Number(s.change ?? 0),
+        changePercent: Number(s.changePercent ?? 0),
+      })).filter((s) => s.symbol));
     } catch {}
     try {
       const raw = localStorage.getItem('paper_trading_data');
@@ -158,8 +178,14 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       const arr = raw ? JSON.parse(raw) : [];
       const next = (Array.isArray(arr) ? arr : []).filter((s: any) => String(s.symbol) !== sym);
       localStorage.setItem('top_signals_persistent', JSON.stringify(next));
-      loadAll();
     } catch {}
+    try {
+      const raw = localStorage.getItem('manual_results');
+      const arr = raw ? JSON.parse(raw) : [];
+      const next = (Array.isArray(arr) ? arr : []).filter((s: any) => String(s.symbol) !== sym);
+      localStorage.setItem('manual_results', JSON.stringify(next));
+    } catch {}
+    loadAll();
   };
 
   const signalFor = useCallback((sym: string) => fullSignals.find((r) => r.symbol === sym), [fullSignals]);
@@ -197,11 +223,11 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         onClientsClick={() => setTab('clients')}
         onNotificationsClick={() => setTab('home')} onProfileClick={() => setTab('settings')} />
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
-        {tab === 'home' && <MobileHome fullSignals={fullSignals} balance={balance} equity={equity} openCount={positions.length} autoTradeEnabled={auto} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); setTab('trade'); }} onRemove={removeSignal} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
+        {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); setTab('trade'); }} onRemove={removeSignal} autoTradeEnabled={auto} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
         {tab === 'quotes' && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} onClose={(id) => { try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {} setPositions((p) => p.filter((x) => x.id !== id)); }} onSelect={(sym) => { setSelSym(sym); setTab('trade'); }} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
-        {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} onManualAnalyze={() => setTab('manual')} onPublish={() => setShowPublish(true)} />}
+        {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} onPublish={() => setShowPublish(true)} />}
         {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={() => setTab('home')} onDone={runManual} />}
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={() => setTab('home')} autoEmail={email} isDeveloper={isDev} />}
         {tab === 'store' && isDev && <MobileStore lang={lang} onClose={() => setTab('home')} />}

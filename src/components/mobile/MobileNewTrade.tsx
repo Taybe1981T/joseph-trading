@@ -35,7 +35,12 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
 
   return (
     <div className="mt5-page-container">
-      <div className="mt5-section-title">{isAr ? 'صفقة جديدة' : 'New Trade'}</div>
+      <div className="mt5-section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>{isAr ? 'صفقة جديدة' : 'New Trade'}</span>
+        <span style={{ fontSize: 13, color: '#888', fontWeight: 700 }}>
+          {isAr ? 'الرصيد' : 'Balance'}: <span style={{ color: '#00ff88', fontSize: 15 }}>${balance.toFixed(2)}</span>
+        </span>
+      </div>
 
       <div className="mt5-card">
         <div className="mt5-card-title">{isAr ? 'الرمز' : 'Symbol'}</div>
