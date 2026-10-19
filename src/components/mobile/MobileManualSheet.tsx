@@ -4,7 +4,7 @@ import { AnalysisResult, TradingStyle } from '../../types';
 import { MobileProgress, runMobileManual, getMobileSymbolGroups, addMobileCustomSymbol } from '../../services/mobileAnalysisEngine';
 import { TIMEFRAMES, TRADING_STYLES, FREE_SYMBOLS, ALL_SYMBOLS_DB } from '../../constants';
 import { Language } from '../../lib/i18n';
-import { mobileT } from '../../lib/mobileMode';
+import { mobileT, detectMobileMode, hasClientPlan } from '../../lib/mobileMode';
 
 interface Props { lang: Language; onClose: () => void; onDone: (r: AnalysisResult[]) => void; }
 
@@ -15,11 +15,10 @@ const STYLE_LBL: Record<string, { en: string; ar: string }> = {
 };
 
 function hasPlan(): boolean {
-  try {
-    const o = JSON.parse(localStorage.getItem('finalyze_user') || '{}');
-    if (o?.isDeveloper) return true;
-    return !!localStorage.getItem('active_subscription');
-  } catch { return false; }
+  // Same detection the app uses everywhere: email-based developer mode OR an active plan.
+  try { if (detectMobileMode().mode === 'developer') return true; } catch {}
+  try { if (hasClientPlan()) return true; } catch {}
+  try { return !!localStorage.getItem('active_subscription'); } catch { return false; }
 }
 
 export function MobileManualSheet({ lang, onClose, onDone }: Props) {
@@ -37,6 +36,7 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const [failed, setFailed] = useState<string[]>([]);
   const [customInput, setCustomInput] = useState('');
   const [manualInput, setManualInput] = useState('');
+  const [hiddenTick, setHiddenTick] = useState(0);
 
   const allCategorySymbols = useMemo(() => {
     const g = groups.find((x) => x.id === selectedType);
@@ -53,7 +53,13 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
 
   const hidden: string[] = useMemo(() => {
     try { return JSON.parse(localStorage.getItem('finalyze_hidden_symbols') || '[]'); } catch { return []; }
-  }, []);
+  }, [hiddenTick]);
+
+  const restoreHidden = () => {
+    try { localStorage.removeItem('finalyze_hidden_symbols'); } catch {}
+    setHiddenTick(t => t + 1);
+    setGroups(getMobileSymbolGroups());
+  };
 
   const FREE_ALL: string[] = useMemo(() => {
     try {
@@ -196,7 +202,15 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
           <input value={manualInput} onChange={(e) => setManualInput(e.target.value.toUpperCase())} placeholder={mobileT(lang, 'Or type symbols separated by comma...', 'أو اكتب رموز مفصولة بفاصلة...')}
             style={{ flex: 1, background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '9px 12px', color: '#fff', fontSize: 13, outline: 'none' }} />
         </div>
-        <div style={{ fontSize: 12, color: '#888', marginBottom: 6 }}>{visibleSymbols.length} {mobileT(lang, 'symbols', 'رموز')} · {mobileT(lang, 'selected', 'المحدد')} <b style={{ color: '#F59E0B' }}>{selectedSymbols.length}</b></div>
+        <div style={{ fontSize: 12, color: '#888', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span>{visibleSymbols.length} {mobileT(lang, 'symbols', 'رموز')} · {mobileT(lang, 'selected', 'المحدد')} <b style={{ color: '#F59E0B' }}>{selectedSymbols.length}</b></span>
+          {hidden.length > 0 && (
+            <button onClick={restoreHidden}
+              style={{ marginLeft: 'auto', background: 'rgba(59,130,246,0.12)', border: '1px solid rgba(59,130,246,0.4)', color: '#60A5FA', borderRadius: 8, padding: '4px 8px', fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>
+              {isAr ? `إظهار المخفي (${hidden.length})` : `Show hidden (${hidden.length})`}
+            </button>
+          )}
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 6, maxHeight: 200, overflowY: 'auto', marginBottom: 12 }}>
           {visibleSymbols.map((s) => {
             const on = selectedSymbols.includes(s);

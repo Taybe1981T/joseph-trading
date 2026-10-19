@@ -52,14 +52,14 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflowAnchor: 'none' }}>
       <div className="mt5-card" style={s.isEnabled ? { borderColor: 'rgba(0,255,136,0.4)' } : undefined}>
         <div className="mt5-card-header">
           <div className="mt5-card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Zap size={18} style={{ color: s.isEnabled ? '#00ff88' : '#888' }} fill={s.isEnabled ? 'currentColor' : 'none'} />
             {mobileT(lang, 'Radar System', 'نظام الرادار')}
           </div>
-          <button className={`mt5-btn ${s.isEnabled ? 'mt5-btn-primary' : 'mt5-btn-secondary'}`} style={{ padding: '8px 18px', fontSize: 13, minWidth: 72 }} onClick={() => commit({ isEnabled: !s.isEnabled })}>{s.isEnabled ? 'ON' : 'OFF'}</button>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} className={`mt5-btn ${s.isEnabled ? 'mt5-btn-primary' : 'mt5-btn-secondary'}`} style={{ padding: '8px 18px', fontSize: 13, minWidth: 72 }} onClick={() => commit({ isEnabled: !s.isEnabled })}>{s.isEnabled ? 'ON' : 'OFF'}</button>
         </div>
         <div className="mt5-card-subtitle">{s.isEnabled ? mobileT(lang, 'Radar Active', 'الرادار نشط') : mobileT(lang, 'Radar Off', 'الرادار متوقف')}</div>
       </div>
@@ -122,7 +122,7 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
           {groups.map((c) => {
             const on = selectedList.includes(c.id);
             return (
-              <button key={c.id} onClick={(e) => { e.stopPropagation(); toggleCat(c.id); }}
+              <button key={c.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); toggleCat(c.id); }}
                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: 12, border: '1px solid ' + (on ? '#10B981' : '#2a2a2a'), background: on ? 'rgba(16,185,129,0.12)' : '#0a0a0a', color: on ? '#00ff88' : '#888', fontSize: 13, fontWeight: 800, cursor: 'pointer', minHeight: 52 }}>
                 <span>{isAr ? c.label : c.label}</span>
                 <span style={{ width: 16, height: 16, borderRadius: 4, border: '1px solid ' + (on ? '#10B981' : '#444'), background: on ? '#10B981' : 'transparent', color: '#fff', fontSize: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{on ? '✓' : ''}</span>
@@ -150,7 +150,7 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
           {TIMEFRAMES.map((tf) => {
             const on = s.timeframe === tf;
             return (
-              <button key={tf} onClick={(e) => { e.stopPropagation(); commit({ timeframe: tf }); }}
+              <button key={tf} type="button" onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); commit({ timeframe: tf }); }}
                 style={{ padding: '11px 0', borderRadius: 10, border: '1px solid ' + (on ? '#10B981' : '#2a2a2a'), background: on ? 'rgba(16,185,129,0.14)' : '#0a0a0a', color: on ? '#00ff88' : '#888', fontSize: 13, fontWeight: 800, cursor: 'pointer' }}>
                 {tf}
               </button>

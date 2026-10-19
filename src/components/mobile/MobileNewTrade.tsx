@@ -3,6 +3,7 @@ import type { MobileQuote } from './MobileQuotes';
 import { AnalysisResult } from '../../types';
 import { Language } from '../../lib/i18n';
 import { MobileLotCalc } from './MobileLotCalc';
+import { getMobileSymbolGroups } from '../../services/mobileAnalysisEngine';
 
 interface MobileNewTradeProps {
   quotes: MobileQuote[];
@@ -15,8 +16,19 @@ interface MobileNewTradeProps {
 
 export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor, onOpen }: MobileNewTradeProps) {
   const isAr = lang === 'ar';
-  const [symbol, setSymbol] = useState(defaultSymbol || (quotes[0]?.symbol || ''));
+  // Same categories/symbols as the Manual Analysis section (unified source).
+  const groups = useMemo(() => getMobileSymbolGroups(), []);
+  const [symbol, setSymbol] = useState(defaultSymbol || (groups[0]?.symbols[0] || quotes[0]?.symbol || ''));
   const [volume, setVolume] = useState(0.01);
+
+  const symbolUniverse = useMemo(() => {
+    const set = new Set<string>();
+    const flat = groups.map((g) => { g.symbols.forEach((s) => set.add(s)); return g; });
+    const extra = quotes.map((q) => q.symbol).filter((s) => s && !set.has(s));
+    if (extra.length) flat.push({ id: 'live', label: isAr ? 'أسعار حية' : 'Live', symbols: [...new Set(extra)] });
+    if (symbol && !set.has(symbol)) flat.push({ id: 'current', label: isAr ? 'الحالي' : 'Current', symbols: [symbol] });
+    return flat;
+  }, [groups, quotes, symbol, isAr]);
 
   const current = quotes.find((q) => q.symbol === symbol);
   const sig = useMemo(() => (signalFor ? signalFor(symbol) : undefined), [signalFor, symbol]);
@@ -35,10 +47,12 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
             color: '#fff', borderRadius: 10, padding: 12, fontSize: 15, fontWeight: 700,
           }}
         >
-          {quotes.map((q) => (
-            <option key={q.symbol} value={q.symbol}>
-              {q.symbol} — {q.category}
-            </option>
+          {symbolUniverse.map((g) => (
+            <optgroup key={g.id} label={g.label}>
+              {g.symbols.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </div>

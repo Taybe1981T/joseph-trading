@@ -17,6 +17,7 @@ import { MobileManualSheet } from './MobileManualSheet';
 import { MobileStore } from './MobileStore';
 import { MobileClientMonitor } from './MobileClientMonitor';
 import { MobileBulkPublish } from './MobileBulkPublish';
+import TransactionsPage from '../TransactionsPage';
 import { useMobileSignalAlert } from './useMobileSignalAlert';
 import { AnalysisResult, SignalType } from '../../types';
 
@@ -29,8 +30,8 @@ interface MobileSignal {
 }
 
 const TITLES: Record<MobileTab, string> = {
-  home: 'Joseph.Trading', quotes: 'Market Watch', positions: 'Trade',
-  trade: 'New Order', settings: 'Settings', analysis: 'AI Analysis', store: 'Store', clients: 'Clients',
+  home: 'Joseph.Trading', quotes: 'Market Watch', positions: 'Open Positions', trade: 'Trading Platform',
+  settings: 'Settings', analysis: 'Auto Analysis', manual: 'Manual Analysis', store: 'Store', clients: 'Clients', transactions: 'My Transactions',
 };
 
 export function MobileLayout({ children }: { children?: React.ReactNode }) {
@@ -58,17 +59,18 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [selSym, setSelSym] = useState<string | null>(null);
   const [showPublish, setShowPublish] = useState(false);
   const [showStore, setShowStore] = useState(false);
-  const [showManual, setShowManual] = useState(false);
   const [isDev, setIsDev] = useState(false);
+  const [email, setEmail] = useState('');
   const [clientCount, setClientCount] = useState(0);
 
   useEffect(() => {
     const check = () => {
       try {
         const raw = localStorage.getItem('finalyze_user');
-        const email = raw ? String(JSON.parse(raw)?.email || '').toLowerCase().trim() : '';
+        const em = raw ? String(JSON.parse(raw)?.email || '').toLowerCase().trim() : '';
+        setEmail(em);
         const devEmail = (localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0] || '').toLowerCase();
-        setIsDev(!!email && (email === devEmail || isDeveloperEmail(email) || email.includes('dev')));
+        setIsDev(!!em && (em === devEmail || isDeveloperEmail(em) || em.includes('dev')));
       } catch { setIsDev(false); }
       try {
         const raw = localStorage.getItem('finalyze_clients');
@@ -194,12 +196,14 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         clientCount={isDev ? clientCount : 0}
         onClientsClick={() => setTab('clients')}
         onNotificationsClick={() => setTab('home')} onProfileClick={() => setTab('settings')} />
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
         {tab === 'home' && <MobileHome fullSignals={fullSignals} balance={balance} equity={equity} openCount={positions.length} autoTradeEnabled={auto} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); setTab('trade'); }} onRemove={removeSignal} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
         {tab === 'quotes' && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
-        {tab === 'positions' && <MobilePositions positions={positions} onClose={(id) => { try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {} setPositions((p) => p.filter((x) => x.id !== id)); }} />}
+        {tab === 'positions' && <MobilePositions positions={positions} onClose={(id) => { try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {} setPositions((p) => p.filter((x) => x.id !== id)); }} onSelect={(sym) => { setSelSym(sym); setTab('trade'); }} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
-        {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} onManualAnalyze={() => setShowManual(true)} onPublish={() => setShowPublish(true)} />}
+        {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} onManualAnalyze={() => setTab('manual')} onPublish={() => setShowPublish(true)} />}
+        {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={() => setTab('home')} onDone={runManual} />}
+        {tab === 'transactions' && <TransactionsPage lang={lang} onBack={() => setTab('home')} autoEmail={email} isDeveloper={isDev} />}
         {tab === 'store' && isDev && <MobileStore lang={lang} onClose={() => setTab('home')} />}
         {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={() => setTab('home')} />}
@@ -209,7 +213,6 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       <MobileBottomNav activeTab={tab} onTabChange={setTab} isDeveloper={isDev} lang={lang} />
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
       {detail && <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />}
-      {showManual && isDev && <MobileManualSheet lang={lang} onClose={() => setShowManual(false)} onDone={runManual} />}
       {alert && <div className="mt5-signal-alert">{alert}</div>}
     </div>
   );

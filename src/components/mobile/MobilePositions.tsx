@@ -14,9 +14,10 @@ export interface MobilePosition {
 interface MobilePositionsProps {
   positions: MobilePosition[];
   onClose: (id: string) => void;
+  onSelect?: (symbol: string) => void;
 }
 
-export function MobilePositions({ positions, onClose }: MobilePositionsProps) {
+export function MobilePositions({ positions, onClose, onSelect }: MobilePositionsProps) {
   const totalProfit = positions.reduce((sum, p) => sum + p.profit, 0);
 
   return (
@@ -47,7 +48,10 @@ export function MobilePositions({ positions, onClose }: MobilePositionsProps) {
       )}
 
       {positions.map((p) => (
-        <div key={p.id} className="mt5-position-card">
+        <div key={p.id} className="mt5-position-card"
+          onClick={() => onSelect?.(p.symbol)}
+          style={{ cursor: onSelect ? 'pointer' : undefined }}
+          title={onSelect ? (p.symbol + ' — tap to open chart / شارت الرمز') : undefined}>
           <div className="mt5-position-info">
             <div className="mt5-position-symbol">{p.symbol}</div>
             <div className={`mt5-position-type ${p.type}`}>
@@ -63,9 +67,10 @@ export function MobilePositions({ positions, onClose }: MobilePositionsProps) {
             </div>
             <div className="mt5-position-actions" style={{ marginTop: 8 }}>
               <button
+                type="button"
                 className="mt5-btn mt5-btn-danger"
                 style={{ padding: '6px 14px', fontSize: 12 }}
-                onClick={() => onClose(p.id)}
+                onClick={(e) => { e.stopPropagation(); onClose(p.id); }}
               >
                 <X size={14} /> Close
               </button>
