@@ -1,5 +1,5 @@
-import React from 'react';
-import { Bell, Volume2, Globe, Shield, LogOut, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Bell, Volume2, Globe, Shield, LogOut, RefreshCw, Camera, Image as ImageIcon, X } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 
 interface MobileSettingsProps {
@@ -53,6 +53,44 @@ export function MobileSettings({
       {on ? 'ON' : 'OFF'}
     </button>
   );
+
+  // Profile picture + mini logo — desktop parity (ProfilePage → finalyze_custom_avatar/logo).
+  const [avatar, setAvatar] = useState<string | null>(null);
+  const [logo, setLogo] = useState<string | null>(null);
+  const [savedTick, setSavedTick] = useState(false);
+  const avatarRef = useRef<HTMLInputElement>(null);
+  const logoRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    try {
+      const a = localStorage.getItem('finalyze_custom_avatar');
+      const l = localStorage.getItem('finalyze_custom_logo');
+      if (a) setAvatar(a);
+      if (l) setLogo(l);
+    } catch {}
+  }, []);
+  const readFileAsDataURL = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result || ''));
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  const onAvatarFile = async (f: File | undefined) => {
+    if (!f) return;
+    if (f.size > 2 * 1024 * 1024) { alert(language === 'ar' ? 'حجم الصورة يجب أن يكون أقل من 2 ميجا' : 'Image must be under 2MB'); return; }
+    const url = await readFileAsDataURL(f);
+    setAvatar(url);
+    try { localStorage.setItem('finalyze_custom_avatar', url); window.dispatchEvent(new Event('storage')); } catch {}
+    setSavedTick(true); setTimeout(() => setSavedTick(false), 2000);
+  };
+  const onLogoFile = async (f: File | undefined) => {
+    if (!f) return;
+    if (f.size > 3 * 1024 * 1024) { alert(language === 'ar' ? 'حجم الشعار يجب أن يكون أقل من 3 ميجا' : 'Logo must be under 3MB'); return; }
+    const url = await readFileAsDataURL(f);
+    setLogo(url);
+    try { localStorage.setItem('finalyze_custom_logo', url); window.dispatchEvent(new Event('storage')); } catch {}
+    setSavedTick(true); setTimeout(() => setSavedTick(false), 2000);
+  };
 
   return (
     <div className="mt5-page-container">
@@ -112,6 +150,75 @@ export function MobileSettings({
       <button className="mt5-btn mt5-btn-secondary mt5-btn-block" onClick={onClearCache}>
         Clear Cache
       </button>
+
+      <div className="mt5-section-title" style={{ marginTop: 16 }}>
+        <Camera size={16} /> {language === 'ar' ? 'صورة البروفايل والشعار' : 'Profile & Logo'}
+      </div>
+
+      <div className="mt5-signal-card">
+        <div style={{ width: 56, height: 56, borderRadius: '50%', overflow: 'hidden', background: '#1a1a1a', border: '2px solid #333', flexShrink: 0, position: 'relative' }}>
+          {avatar ? (
+            <img src={avatar} alt="profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
+              <Camera size={22} />
+            </div>
+          )}
+          {avatar && (
+            <button
+              type="button"
+              onClick={() => { setAvatar(null); try { localStorage.removeItem('finalyze_custom_avatar'); window.dispatchEvent(new Event('storage')); } catch {} }}
+              style={{ position: 'absolute', top: 0, right: 0, width: 20, height: 20, borderRadius: '50%', background: '#ef4444', border: 'none', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+        <div className="mt5-signal-info">
+          <div className="mt5-card-title">{language === 'ar' ? 'صورة البروفايل' : 'Profile Picture'}</div>
+          <div className="mt5-card-subtitle">{language === 'ar' ? 'تظهر في الهيدر وصفحة الديسكتوب' : 'Shows in header and desktop page'}</div>
+        </div>
+        <button className="mt5-btn mt5-btn-secondary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => avatarRef.current?.click()}>
+          <Camera size={14} /> {language === 'ar' ? 'تغيير' : 'Change'}
+        </button>
+        <input ref={avatarRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }}
+          onChange={(e) => { onAvatarFile(e.target.files?.[0]); e.target.value = ''; }} />
+      </div>
+
+      <div className="mt5-signal-card">
+        <div style={{ width: 56, height: 56, borderRadius: 12, overflow: 'hidden', background: '#000', border: '1px solid rgba(255,255,255,0.25)', flexShrink: 0, position: 'relative' }}>
+          {logo ? (
+            <img src={logo} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666' }}>
+              <ImageIcon size={22} />
+            </div>
+          )}
+          {logo && (
+            <button
+              type="button"
+              onClick={() => { setLogo(null); try { localStorage.removeItem('finalyze_custom_logo'); window.dispatchEvent(new Event('storage')); } catch {} }}
+              style={{ position: 'absolute', top: 0, right: 0, width: 20, height: 20, borderRadius: '50%', background: '#ef4444', border: 'none', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+        <div className="mt5-signal-info">
+          <div className="mt5-card-title">{language === 'ar' ? 'الشعار المصغر' : 'Mini Logo'}</div>
+          <div className="mt5-card-subtitle">{language === 'ar' ? 'يظهر في أعلى التطبيق' : 'Shows at the top of the app'}</div>
+        </div>
+        <button className="mt5-btn mt5-btn-secondary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => logoRef.current?.click()}>
+          <ImageIcon size={14} /> {language === 'ar' ? 'تغيير' : 'Change'}
+        </button>
+        <input ref={logoRef} type="file" accept="image/svg+xml,image/png,image/jpeg,image/webp" style={{ display: 'none' }}
+          onChange={(e) => { onLogoFile(e.target.files?.[0]); e.target.value = ''; }} />
+      </div>
+      {savedTick && (
+        <div style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10, padding: '8px 14px', fontSize: 12, fontWeight: 700, color: '#00ff88', textAlign: 'center' }}>
+          ✓ {language === 'ar' ? 'تم الحفظ — ينعكس على الموقع والتطبيق معاً' : 'Saved — reflected on both site and app'}
+        </div>
+      )}
 
       <button className="mt5-btn mt5-btn-danger mt5-btn-block" onClick={() => {
         if (confirm('Logout from Joseph.Trading?')) {

@@ -20,6 +20,14 @@ import { MobileClientMonitor } from './MobileClientMonitor';
 import TransactionsPage from '../TransactionsPage';
 import { useMobileSignalAlert } from './useMobileSignalAlert';
 import { AnalysisResult, SignalType } from '../../types';
+import {
+  isMobileAutoTradeOn,
+  setMobileAutoTrade,
+  listMobileTrades,
+  readMobileAccount,
+  syncMobileAutoEngine,
+  closeMobileTrade,
+} from '../../services/mobileTradeBridge';
 
 interface MobileSignal {
   symbol: string;
@@ -55,7 +63,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   }, []);
   const [dialog, setDialog] = useState<MobileQuote | null>(null);
   const [alert, setAlert] = useState<string | null>(null);
-  const [auto, setAuto] = useState(() => { try { return localStorage.getItem('paper_trading_auto_trade') !== '0'; } catch { return true; } });
+  const [auto, setAuto] = useState(() => isMobileAutoTradeOn());
   const [sound, setSound] = useState(true);
   const [lang, setLang] = useState<Language>(() => {
     try {
@@ -98,7 +106,19 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     const iv = setInterval(check, 5000);
     return () => { window.removeEventListener('storage', check); clearInterval(iv); };
   }, []);
-  const loadAll = useCallback(() => {
+  const setAutoBoth = useCallback((v: boolean) => {
+    setAuto(v);
+    setMobileAutoTrade(v);
+    // Force the shared engine to resync immediately (same-tab toggles don't re-run effects).
+    try { window.dispatchEvent(new CustomEvent('mobile-autotrade-resync')); } catch {}
+  }, []);
+
+  // Sync the shared mobile auto engine with the SAME home-page signals (desktop parity: App.tsx).
+  useEffect(() => {
+    syncMobileAutoEngine(fullSignals);
+  }, [fullSignals]);
+
+  const loadAll = useCallback(async () => {
     try {
       const merged: any[] = [];
       // Auto radar signals (same as desktop AnalysisResults)
@@ -136,30 +156,60 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         changePercent: Number(s.changePercent ?? 0),
       })).filter((s) => s.symbol));
     } catch {}
+    // Account: same store as desktop (balance + leverage aware).
     try {
-      const raw = localStorage.getItem('paper_trading_data');
-      if (raw) {
-        const d = JSON.parse(raw);
-        if (typeof d.balance === 'number') setBalance(d.balance);
-        if (typeof d.equity === 'number') setEquity(d.equity);
-        if (Array.isArray(d.trades)) {
-          setPositions(d.trades.filter((t: any) => t.status === 'open').map((t: any) => {
-            const cur = Number(t.currentPrice ?? t.openPrice ?? 0);
-            const op = Number(t.openPrice ?? 0);
-            const dir = t.side === 'sell' ? -1 : 1;
-            return {
-              id: String(t.id ?? t.symbol + op), symbol: String(t.symbol),
-              type: (t.side === 'sell' ? 'sell' : 'buy') as 'buy' | 'sell',
-              volume: Number(t.volume || 0.01), openPrice: op, currentPrice: cur,
-              profit: (cur - op) * dir * Number(t.volume || 0.01) * 100,
-            };
-          }));
+      const acc = await readMobileAccount();
+      if (typeof acc.balance === 'number') setBalance(acc.balance);
+    } catch {}
+    // Positions tab: read open trades from the SAME store (auto + manual) — no mock fills.
+    try {
+      const all = await listMobileTrades();
+      const open = all.filter((t: any) => t.status === 'open');
+      const mapped: MobilePosition[] = open.map((t: any) => {
+        const cur = Number(t.currentPrice ?? t.entryPrice ?? 0);
+        const op = Number(t.entryPrice ?? 0);
+        return {
+          id: String(t.id), symbol: String(t.symbol),
+          type: (t.side === 'sell' ? 'sell' : 'buy') as 'buy' | 'sell',
+          volume: Number(t.qty ?? t.volume ?? 0.01), openPrice: op, currentPrice: cur,
+          profit: 0, // live P&L is computed in MobilePositions via the same quote path
+        };
+      });
+      // Hydrate live prices once for an instant accurate display.
+      try {
+        const { mobileLivePrice } = await import('../../services/mobileTradeBridge');
+        for (const m of mapped) {
+          try {
+            const p = await mobileLivePrice(m.symbol);
+            if (p != null && p > 0) {
+              m.currentPrice = p;
+              const t = open.find((x: any) => String(x.id) === m.id);
+              if (t) {
+                const { calcPnl } = await import('../../services/paperTradingService');
+                m.profit = calcPnl(t as any, p);
+              }
+            }
+          } catch {}
         }
-      }
+      } catch {}
+      setPositions(mapped);
     } catch {}
   }, []);
 
-  useEffect(() => { loadAll(); const iv = setInterval(loadAll, 5000); return () => clearInterval(iv); }, [loadAll]);
+  // Live store sync: trades opened/closed (auto engine or this device) refresh instantly.
+  useEffect(() => {
+    loadAll();
+    const iv = setInterval(loadAll, 5000);
+    const h = () => { loadAll(); };
+    const rs = () => { syncMobileAutoEngine(fullSignals); };
+    window.addEventListener('mobile-trades-changed', h);
+    window.addEventListener('mobile-autotrade-resync', rs);
+    return () => {
+      clearInterval(iv);
+      window.removeEventListener('mobile-trades-changed', h);
+      window.removeEventListener('mobile-autotrade-resync', rs);
+    };
+  }, [loadAll, fullSignals]);
 
   const ping = (freq: number) => {
     if (!sound) return;
@@ -175,12 +225,18 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   };
 
   const openTrade = (sym: string, type: 'buy' | 'sell', vol: number) => {
-    try { window.dispatchEvent(new CustomEvent('mobile-open-trade', { detail: { symbol: sym, side: type, volume: vol } })); } catch {}
     ping(type === 'buy' ? 880 : 440);
-    setAlert('Order sent: ' + type.toUpperCase() + ' ' + vol.toFixed(2) + ' ' + sym);
+    setAlert((lang === 'ar' ? 'تم إرسال الأمر: ' : 'Order sent: ') + type.toUpperCase() + ' ' + vol.toFixed(2) + ' ' + sym);
     setTimeout(() => setAlert(null), 4000);
+    // Refresh account + open trades from the SAME store (auto/manual included).
+    loadAll();
     if (tab === 'trade') goTab('positions');
   };
+
+  const closeTradeById = useCallback(async (id: string) => {
+    try { await closeMobileTrade(id); } catch {}
+    loadAll();
+  }, [loadAll]);
 
   const pickSymbol = (s: string) => {
     const q = quotes.find((x) => x.symbol === s);
@@ -247,15 +303,15 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         </button>
       )}
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
-        {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} autoTradeEnabled={auto} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
+        {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
         {tab === 'quotes' && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
-        {tab === 'positions' && <MobilePositions positions={positions} onClose={(id) => { try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {} setPositions((p) => p.filter((x) => x.id !== id)); }} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} />}
+        {tab === 'positions' && <MobilePositions positions={positions} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
         {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} />}
         {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} />}
         {tab === 'store' && isDev && <MobileStore lang={lang} onClose={goHome} />}
-        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={(v) => { setAuto(v); try { localStorage.setItem('paper_trading_auto_trade', v ? '1' : '0'); } catch {} }} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" />}
+        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} />}
         {children}
       </div>
