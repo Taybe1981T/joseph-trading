@@ -118,13 +118,124 @@ export async function closeMobileTrade(id: string): Promise<void> {
       const cur = p ?? t.entryPrice;
       const pnl = calcPnl(t, cur);
       await store.updateTrade(id, { status: 'closed', closeReason: 'manual', exitPrice: cur, pnl, closedAt: Date.now() });
+      // Desktop parity: realized P&L must move the balance (TradeNowPage/auto engine do this).
+      try {
+        const acc = await store.getAccount();
+        await store.saveBalance((acc.balance ?? 0) + pnl);
+      } catch {}
     }
   } catch { /* best effort */ }
   try { window.dispatchEvent(new CustomEvent('mobile-trades-changed', { detail: { action: 'close', id } })); } catch {}
 }
 
+/** Update SL/TP of an open trade from chart drag or the position card editor. */
+export async function updateMobileTradeLevels(id: string, sl: number | null, tp: number | null): Promise<void> {
+  if (!id) return;
+  const store = getTradeStore(mobileTradeUser() as any);
+  try {
+    await store.updateTrade(id, { sl, tp });
+  } catch { /* best effort */ }
+  try { window.dispatchEvent(new CustomEvent('mobile-trades-changed', { detail: { action: 'levels', id } })); } catch {}
+}
+
 // ── Shared mobile auto engine (mirrors App.tsx wiring) ──
 let mobileEngine: AutoTradeEngine | null = null;
+
+// ── Mobile position manager (desktop parity: TradeNowPage managePositions) ──
+// Runs in the background on the mobile app: for EVERY open trade (auto AND
+// manual) it checks live price → TP/SL close (balance += P&L) and the dynamic
+// trailing stop (same calcTrailingStop rule + strategy_settings tunables).
+// Without this, auto trades opened on mobile would sit unmanaged.
+let posMgrTimer: ReturnType<typeof setInterval> | null = null;
+
+function loadMobileTrailing(): { enabled: boolean; baseActivationUSD: number; baseStepUSD: number; activationLotStep: number; stepLotStep: number } {
+  const fallback = { enabled: true, baseActivationUSD: 5, baseStepUSD: 2, activationLotStep: 2, stepLotStep: 1 };
+  try {
+    const s = JSON.parse(localStorage.getItem('strategy_settings') || '{}');
+    return {
+      enabled: (s as any).trailingEnabled ?? fallback.enabled,
+      baseActivationUSD: (s as any).trailingBaseActivationUSD ?? fallback.baseActivationUSD,
+      baseStepUSD: (s as any).trailingBaseStepUSD ?? fallback.baseStepUSD,
+      activationLotStep: (s as any).trailingActivationLotStep ?? fallback.activationLotStep,
+      stepLotStep: (s as any).trailingStepLotStep ?? fallback.stepLotStep,
+    };
+  } catch { return fallback; }
+}
+
+async function mobileManagePositions(): Promise<void> {
+  let store: ReturnType<typeof getTradeStore>;
+  try { store = getTradeStore(mobileTradeUser() as any); } catch { return; }
+  let all: PaperTrade[];
+  let balance: number;
+  try {
+    all = await store.listTrades();
+    balance = (await store.getAccount()).balance;
+  } catch { return; }
+  const open = all.filter((t) => t.status === 'open');
+  if (!open.length) return;
+  const cfg = loadMobileTrailing();
+  let changed = false;
+  for (const t of open) {
+    let price: number | null = null;
+    try { price = await getLivePrice(t.symbol); } catch { price = null; }
+    if (price == null || !(price > 0)) continue;
+    const isBuy = t.side === 'buy';
+    // 1) TP / SL
+    let reason: 'tp' | 'sl' | null = null;
+    if (isBuy) {
+      if (t.tp != null && price >= t.tp) reason = 'tp';
+      else if (t.sl != null && price <= t.sl) reason = 'sl';
+    } else {
+      if (t.tp != null && price <= t.tp) reason = 'tp';
+      else if (t.sl != null && price >= t.sl) reason = 'sl';
+    }
+    if (reason) {
+      try {
+        const pnl = calcPnl(t, price);
+        await store.updateTrade(t.id, { status: 'closed', closeReason: reason, exitPrice: price, pnl, closedAt: Date.now() });
+        await store.saveBalance(balance + pnl);
+        balance += pnl;
+        changed = true;
+      } catch {}
+      continue;
+    }
+    // 2) Trailing stop — same rule as desktop (base unit per category).
+    if (!cfg.enabled) continue;
+    try {
+      const { baseQtyPerCategory } = await import('./paperTradingService');
+      const { calcTrailingStop } = await import('../lib/trailingStop');
+      const { usdToPrice } = await import('../lib/positionMath');
+      const pnl = calcPnl(t, price);
+      const tr = calcTrailingStop({
+        qty: t.qty, openPnlUSD: pnl, baseUnit: baseQtyPerCategory(t.category || detectMobileTradeCategory(t.symbol)),
+        baseActivationUSD: cfg.baseActivationUSD, baseStepUSD: cfg.baseStepUSD,
+        activationLotStep: cfg.activationLotStep, stepLotStep: cfg.stepLotStep,
+      });
+      if (tr.active) {
+        const newSl = usdToPrice(t.symbol, tr.offsetUSD, t.entryPrice, isBuy, t.qty, t.category || detectMobileTradeCategory(t.symbol));
+        const better = t.sl == null || (isBuy ? newSl > t.sl! : newSl < t.sl!);
+        if (better) {
+          await store.updateTrade(t.id, { sl: newSl });
+          changed = true;
+        }
+      }
+    } catch {}
+  }
+  if (changed) {
+    try { window.dispatchEvent(new CustomEvent('mobile-trades-changed', { detail: { action: 'manage' } })); } catch {}
+  }
+}
+
+export function startMobilePositionManager(): void {
+  if (posMgrTimer) return;
+  posMgrTimer = setInterval(() => { mobileManagePositions().catch(() => {}); }, 5000);
+  // First pass shortly after start so TP/SL/trailing engage immediately.
+  setTimeout(() => { mobileManagePositions().catch(() => {}); }, 3000);
+}
+
+export function stopMobilePositionManager(): void {
+  if (posMgrTimer) { clearInterval(posMgrTimer); posMgrTimer = null; }
+}
 
 function engineSignals(list: AnalysisResult[]) {
   return (Array.isArray(list) ? list : [])

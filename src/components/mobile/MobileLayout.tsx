@@ -27,6 +27,7 @@ import {
   readMobileAccount,
   syncMobileAutoEngine,
   closeMobileTrade,
+  startMobilePositionManager,
 } from '../../services/mobileTradeBridge';
 
 interface MobileSignal {
@@ -78,6 +79,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [fullSignals, setFullSignals] = useState<AnalysisResult[]>([]);
   const [detail, setDetail] = useState<AnalysisResult | null>(null);
   const [positions, setPositions] = useState<MobilePosition[]>([]);
+  const [closedTrades, setClosedTrades] = useState<any[]>([]);
   const [balance, setBalance] = useState(10000);
   const [equity, setEquity] = useState(10000);
   const [selSym, setSelSym] = useState<string | null>(null);
@@ -165,6 +167,25 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     try {
       const all = await listMobileTrades();
       const open = all.filter((t: any) => t.status === 'open');
+      // History tab: closed trades from the SAME store (desktop parity: History tab).
+      const closed = all
+        .filter((t: any) => t.status === 'closed')
+        .slice()
+        .sort((a: any, b: any) => (b.closedAt || 0) - (a.closedAt || 0))
+        .slice(0, 60)
+        .map((t: any) => ({
+          id: String(t.id), symbol: String(t.symbol),
+          type: (t.side === 'sell' ? 'sell' : 'buy') as 'buy' | 'sell',
+          volume: Number(t.qty ?? 0.01),
+          openPrice: Number(t.entryPrice ?? 0),
+          exitPrice: Number(t.exitPrice ?? t.entryPrice ?? 0),
+          profit: Number(t.pnl ?? 0),
+          openedAt: t.openedAt != null ? Number(t.openedAt) : undefined,
+          closedAt: t.closedAt != null ? Number(t.closedAt) : undefined,
+          closeReason: t.closeReason ? String(t.closeReason) : null,
+          source: t.source === 'manual' ? 'manual' : 'auto',
+        }));
+      setClosedTrades(closed);
       const mapped: MobilePosition[] = open.map((t: any) => {
         const cur = Number(t.currentPrice ?? t.entryPrice ?? 0);
         const op = Number(t.entryPrice ?? 0);
@@ -205,6 +226,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // Live store sync: trades opened/closed (auto engine or this device) refresh instantly.
   useEffect(() => {
     loadAll();
+    // Desktop parity: background TP/SL/trailing manager for ALL open trades.
+    try { startMobilePositionManager(); } catch {}
     const iv = setInterval(loadAll, 5000);
     const h = () => { loadAll(); };
     const rs = () => { syncMobileAutoEngine(fullSignals); };
@@ -311,7 +334,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
         {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
         {tab === 'quotes' && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
-        {tab === 'positions' && <MobilePositions positions={positions} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} />}
+        {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
         {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} />}
         {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}

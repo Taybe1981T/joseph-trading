@@ -12,10 +12,12 @@ import {
   detectMobileTradeCategory,
   mobileLivePrice,
   mobileTradeUser,
+  updateMobileTradeLevels,
 } from '../../services/mobileTradeBridge';
 import { getTradeStore, calcPnl, START_BALANCE } from '../../services/paperTradingService';
 import { notionalInUSD } from '../../lib/positionMath';
-import TradingViewEmbed from '../TradingViewEmbed';
+import type { PaperTrade } from '../../services/paperTradingService';
+import { MobileCandleChart } from './MobileCandleChart';
 
 interface MobileNewTradeProps {
   quotes: MobileQuote[];
@@ -67,6 +69,52 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
 
   const current = quotes.find((q) => q.symbol === symbol);
   const sig = useMemo(() => (signalFor ? signalFor(symbol) : undefined), [signalFor, symbol]);
+
+  // Open trade on this symbol (if any) → show its entry/SL/TP on the chart.
+  const [openForSymbol, setOpenForSymbol] = useState<PaperTrade | null>(null);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const store = getTradeStore(mobileTradeUser() as any);
+        const all = await store.listTrades();
+        const t = all.find((x) => x.status === 'open' && x.symbol === symbol) || null;
+        if (alive) setOpenForSymbol(t as PaperTrade | null);
+      } catch { if (alive) setOpenForSymbol(null); }
+    })();
+    const h = () => {
+      (async () => {
+        try {
+          const store = getTradeStore(mobileTradeUser() as any);
+          const all = await store.listTrades();
+          const t = all.find((x) => x.status === 'open' && x.symbol === symbol) || null;
+          if (alive) setOpenForSymbol(t as PaperTrade | null);
+        } catch {}
+      })();
+    };
+    try { window.addEventListener('mobile-trades-changed', h); } catch {}
+    return () => { alive = false; try { window.removeEventListener('mobile-trades-changed', h); } catch {} };
+  }, [symbol]);
+
+  const chartSl = openForSymbol?.sl ?? sig?.stopLoss ?? null;
+  const chartTp = openForSymbol?.tp ?? sig?.takeProfit ?? null;
+  const chartEntry = openForSymbol?.entryPrice ?? sig?.entryPrice ?? null;
+  const chartSide = openForSymbol?.side ?? null;
+
+  const onChartSl = async (p: number) => {
+    if (openForSymbol) {
+      const next = { ...openForSymbol, sl: p };
+      setOpenForSymbol(next);
+      try { await updateMobileTradeLevels(openForSymbol.id, p, openForSymbol.tp ?? null); } catch {}
+    }
+  };
+  const onChartTp = async (p: number) => {
+    if (openForSymbol) {
+      const next = { ...openForSymbol, tp: p };
+      setOpenForSymbol(next);
+      try { await updateMobileTradeLevels(openForSymbol.id, openForSymbol.sl ?? null, p); } catch {}
+    }
+  };
 
   // ── Account header: balance + equity + margin + margin level + floating P&L
   //    (desktop parity: TradeNowPage header — same live math, refresh + reset)
@@ -273,15 +321,29 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
         </select>
       </div>
 
-      {/* Live chart for the selected symbol (desktop parity: TradingViewEmbed) */}
+      {/* Live candle chart with entry/SL/TP levels (desktop parity: drag to adjust) */}
       {symbol && (
         <div className="mt5-card">
           <div className="mt5-card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <BarChart2 size={15} style={{ color: '#00ff88' }} />
             {symbol}
+            {openForSymbol && (
+              <span style={{ fontSize: 10, fontWeight: 800, color: openForSymbol.side === 'buy' ? '#00ff88' : '#ff5555', background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 6, padding: '1px 7px' }}>
+                {openForSymbol.side.toUpperCase()} {openForSymbol.qty.toFixed(2)}
+              </span>
+            )}
           </div>
-          <div style={{ height: 300, marginTop: 8 }}>
-            <TradingViewEmbed symbol={symbol} interval="60" />
+          <div style={{ marginTop: 8 }}>
+            <MobileCandleChart
+              symbol={symbol}
+              entryPrice={chartEntry}
+              sl={chartSl}
+              tp={chartTp}
+              side={chartSide}
+              lang={lang}
+              onSlChange={onChartSl}
+              onTpChange={onChartTp}
+            />
           </div>
         </div>
       )}
