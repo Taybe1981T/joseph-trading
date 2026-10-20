@@ -219,7 +219,12 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
   // Unified symbol source: same groups as Manual Analysis (SYMBOL_GROUPS flatMap + custom symbols, minus hidden)
   const groups = getMobileSymbolGroups();
   const rawCat = auto.category || 'all';
-  const catSet = rawCat === 'all' ? groups.map((g) => g.id) : rawCat.split(',').filter(Boolean);
+  // FIX: stable fixed order (forex → crypto → stocks → metals → custom) so the
+  // radar always scans in the requested order instead of storage order.
+  const FIXED_ORDER = ['forex', 'crypto', 'stocks', 'metals', 'custom'];
+  const wanted = rawCat === 'all' ? FIXED_ORDER : rawCat.split(',').filter(Boolean);
+  const catSet = FIXED_ORDER.filter((c) => wanted.includes(c))
+    .concat(wanted.filter((c) => !FIXED_ORDER.includes(c)));
   const jobs: { cat: string; syms: string[]; exKey?: any }[] = [];
   for (const cat of catSet) {
     const g = groups.find((x) => x.id === cat);
@@ -235,19 +240,24 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
       jobs.push({ cat, syms: g.symbols.slice(0, 15) });
     }
   }
+  // FIX: grand total across ALL categories so the progress bar never jumps
+  // backwards when the radar moves to the next category.
+  const grandTotal = jobs.reduce((n, j) => n + j.syms.length, 0);
+  let done = 0;
   let scanned: AnalysisResult[] = [];
   let failed = 0;
   for (const j of jobs) {
     if (!readMobileAuto().isEnabled) break;
     for (const sym of j.syms) {
       if (!readMobileAuto().isEnabled) break;
-      onProg?.({ current: sym, total: j.syms.length, index: scanned.length, failed, exchange: j.exKey ? exchangeLabel(j.exKey, lang) : undefined });
+      done++;
+      onProg?.({ current: sym, total: grandTotal, index: done, failed, exchange: j.exKey ? exchangeLabel(j.exKey, lang) : undefined });
       try {
         await waitIfRateLimited();
         const b = await analyzeMarketBatch(
           [{ symbol: sym, type: detectMobileType(sym), timeframe: auto.timeframe || '1d', tradingStyle: auto.tradingStyle || TradingStyle.DAY_TRADING }],
           strategy, lang,
-          (cur, tot, idx) => onProg?.({ current: cur, total: tot, index: idx, failed, exchange: j.exKey ? exchangeLabel(j.exKey, lang) : undefined })
+          () => onProg?.({ current: sym, total: grandTotal, index: done, failed, exchange: j.exKey ? exchangeLabel(j.exKey, lang) : undefined })
         );
         if (b.results.length > 0) {
           for (const r of b.results) { r.userId = uid || 'anonymous'; scanned.push(r); }

@@ -22,7 +22,7 @@ const AR_CATS: Record<string, string> = {
   energy: 'طاقة', indices: 'مؤشرات', custom: 'رموز مخصصة', other: 'أخرى',
 };
 
-const CAT_ORDER = ['crypto', 'forex', 'stocks', 'metals', 'energy', 'indices', 'custom', 'other'];
+const CAT_ORDER = ['forex', 'crypto', 'stocks', 'metals', 'energy', 'indices', 'custom', 'other'];
 
 export function MobileHome({
   fullSignals, lang, onDetail, onTrade, onRemove,
@@ -31,7 +31,9 @@ export function MobileHome({
   const { isDev, isClient, hasPlan } = useMobileMode();
   const isAr = lang === 'ar';
 
-  // Group by category → Top 3 by confidence (same rule as desktop finalyze:top_signals)
+  // Group by category → Top 3 by confidence (same rule as desktop finalyze:top_signals).
+  // FIX: stable fixed order + stable inner order so categories never flicker
+  // while the radar is still scanning (no re-ordering mid-analysis).
   const grouped = React.useMemo(() => {
     const map: Record<string, AnalysisResult[]> = {};
     for (const s of fullSignals) {
@@ -39,11 +41,15 @@ export function MobileHome({
       (map[cat] = map[cat] || []).push(s);
     }
     const out: { cat: string; list: AnalysisResult[] }[] = [];
-    const cats = Object.keys(map).sort((a, b) => CAT_ORDER.indexOf(a) - CAT_ORDER.indexOf(b));
+    const cats = Object.keys(map).sort((a, b) => {
+      const ia = CAT_ORDER.indexOf(a);
+      const ib = CAT_ORDER.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
     for (const cat of cats) {
       const list = map[cat]
         .slice()
-        .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+        .sort((a, b) => (b.confidence || 0) - (a.confidence || 0) || String(a.symbol).localeCompare(String(b.symbol)))
         .slice(0, 3);
       if (list.length) out.push({ cat, list });
     }
