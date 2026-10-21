@@ -14,8 +14,9 @@ import {
   mobileTradeUser,
   updateMobileTradeLevels,
 } from '../../services/mobileTradeBridge';
-import { getTradeStore, calcPnl, START_BALANCE } from '../../services/paperTradingService';
+import { getTradeStore, calcPnl, START_BALANCE, getLivePrices, baseQtyPerCategory } from '../../services/paperTradingService';
 import { notionalInUSD } from '../../lib/positionMath';
+import { calcTrailingStop } from '../../lib/trailingStop';
 import type { PaperTrade } from '../../services/paperTradingService';
 import { MobileCandleChart } from './MobileCandleChart';
 
@@ -101,6 +102,29 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   const chartEntry = openForSymbol?.entryPrice ?? sig?.entryPrice ?? null;
   const chartSide = openForSymbol?.side ?? null;
 
+  // Live price for the chart's last-price line — the same bid the watchlist
+  // uses (shared quote hub), so no extra polling here.
+  const chartLivePrice = current?.bid ?? null;
+
+  // Trailing-stop state (desktop parity with TradeNowPage): active once the
+  // dynamic trail has triggered AND the stop is locked into profit.
+  const chartTrailingActive = useMemo(() => {
+    if (!openForSymbol || typeof openForSymbol.qty !== 'number' || openForSymbol.qty <= 0) return false;
+    if (typeof openForSymbol.entryPrice !== 'number' || typeof openForSymbol.sl !== 'number') return false;
+    const live = chartLivePrice ?? openForSymbol.entryPrice;
+    const pnl = calcPnl(openForSymbol, live);
+    const category = openForSymbol.category || detectMobileTradeCategory(openForSymbol.symbol);
+    const trail = calcTrailingStop({
+      qty: openForSymbol.qty,
+      openPnlUSD: pnl,
+      baseUnit: baseQtyPerCategory(category),
+    });
+    const intoProfit = openForSymbol.side === 'buy'
+      ? openForSymbol.sl >= openForSymbol.entryPrice
+      : openForSymbol.sl <= openForSymbol.entryPrice;
+    return trail.active && intoProfit;
+  }, [openForSymbol, chartLivePrice]);
+
   const onChartSl = async (p: number) => {
     if (openForSymbol) {
       const next = { ...openForSymbol, sl: p };
@@ -126,12 +150,26 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
       const store = getTradeStore(mobileTradeUser() as any);
       const [a, all] = await Promise.all([store.getAccount(), store.listTrades().catch(() => [] as any[])]);
       const open = (all as any[]).filter((t) => t.status === 'open');
-      // Live floating P&L across ALL open positions (same quote path as desktop).
+      // Fetch each open symbol's price ONCE in a single batched request
+      // and reuse it for both the floating P&L and the margin calculation.
+      const prices = new Map<string, number>();
+      try {
+        const syms = [...new Set(open.map((t: any) => t.symbol))];
+        const fetched = await getLivePrices(syms);
+        for (const [s, p] of fetched) if (p > 0) prices.set(s, p);
+      } catch {
+        // Fallback: per-symbol fetch (cached + deduplicated).
+        await Promise.all(open.map(async (t: any) => {
+          try {
+            const p = await mobileLivePrice(t.symbol);
+            if (p != null && p > 0) prices.set(t.symbol, p);
+          } catch {}
+        }));
+      }
       let floating = 0;
       for (const t of open) {
         try {
-          const p = await mobileLivePrice(t.symbol);
-          const cur = p ?? t.entryPrice;
+          const cur = prices.get(t.symbol) ?? t.entryPrice;
           floating += calcPnl(t as any, cur);
         } catch {}
       }
@@ -140,8 +178,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
       let margin = 0;
       for (const t of open) {
         try {
-          const p = await mobileLivePrice(t.symbol);
-          const px = p ?? t.entryPrice;
+          const px = prices.get(t.symbol) ?? t.entryPrice;
           margin += notionalInUSD(t.category || detectMobileTradeCategory(t.symbol), t.symbol, px, t.qty) / lev;
         } catch {}
       }
@@ -340,6 +377,8 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
               sl={chartSl}
               tp={chartTp}
               side={chartSide}
+              livePrice={chartLivePrice}
+              trailingActive={chartTrailingActive}
               lang={lang}
               onSlChange={onChartSl}
               onTpChange={onChartTp}
