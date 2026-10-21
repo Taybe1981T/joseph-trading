@@ -4,6 +4,13 @@ import { Language } from './i18n';
 
 export type MobileMode = 'developer' | 'client' | 'unknown';
 
+/**
+ * Desktop parity (App.tsx processGoogleUser + isDeveloperSession):
+ * - developer = email is in DEVELOPER_EMAILS, OR equals the stored dev email,
+ *   OR contains 'dev'. Everyone else is a CLIENT.
+ * - unknown = no signed-in email at all (client home shows, login required
+ *   only for dev-only sections).
+ */
 export function detectMobileMode(): { mode: MobileMode; email: string; uid: string } {
   try {
     const raw = localStorage.getItem('finalyze_user');

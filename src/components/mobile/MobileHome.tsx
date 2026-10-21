@@ -37,7 +37,7 @@ export function MobileHome({
   const grouped = React.useMemo(() => {
     const map: Record<string, AnalysisResult[]> = {};
     for (const s of fullSignals) {
-      const cat = String((s as Record<string, unknown>).category || 'other');
+      const cat = String((s as unknown as Record<string, unknown>).category || 'other');
       (map[cat] = map[cat] || []).push(s);
     }
     const out: { cat: string; list: AnalysisResult[] }[] = [];
@@ -108,7 +108,7 @@ export function MobileHome({
           </div>
           {list.map((r) => (
             <MobileSignalCard
-              key={r.symbol + '_' + (r.timeframe || '') + '_' + ((r as Record<string, unknown>).source || 'auto')}
+              key={r.symbol + '_' + (r.timeframe || '') + '_' + ((r as unknown as Record<string, unknown>).source || 'auto')}
               res={r}
               lang={lang}
               isDev={isDev}

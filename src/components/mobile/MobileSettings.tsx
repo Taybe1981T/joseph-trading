@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Volume2, Globe, Shield, LogOut, RefreshCw, Camera, Image as ImageIcon, X } from 'lucide-react';
+import { Bell, Volume2, Globe, Shield, LogOut, LogIn, Loader2, RefreshCw, Camera, Image as ImageIcon, X } from 'lucide-react';
 import { Language } from '../../lib/i18n';
+import { useMobileMode } from '../../lib/mobileMode';
 
 interface MobileSettingsProps {
   autoTradeEnabled: boolean;
@@ -10,6 +11,9 @@ interface MobileSettingsProps {
   onSoundToggle: (v: boolean) => void;
   onLanguageChange: (v: Language) => void;
   onClearCache: () => void;
+  onDeveloperLogin?: () => void;
+  devLoginBusy?: boolean;
+  devLoginError?: string | null;
   version: string;
 }
 
@@ -21,6 +25,9 @@ export function MobileSettings({
   onSoundToggle,
   onLanguageChange,
   onClearCache,
+  onDeveloperLogin,
+  devLoginBusy,
+  devLoginError,
   version,
 }: MobileSettingsProps) {
   const Row = ({
@@ -220,17 +227,81 @@ export function MobileSettings({
         </div>
       )}
 
-      <button className="mt5-btn mt5-btn-danger mt5-btn-block" onClick={() => {
-        if (confirm('Logout from Joseph.Trading?')) {
-          try { window.dispatchEvent(new Event('mobile-logout')); } catch {}
-        }
-      }}>
-        <LogOut size={16} /> Logout
-      </button>
+      {/* Desktop parity: developer login lives here. Clients see a discreet
+          login button; once a dev email signs in, dev sections unlock. */}
+      <DevLoginRow
+        language={language}
+        onDeveloperLogin={onDeveloperLogin}
+        devLoginBusy={devLoginBusy}
+        devLoginError={devLoginError}
+      />
+
+      <DevLogoutButton language={language} />
 
       <div className="mt5-empty-subtitle" style={{ textAlign: 'center', marginTop: 12 }}>
         Joseph.Trading v{version} — MT5 Mobile Edition
       </div>
     </div>
+  );
+}
+
+/**
+ * Developer login row — desktop parity (App.tsx guest mode shows a developer
+ * login; clients never get the dev sections until a dev email signs in).
+ */
+function DevLoginRow({
+  language,
+  onDeveloperLogin,
+  devLoginBusy,
+  devLoginError,
+}: {
+  language: Language;
+  onDeveloperLogin?: () => void;
+  devLoginBusy?: boolean;
+  devLoginError?: string | null;
+}) {
+  const { isDev } = useMobileMode();
+  if (isDev) return null;
+  return (
+    <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <LogIn size={18} style={{ color: '#F59E0B', flexShrink: 0 }} />
+        <div className="mt5-signal-info">
+          <div className="mt5-card-title">{language === 'ar' ? 'دخول المطور' : 'Developer Login'}</div>
+          <div className="mt5-card-subtitle">
+            {language === 'ar' ? 'للمطورين فقط — يفتح أدوات المطوّر' : 'Developers only — unlocks developer tools'}
+          </div>
+        </div>
+      </div>
+      <button
+        className="mt5-btn mt5-btn-primary mt5-btn-block"
+        disabled={!!devLoginBusy}
+        onClick={() => onDeveloperLogin?.()}
+      >
+        {devLoginBusy ? <Loader2 size={16} className="spin" /> : <LogIn size={16} />}
+        {language === 'ar' ? 'تسجيل دخول المطور' : 'Sign in as developer'}
+      </button>
+      {devLoginError && (
+        <div style={{ color: '#ff6b6b', fontSize: 12, fontWeight: 700, textAlign: 'center' }}>{devLoginError}</div>
+      )}
+    </div>
+  );
+}
+
+/** Logout button — only meaningful while a developer session is active. */
+function DevLogoutButton({ language }: { language: Language }) {
+  const { isDev } = useMobileMode();
+  if (!isDev) return null;
+  return (
+    <button
+      className="mt5-btn mt5-btn-danger mt5-btn-block"
+      onClick={() => {
+        if (confirm(language === 'ar' ? 'تسجيل الخروج؟' : 'Logout?')) {
+          try { window.dispatchEvent(new Event('mobile-logout')); } catch {}
+        }
+      }}
+    >
+      <LogOut size={16} /> {language === 'ar' ? 'تسجيل الخروج' : 'Logout'}
+    </button>
   );
 }

@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { X, Pencil, Check } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
-import { closeMobileTrade, mobileLivePrice, updateMobileTradeLevels } from '../../services/mobileTradeBridge';
+import { closeMobileTrade, updateMobileTradeLevels } from '../../services/mobileTradeBridge';
+import { subscribeQuoteBatch } from '../../services/paperTradingService';
 
-interface MobilePosition {
+export interface MobilePosition {
   id: string;
   symbol: string;
   type: 'buy' | 'sell';
@@ -55,22 +56,27 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
   const [editTp, setEditTp] = useState('');
 
   // Live P&L from the SAME real quote path as desktop (getLivePrice → /api/quote).
+  // Now driven by the shared quote hub: one batched request for the whole app
+  // instead of a private timer issuing one request per position every 2s.
+  // The batch subscription delivers ALL symbols in ONE callback, so the
+  // component performs a single React state commit per tick.
+  const syms = useMemo(() => [...new Set(positions.map((p) => p.symbol))], [positions]);
+  const symKey = syms.join('|');
   useEffect(() => {
-    let alive = true;
-    const syms = [...new Set(positions.map((p) => p.symbol))];
     if (!syms.length) return;
-    const tick = async () => {
-      for (const s of syms) {
-        try {
-          const p = await mobileLivePrice(s);
-          if (alive && p != null) setLive((prev) => (prev[s] === p ? prev : { ...prev, [s]: p }));
-        } catch {}
-      }
-    };
-    tick();
-    const iv = setInterval(tick, 2000);
-    return () => { alive = false; clearInterval(iv); };
-  }, [positions.map((p) => p.symbol).join('|')]);
+    const unsub = subscribeQuoteBatch(syms, (prices) => {
+      setLive((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const [s, price] of prices) {
+          if (next[s] !== price) { next[s] = price; changed = true; }
+        }
+        return changed ? next : prev;
+      });
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symKey]);
 
   const doClose = async (id: string) => {
     setBusy(id);

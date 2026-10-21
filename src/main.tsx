@@ -52,8 +52,14 @@ function AppWrapper() {
 
   useEffect(() => {
     const h = () => {
+      // Desktop parity: dev logout → land on the CLIENT home, not the login
+      // wall. Firebase signs out, the dev email identity is cleared, and the
+      // client home (shared signals + client features) stays open.
       signOut(auth).catch(() => {});
-      try { localStorage.removeItem('finalyze_user'); localStorage.removeItem('finalyze_auth_user'); } catch {}
+      try {
+        localStorage.removeItem('finalyze_user');
+        localStorage.removeItem('finalyze_auth_user');
+      } catch {}
     };
     window.addEventListener('mobile-logout', h);
     return () => window.removeEventListener('mobile-logout', h);
@@ -94,11 +100,16 @@ function AppWrapper() {
       </div>
     );
   }
+  // Desktop parity (App.tsx guest/client mode): a CLIENT opens the app and lands
+  // straight on the client home — no login wall. Dev-only sections stay hidden
+  // until a developer email signs in via Settings → Developer Login.
+  // After a dev logout, Firebase user is null BUT the client home must show
+  // (not the login wall) — same as the site returning to the main page.
   if (!user) {
     return (
       <StrictMode>
         <ErrorBoundary>
-          <MobileLogin lang={lang} onLangChange={(l) => { setLang(l); try { localStorage.setItem('language', l); } catch {} }} onLogin={doLogin} busy={loginBusy} error={loginError} />
+          <MobileLayout />
         </ErrorBoundary>
       </StrictMode>
     );

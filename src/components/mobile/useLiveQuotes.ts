@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { subscribePrices } from '../../services/paperTradingService';
-import { getLivePrice } from '../../services/paperTradingService';
+import { getLivePrice, subscribeQuoteBatch } from '../../services/paperTradingService';
 import type { MobileQuote } from './MobileQuotes';
 
 /** Base instruments shown in the watchlist (same universes as the site). */
@@ -21,19 +20,33 @@ const BASE: { symbol: string; category: string; spreadFactor: number }[] = [
  * Prices refresh ~1s; change% is measured against the session open (first price).
  */
 export function useLiveQuotes(): MobileQuote[] {
-  const [prices, setPrices] = useState<Record<string, number>>({});
-  const [opens, setOpens] = useState<Record<string, number>>({});
+  // A single state object instead of two: the hub delivers every symbol's price
+  // in one batch, so we now commit ONE state update per tick instead of two
+  // setState calls per symbol (previously ~16 re-renders per second).
+  const [state, setState] = useState<{ prices: Record<string, number>; opens: Record<string, number> }>({ prices: {}, opens: {} });
 
   useEffect(() => {
     const symbols = BASE.map((b) => b.symbol);
-    const unsub = subscribePrices(symbols, (sym, price) => {
-      if (!(price > 0)) return;
-      setPrices((prev) => ({ ...prev, [sym]: price }));
-      setOpens((prev) => (prev[sym] == null ? { ...prev, [sym]: price } : prev));
+    // ONE callback per tick with ALL prices → a single state commit per second
+    // instead of one commit per symbol.
+    const unsub = subscribeQuoteBatch(symbols, (batch) => {
+      setState((prev) => {
+        let changed = false;
+        const prices = { ...prev.prices };
+        const opens = { ...prev.opens };
+        for (const [sym, price] of batch) {
+          if (!(price > 0)) continue;
+          if (prices[sym] !== price) { prices[sym] = price; changed = true; }
+          // change% is measured against the session open (first price seen).
+          if (opens[sym] == null) { opens[sym] = price; changed = true; }
+        }
+        return changed ? { prices, opens } : prev;
+      });
     });
     return () => { try { unsub(); } catch {} };
   }, []);
 
+  const { prices, opens } = state;
   return BASE.map((b) => {
     const bid = prices[b.symbol];
     const open = opens[b.symbol] ?? bid;

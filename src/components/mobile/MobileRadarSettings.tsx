@@ -7,6 +7,7 @@ import { getMobileSymbolGroups } from '../../services/mobileAnalysisEngine';
 interface AutoSettings {
   isEnabled: boolean; interval: number; timeframe: string; category: string;
   tradingStyle: string; volume: number; showAllSignals?: boolean;
+  successSound?: string; failSound?: string; completionSound?: string;
 }
 function readAuto(): AutoSettings {
   try {

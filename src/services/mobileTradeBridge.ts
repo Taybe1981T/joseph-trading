@@ -11,6 +11,7 @@
 import {
   getTradeStore,
   getLivePrice,
+  getLivePrices,
   getDefaultQty,
   calcPnl,
   calcRiskUSD,
@@ -175,9 +176,19 @@ async function mobileManagePositions(): Promise<void> {
   if (!open.length) return;
   const cfg = loadMobileTrailing();
   let changed = false;
+  // ONE batched price fetch for every open position instead of one
+  // sequential /api/quote request per position.
+  const priceMap = new Map<string, number>();
+  try {
+    const fetched = await getLivePrices([...new Set(open.map((t) => t.symbol))]);
+    for (const [s, p] of fetched) if (p > 0) priceMap.set(s, p);
+  } catch {
+    for (const t of open) {
+      try { const p = await getLivePrice(t.symbol); if (p != null && p > 0) priceMap.set(t.symbol, p); } catch {}
+    }
+  }
   for (const t of open) {
-    let price: number | null = null;
-    try { price = await getLivePrice(t.symbol); } catch { price = null; }
+    const price = priceMap.get(t.symbol) ?? null;
     if (price == null || !(price > 0)) continue;
     const isBuy = t.side === 'buy';
     // 1) TP / SL

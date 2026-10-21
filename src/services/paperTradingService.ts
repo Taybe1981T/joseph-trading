@@ -146,7 +146,11 @@ export function formatPnl(v: number): string {
 type PriceListener = (price: number) => void;
 
 const _priceCache = new Map<string, { price: number; ts: number }>();
-const PRICE_TTL = 1000;
+const PRICE_TTL = 1500;
+// In-flight de-duplication: several mobile components (watchlist, positions,
+// account bar) ask for the SAME symbol at the same time. Without this each one
+// fires its own /api/quote request; with it they share a single round trip.
+const _priceInflight = new Map<string, Promise<number | null>>();
 
 async function fetchServerLastPrice(symbol: string): Promise<number | null> {
   try {
@@ -186,33 +190,196 @@ export async function getLivePrice(symbol: string): Promise<number | null> {
   const cached = _priceCache.get(symbol);
   if (cached && Date.now() - cached.ts < PRICE_TTL) return cached.price;
 
+  // Coalesce concurrent requests for the same symbol into one network call.
+  const pending = _priceInflight.get(symbol);
+  if (pending) return pending;
+
   // Route ALL assets (crypto, forex, metals, indices) through the backend
   // server proxy /api/market-data. The server resolves crypto -> Binance and
   // forex/metals -> Yahoo/TwelveData server-side, bypassing browser CORS.
   // No browser-direct Binance calls (CORS-blocked) and no unreliable external
   // CORS proxies (corsproxy.io/allorigins often fail with 403).
-  const price = await fetchServerLastPrice(symbol);
+  const request = fetchServerLastPrice(symbol)
+    .then((price) => {
+      if (price != null) {
+        _priceCache.set(symbol, { price, ts: Date.now() });
+      }
+      return price;
+    })
+    .finally(() => {
+      _priceInflight.delete(symbol);
+    });
 
-  if (price != null) {
-    _priceCache.set(symbol, { price, ts: Date.now() });
-  }
-  return price;
+  _priceInflight.set(symbol, request);
+  return request;
 }
 
-// Poll prices for a list of symbols, calling listener on each update.
-export function subscribePrices(symbols: string[], listener: (symbol: string, price: number) => void): () => void {
-  let alive = true;
-  const tick = async () => {
-    if (!alive) return;
-    const unique = [...new Set(symbols)];
-    await Promise.all(unique.map(async (sym) => {
-      const p = await getLivePrice(sym);
-      if (p != null && alive) listener(sym, p);
-    }));
+// ── Shared quote hub ────────────────────────────────────────────────────────
+// Every mobile surface (watchlist, positions list, account header, ticket)
+// needs live prices at the same time. Each one used to run its own timer and
+// issue its own /api/quote request per symbol, which multiplied into dozens
+// of redundant round trips per second on mobile data.
+//
+// The hub keeps ONE timer for the whole app, batches every interested symbol
+// into a single /api/quotes request, and fans the result out to subscribers.
+type HubListener = (symbol: string, price: number) => void;
+type HubBatchListener = (prices: Map<string, number>) => void;
+
+const _hubListeners = new Map<string, Set<HubListener>>();
+const _hubBatchListeners = new Set<HubBatchListener>();
+const _hubPrices = new Map<string, number>();
+let _hubTimer: ReturnType<typeof setInterval> | null = null;
+let _hubBusy = false;
+let _hubInFlight: Promise<void> | null = null;
+
+const HUB_INTERVAL = 1000;
+
+/** Subscribe to live prices for a symbol. Returns an unsubscribe function. */
+export function subscribeQuote(symbol: string, listener: HubListener): () => void {
+  const sym = (symbol || '').trim().toUpperCase();
+  if (!sym) return () => {};
+  let set = _hubListeners.get(sym);
+  if (!set) { set = new Set(); _hubListeners.set(sym, set); }
+  set.add(listener);
+  startHub();
+  // Deliver the last known price immediately so the UI is never empty.
+  const last = _hubPrices.get(sym);
+  if (last != null) { try { listener(sym, last); } catch {} }
+  return () => {
+    const s = _hubListeners.get(sym);
+    if (!s) return;
+    s.delete(listener);
+    if (!s.size) _hubListeners.delete(sym);
+    maybeStopHub();
   };
-  tick();
-  const iv = setInterval(tick, 1000);
-  return () => { alive = false; clearInterval(iv); };
+}
+
+/** Last price the hub has seen for a symbol (no network call). */
+export function getCachedQuote(symbol: string): number | null {
+  const p = _hubPrices.get((symbol || '').trim().toUpperCase());
+  return p == null ? null : p;
+}
+
+/**
+ * Subscribe to a set of symbols in ONE callback per tick.
+ * Far cheaper than per-symbol subscriptions: the listener is invoked once
+ * with every price that changed, so the consumer can commit a single
+ * state update instead of one per symbol.
+ */
+export function subscribeQuoteBatch(symbols: string[], listener: HubBatchListener): () => void {
+  const unique = [...new Set((symbols || []).map((s) => (s || '').trim().toUpperCase()).filter(Boolean))];
+  // Register each symbol so the hub knows to include it in the batch request.
+  const unsubs = unique.map((sym) => subscribeQuote(sym, () => {}));
+  _hubBatchListeners.add(listener);
+  startHub();
+  return () => {
+    _hubBatchListeners.delete(listener);
+    for (const u of unsubs) u();
+    maybeStopHub();
+  };
+}
+
+/**
+ * Subscribe to a LIST of symbols. Kept for the desktop watchlist
+ * (TradeNowPage) — implemented on top of the shared hub so desktop and mobile
+ * share a single polling loop and a single batched request.
+ */
+export function subscribePrices(symbols: string[], listener: (symbol: string, price: number) => void): () => void {
+  const unique = [...new Set((symbols || []).map((s) => (s || '').trim().toUpperCase()).filter(Boolean))];
+  const unsubs = unique.map((sym) => subscribeQuote(sym, listener));
+  return () => { for (const u of unsubs) u(); };
+}
+
+function startHub() {
+  if (_hubTimer != null) return;
+  _hubTimer = setInterval(() => { void hubTick(); }, HUB_INTERVAL);
+  void hubTick();
+}
+
+// Stop the shared timer once nothing is subscribed any more, so a backgrounded
+// tab (or a fully closed watchlist) doesn't keep polling.
+function maybeStopHub() {
+  if (_hubListeners.size || _hubBatchListeners.size) return;
+  if (_hubTimer != null) { clearInterval(_hubTimer); _hubTimer = null; }
+}
+
+async function hubTick() {
+  if (_hubBusy) return;
+  const symbols = [..._hubListeners.keys()];
+  if (!symbols.length && !_hubBatchListeners.size) return;
+  _hubBusy = true;
+  _hubInFlight = (async () => {
+    try {
+      const prices = await fetchBatchPrices(symbols);
+      for (const [sym, price] of prices) {
+        _hubPrices.set(sym, price);
+        const set = _hubListeners.get(sym);
+        if (!set) continue;
+        for (const l of set) { try { l(sym, price); } catch {} }
+      }
+      // Batch listeners get everything in a single callback.
+      if (_hubBatchListeners.size && prices.size) {
+        for (const l of _hubBatchListeners) { try { l(prices); } catch {} }
+      }
+    } catch {}
+  })();
+  try { await _hubInFlight; } finally { _hubBusy = false; _hubInFlight = null; }
+}
+
+/**
+ * Fetch live prices for MANY symbols in one HTTP request.
+ * Uses the same batched endpoint as the quote hub.
+ */
+export async function getLivePrices(symbols: string[]): Promise<Map<string, number>> {
+  const unique = [...new Set((symbols || []).map((s) => (s || '').trim().toUpperCase()).filter(Boolean))];
+  if (!unique.length) return new Map();
+  return fetchBatchPrices(unique);
+}
+
+// The server caps a single /api/quotes request at 40 symbols. Larger sets are
+// split into chunks and fetched in parallel so nothing is silently dropped.
+const BATCH_LIMIT = 40;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+// Fetch several quotes in ONE /api/quotes request (chunked if needed).
+// Falls back to per-symbol requests when the batch endpoint is unavailable.
+async function fetchBatchPrices(symbols: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!symbols.length) return out;
+  const chunks = chunk(symbols, BATCH_LIMIT);
+
+  const batchOk = await Promise.all(chunks.map(async (chunkSymbols) => {
+    try {
+      const r = await fetch(`/api/quotes?symbols=${encodeURIComponent(chunkSymbols.join(','))}`);
+      if (!r.ok) return false;
+      const d = await r.json();
+      const quotes = d?.quotes || {};
+      for (const sym of chunkSymbols) {
+        const p = Number(quotes[sym]?.price);
+        if (typeof p === 'number' && isFinite(p) && p > 0) {
+          out.set(sym, p);
+          _priceCache.set(sym, { price: p, ts: Date.now() });
+        }
+      }
+      return true;
+    } catch { return false; }
+  }));
+
+  // If ANY chunk failed, fill the gaps with per-symbol fetches
+  // (these share the cache / in-flight dedup and are much cheaper).
+  if (batchOk.some((ok) => !ok)) {
+    const missing = symbols.filter((sym) => !out.has(sym));
+    await Promise.all(missing.map(async (sym) => {
+      const p = await getLivePrice(sym);
+      if (p != null && p > 0) out.set(sym, p);
+    }));
+  }
+  return out;
 }
 
 // ---------- Storage adapters ----------

@@ -701,109 +701,231 @@ async function fetchYahooQuoteFresh(symbol: string): Promise<{ price: number; fr
 // The hard 6s budget below keeps us under Vercel's function timeout; whenever the
 // upstream source is slow/unreachable we answer from lastKnownQuote (never empty).
 const _lastKnownQuote = new Map<string, { price: number; ts: number }>();
-function answerQuote(res: any, symbol: string, price: number): void {
-  _lastKnownQuote.set(symbol, { price, ts: Date.now() });
-  res.json({ symbol, price, ts: Date.now() });
+
+// ── Quote cache + in-flight coalescing ──
+// The mobile UI polls /api/quote ~1×/s per symbol and the desktop watchlist
+// polls ~8 symbols at once. Without a cache every poll re-hits Yahoo (2 hosts),
+// Binance (N endpoints) or Twelve Data upstream — that upstream fan-out is what
+// made the mobile interface feel sluggish. Two layers fix it:
+//   1. a short TTL cache per symbol (1s — still "live" for a spot price), and
+//   2. an in-flight map so concurrent requests for the SAME symbol share one
+//      upstream round trip instead of racing each other.
+const QUOTE_TTL_MS = 1000;
+const _quoteCache = new Map<string, { price: number; ts: number }>();
+const _quoteInflight = new Map<string, Promise<number | null>>();
+
+function cachedQuote(symbol: string): { price: number; ts: number } | null {
+  const c = _quoteCache.get(symbol);
+  if (!c) return null;
+  if (Date.now() - c.ts < QUOTE_TTL_MS) return c;
+  _quoteCache.delete(symbol);
+  return null;
+}
+
+/** Cache the price and mirror it into the never-empty last-known map. */
+function storeQuote(symbol: string, price: number): { price: number; ts: number } {
+  const entry = { price, ts: Date.now() };
+  _quoteCache.set(symbol, entry);
+  _lastKnownQuote.set(symbol, entry);
+  return entry;
 }
 app.get("/api/quote", async (req, res) => {
   try {
     const symbol = (req.query.symbol as string || '').toUpperCase().replace(/ /g, '');
     if (!symbol) return res.status(400).json({ error: "Symbol is required" });
 
-    const cryptoPair = findServerCryptoPair(symbol);
-    const isCrypto = !!cryptoPair;
+    const ctx = symbolContext(symbol);
 
-    const customMappings: Record<string, string> = {
-      'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F', 'XPTUSD': 'PL=F', 'XPDUSD': 'PA=F',
-      'XCUUSD': 'HG=F', 'XALUSD': 'ALI=F',
-    };
-    const indexCfds: Record<string, string> = {
-      'US500': '^GSPC', 'US30': '^DJI', 'US100': '^NDX', 'NAS100': '^NDX', 'USTEC': '^NDX',
-      'UK100': '^FTSE', 'DE40': '^GDAXI', 'JP225': '^N225',
-      'HK50': '^HSI', 'AU200': '^AXJO',
-    };
-    const isIndex = !!indexCfds[symbol];
-    const isMetal = !!customMappings[symbol] && !isIndex;
+    // ── Cache fast path: serve the last price if it is younger than the TTL ──
+    const hit = cachedQuote(symbol);
+    if (hit) return res.json({ symbol, price: hit.price, ts: hit.ts });
 
-    const forexQuotes = ['USD','EUR','JPY','GBP','AUD','NZD','CAD','CHF','MXN','ZAR','TRY','SEK','NOK','DKK','SGD','HKD','CNH','THB','INR','PLN','CZK','HUF','ILS','KRW','TWD','DZD','EGP','MAD','TND','SAR','AED'];
-    const isForex = !isMetal && !isCrypto && !isIndex && symbol.length === 6 &&
-      forexQuotes.some(q => symbol.endsWith(q)) && forexQuotes.some(q => symbol.startsWith(q));
-
-    // ── 1) CRYPTO: Binance real-time ticker price ──
-    if (isCrypto) {
-      const pair = findServerCryptoPair(symbol)!;
-      const ac = new AbortController();
-      const timeout = setTimeout(() => ac.abort(), 8000);
-      try {
-        const results = await Promise.allSettled(
-          BINANCE_ENDPOINTS.map(async (base) => {
-            const r = await fetch(`${base}/api/v3/ticker/price?symbol=${pair}`, { signal: ac.signal });
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            return r.json();
-          })
-        );
-        clearTimeout(timeout);
-        const hit = results.find((x): x is PromiseFulfilledResult<any> => x.status === 'fulfilled' && typeof x.value?.price === 'number');
-        const price = hit?.value?.price as number | undefined;
-        if (typeof price === 'number' && price > 0) {
-          return answerQuote(res, symbol, price);
-        }
-      } catch { clearTimeout(timeout); }
-      // Fallback: last 1m kline close
-      const k = await fetchBinanceData(symbol, '1m');
-      const closes = k?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
-      if (Array.isArray(closes)) {
-        for (let i = closes.length - 1; i >= 0; i--) {
-          if (closes[i] != null && closes[i] > 0) return answerQuote(res, symbol, closes[i]);
-        }
+    // ── In-flight coalescing: concurrent polls for the same symbol share one
+    //    upstream round trip instead of each firing its own Yahoo/Binance fan-out.
+    const pending = _quoteInflight.get(symbol);
+    if (pending) {
+      const price = await pending;
+      if (price != null && price > 0) {
+        const e = storeQuote(symbol, price);
+        return res.json({ symbol, price: e.price, ts: e.ts });
       }
       const ck = _lastKnownQuote.get(symbol);
       if (ck && typeof ck.price === 'number') return res.json({ symbol, price: ck.price, ts: ck.ts });
-      return res.status(404).json({ error: 'No crypto quote' });
+      return res.status(404).json({ error: 'No fresh quote available' });
     }
 
-    const quoteSymbol = isMetal ? customMappings[symbol] : isIndex ? indexCfds[symbol] : symbol;
-    const quoteAttempts = isForex ? attemptsYahooFor(symbol) : [quoteSymbol];
-    const uniqueAttempts = [...new Set([...quoteAttempts, quoteSymbol])];
-    let lastFresh = 0;
-
-    // ── 2) FOREX: real-time via Twelve Data (live tick, rate-limited 7/min),
-    //    then Yahoo (free but can return region-frozen stale rates for AUD/GBP),
-    //    then open.er-api/ECB (daily rates, always available but static). ──
-    // Twelve Data /price costs 1 credit per call. We cache each symbol for 5s
-    // and cap at 7 calls/min so the free-tier quota is never exhausted.
-    if (isForex) {
-      const td = await fetchTwelveDataPrice(symbol);
-      if (td) return answerQuote(res, symbol, td);
-      for (const attempt of uniqueAttempts) {
-        const y = await fetchYahooQuote(attempt);
-        if (typeof y === 'number' && y > 0) { lastFresh = y; return answerQuote(res, symbol, y); }
-      }
-      const frf = await fetchFrfQuote(symbol);
-      if (typeof frf === 'number' && frf > 0) return answerQuote(res, symbol, frf);
+    const promise = resolveQuoteUpstream(symbol, ctx);
+    _quoteInflight.set(symbol, promise);
+    let price: number | null = null;
+    try {
+      price = await promise;
+    } finally {
+      _quoteInflight.delete(symbol);
     }
 
-    // ── 3) METALS / INDEX / STOCKS: Twelve Data first (real-time spot for metals),
-    //    then Yahoo (free, retries across query1+query2). ──
-    if (isMetal) {
-      const td = await fetchTwelveDataPrice(symbol);
-      if (td) return answerQuote(res, symbol, td);
+    if (price != null && price > 0) {
+      const e = storeQuote(symbol, price);
+      return res.json({ symbol, price: e.price, ts: e.ts });
     }
-    for (const attempt of uniqueAttempts) {
-      const price = await fetchYahooQuote(attempt);
-      if (typeof price === 'number' && price > 0) { lastFresh = price; return answerQuote(res, symbol, price); }
-    }
-
     // No fresh upstream data this call: if we ever answered this symbol, re-serve
     // the last known good price so live P&L never snaps to 0/404 mid-update.
     const ck = _lastKnownQuote.get(symbol);
     if (ck && typeof ck.price === 'number') return res.json({ symbol, price: ck.price, ts: ck.ts });
-    if (lastFresh > 0) return answerQuote(res, symbol, lastFresh);
     return res.status(404).json({ error: 'No fresh quote available' });
   } catch {
     return res.status(500).json({ error: 'Quote server error' });
   }
 });
+
+// Resolve a live price from the upstream providers for one symbol. Returns
+// null when nothing fresh could be fetched (the caller then falls back to the
+// last-known-good price). Extracted from the route so the in-flight coalescer
+// can share a single upstream call between concurrent requests.
+async function resolveQuoteUpstream(
+  symbol: string,
+  ctx: {
+    isCrypto: boolean; isMetal: boolean; isIndex: boolean; isForex: boolean;
+    customMappings: Record<string, string>; indexCfds: Record<string, string>;
+  },
+): Promise<number | null> {
+  const { isCrypto, isMetal, isIndex, isForex, customMappings, indexCfds } = ctx;
+
+  // ── 1) CRYPTO: Binance real-time ticker price ──
+  if (isCrypto) {
+    const pair = findServerCryptoPair(symbol)!;
+    const ac = new AbortController();
+    const timeout = setTimeout(() => ac.abort(), 8000);
+    try {
+      const results = await Promise.allSettled(
+        BINANCE_ENDPOINTS.map(async (base) => {
+          const r = await fetch(`${base}/api/v3/ticker/price?symbol=${pair}`, { signal: ac.signal });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
+        })
+      );
+      clearTimeout(timeout);
+      const hit = results.find((x): x is PromiseFulfilledResult<any> => x.status === 'fulfilled' && typeof x.value?.price === 'number');
+      const price = hit?.value?.price as number | undefined;
+      if (typeof price === 'number' && price > 0) return price;
+    } catch { clearTimeout(timeout); }
+    // Fallback: last 1m kline close
+    const k = await fetchBinanceData(symbol, '1m');
+    const closes = k?.chart?.result?.[0]?.indicators?.quote?.[0]?.close;
+    if (Array.isArray(closes)) {
+      for (let i = closes.length - 1; i >= 0; i--) {
+        if (closes[i] != null && closes[i] > 0) return closes[i];
+      }
+    }
+    return null;
+  }
+
+  const quoteSymbol = isMetal ? customMappings[symbol] : isIndex ? indexCfds[symbol] : symbol;
+  const quoteAttempts = isForex ? attemptsYahooFor(symbol) : [quoteSymbol];
+  const uniqueAttempts = [...new Set([...quoteAttempts, quoteSymbol])];
+
+  // ── 2) FOREX: real-time via Twelve Data (live tick, rate-limited 7/min),
+  //    then Yahoo (free but can return region-frozen stale rates for AUD/GBP),
+  //    then open.er-api/ECB (daily rates, always available but static). ──
+  // Twelve Data /price costs 1 credit per call. We cache each symbol for 5s
+  // and cap at 7 calls/min so the free-tier quota is never exhausted.
+  if (isForex) {
+    const td = await fetchTwelveDataPrice(symbol);
+    if (td) return td;
+    for (const attempt of uniqueAttempts) {
+      const y = await fetchYahooQuote(attempt);
+      if (typeof y === 'number' && y > 0) return y;
+    }
+    const frf = await fetchFrfQuote(symbol);
+    if (typeof frf === 'number' && frf > 0) return frf;
+  }
+
+  // ── 3) METALS / INDEX / STOCKS: Twelve Data first (real-time spot for metals),
+  //    then Yahoo (free, retries across query1+query2). ──
+  if (isMetal) {
+    const td = await fetchTwelveDataPrice(symbol);
+    if (td) return td;
+  }
+  for (const attempt of uniqueAttempts) {
+    const price = await fetchYahooQuote(attempt);
+    if (typeof price === 'number' && price > 0) return price;
+  }
+  return null;
+}
+
+// API Route: Batch Spot Quotes — resolves several symbols in ONE round trip.
+// The mobile watchlist polls 8 symbols at once; issuing 8 separate /api/quote
+// requests meant 8 × (Yahoo×2 hosts / Binance×N endpoints) upstream fan-outs
+// per second. This endpoint shares the per-symbol cache + in-flight coalescer
+// and resolves everything concurrently in a single HTTP request.
+app.get("/api/quotes", async (req, res) => {
+  try {
+    const raw = req.query.symbols as string || '';
+    const requested = [...new Set(
+      raw.split(',')
+        .map((s) => s.trim().toUpperCase().replace(/ /g, ''))
+        .filter(Boolean)
+    )];
+    const symbols = requested.slice(0, 40);
+    if (!symbols.length) return res.status(400).json({ error: "symbols is required" });
+
+    const out: Record<string, { price: number; ts: number } | null> = {};
+    await Promise.all(symbols.map(async (symbol) => {
+      const hit = cachedQuote(symbol);
+      if (hit) { out[symbol] = hit; return; }
+      const pending = _quoteInflight.get(symbol);
+      if (pending) {
+        const price = await pending;
+        if (price != null && price > 0) { out[symbol] = storeQuote(symbol, price); return; }
+        const ck = _lastKnownQuote.get(symbol);
+        out[symbol] = ck ? { price: ck.price, ts: ck.ts } : null;
+        return;
+      }
+      const promise = resolveQuoteUpstream(symbol, symbolContext(symbol));
+      _quoteInflight.set(symbol, promise);
+      try {
+        const price = await promise;
+        if (price != null && price > 0) { out[symbol] = storeQuote(symbol, price); return; }
+        const ck = _lastKnownQuote.get(symbol);
+        out[symbol] = ck ? { price: ck.price, ts: ck.ts } : null;
+      } finally {
+        _quoteInflight.delete(symbol);
+      }
+    }));
+
+    return res.json({
+      quotes: out,
+      ts: Date.now(),
+      // Lets the client know it must issue a follow-up request for the rest.
+      truncated: requested.length > symbols.length,
+      remaining: requested.length > symbols.length ? requested.slice(symbols.length) : undefined,
+    });
+  } catch {
+    return res.status(500).json({ error: "Batch quote server error" });
+  }
+});
+
+// Classify a symbol the same way the /api/quote route does.
+function symbolContext(symbol: string): {
+  isCrypto: boolean; isMetal: boolean; isIndex: boolean; isForex: boolean;
+  customMappings: Record<string, string>; indexCfds: Record<string, string>;
+} {
+  const customMappings: Record<string, string> = {
+    'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F', 'XPTUSD': 'PL=F', 'XPDUSD': 'PA=F',
+    'XCUUSD': 'HG=F', 'XALUSD': 'ALI=F',
+  };
+  const indexCfds: Record<string, string> = {
+    'US500': '^GSPC', 'US30': '^DJI', 'US100': '^NDX', 'NAS100': '^NDX', 'USTEC': '^NDX',
+    'UK100': '^FTSE', 'DE40': '^GDAXI', 'JP225': '^N225',
+    'HK50': '^HSI', 'AU200': '^AXJO',
+  };
+  const isCrypto = !!findServerCryptoPair(symbol);
+  const isIndex = !!indexCfds[symbol];
+  const isMetal = !!customMappings[symbol] && !isIndex;
+  const forexQuotes = ['USD','EUR','JPY','GBP','AUD','NZD','CAD','CHF','MXN','ZAR','TRY','SEK','NOK','DKK','SGD','HKD','CNH','THB','INR','PLN','CZK','HUF','ILS','KRW','TWD','DZD','EGP','MAD','TND','SAR','AED'];
+  const isForex = !isMetal && !isCrypto && !isIndex && symbol.length === 6 &&
+    forexQuotes.some(q => symbol.endsWith(q)) && forexQuotes.some(q => symbol.startsWith(q));
+  return { isCrypto, isMetal, isIndex, isForex, customMappings, indexCfds };
+}
 
 // API Route: Market Data
 app.get("/api/market-data", async (req, res) => {

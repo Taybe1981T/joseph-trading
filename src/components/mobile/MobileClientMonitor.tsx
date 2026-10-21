@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, ShieldOff, Trash2, RefreshCw, Clock, Crown } from 'lucide-react';
+import { Users, ShieldOff, Trash2, RefreshCw, Clock, Crown, X } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
 
@@ -86,7 +86,7 @@ export function MobileClientMonitor({ lang, onClose }: Props) {
           <button className="mt5-icon-btn" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          <button onClick={load}
+          <button onClick={loadClients}
             style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #2a2a2a', background: '#0a0a0a', color: '#e0e0e0', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
             <RefreshCw size={14} /> {mobileT(lang, 'Refresh', 'تحديث')}
           </button>

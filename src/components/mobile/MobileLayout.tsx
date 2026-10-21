@@ -29,6 +29,7 @@ import {
   closeMobileTrade,
   startMobilePositionManager,
 } from '../../services/mobileTradeBridge';
+import { calcPnl, getLivePrices } from '../../services/paperTradingService';
 
 interface MobileSignal {
   symbol: string;
@@ -203,20 +204,19 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         };
       });
       // Hydrate live prices once for an instant accurate display.
+      // ONE batched request for all open symbols instead of one per position.
       try {
-        const { mobileLivePrice } = await import('../../services/mobileTradeBridge');
+        const syms = [...new Set(mapped.map((m) => m.symbol))];
+        const prices = await getLivePrices(syms);
         for (const m of mapped) {
-          try {
-            const p = await mobileLivePrice(m.symbol);
-            if (p != null && p > 0) {
-              m.currentPrice = p;
-              const t = open.find((x: any) => String(x.id) === m.id);
-              if (t) {
-                const { calcPnl } = await import('../../services/paperTradingService');
-                m.profit = calcPnl(t as any, p);
-              }
+          const p = prices.get(m.symbol);
+          if (p != null && p > 0) {
+            m.currentPrice = p;
+            const t = open.find((x: any) => String(x.id) === m.id);
+            if (t) {
+              m.profit = calcPnl(t as any, p);
             }
-          } catch {}
+          }
         }
       } catch {}
       setPositions(mapped);
@@ -333,9 +333,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       )}
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
         {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
-        {tab === 'quotes' && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
+        {tab === 'quotes' && isDev && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
+        {/* Desktop parity: dev-only sections never render for clients. */}
         {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} />}
         {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} />}
