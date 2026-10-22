@@ -1,3 +1,9 @@
+// ⚠️ STALE / UNUSED — do NOT mount this in production or local dev.
+// Root server.ts now imports ./api/server.ts (the same file Vercel serves via
+// the /api/(.*) rewrite). This file is an older, partial copy: it has no
+// /api/quote or /api/quotes route and no quote caching, so mobile live prices
+// would fall back to the heavier /api/market-data and re-hit upstream on every
+// poll. Keep it only for reference; prefer api/server.ts.
 import express from "express";
 import nodemailer from "nodemailer";
 

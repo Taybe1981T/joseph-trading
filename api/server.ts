@@ -549,10 +549,11 @@ const fetchTwelveDataOHLC = async (symbol: string, timeframe: string): Promise<a
 };
 
 async function fetchYahooQuote(symbol: string): Promise<number | null> {
-  // Race query2 + query1 in parallel (whichever answers first with a valid price),
-  // short 5s abort so slow/unreachable hosts never block the quote for long.
+  // Try the Yahoo hosts SEQUENTIALLY with an early exit instead of racing both.
+  // Racing meant every quote cost 2 upstream requests for the same price, and
+  // query2 usually answers first anyway.
   const hosts = ['query2.finance.yahoo.com', 'query1.finance.yahoo.com'];
-  const attempts = hosts.map(async (host) => {
+  for (const host of hosts) {
     try {
       const url = `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1m&range=1d&_cb=${Date.now()}&_q=${Math.random().toString(36).slice(2,6)}`;
       const controller = new AbortController();
@@ -565,10 +566,10 @@ async function fetchYahooQuote(symbol: string): Promise<number | null> {
         }
       });
       clearTimeout(timeout);
-      if (!response.ok) return null;
+      if (!response.ok) continue;
       const d = await response.json();
       const result = d?.chart?.result?.[0];
-      if (!result) return null;
+      if (!result) continue;
       let price = Number(result?.meta?.regularMarketPrice);
       const closes = result?.indicators?.quote?.[0]?.close;
       const ts = result?.timestamp;
@@ -580,11 +581,8 @@ async function fetchYahooQuote(symbol: string): Promise<number | null> {
       }
       if (price > 0) return price;
     } catch {}
-
-    return null;
-  });
-  const settled = await Promise.all(attempts);
-  return settled.find((p): p is number => typeof p === 'number' && p > 0) ?? null;
+  }
+  return null;
 }
 
 // Adaptive forex spot sources that are free, keyless, credit-unlimited and — unlike
@@ -692,6 +690,22 @@ async function fetchYahooQuoteFresh(symbol: string): Promise<{ price: number; fr
   return { price, fresh: true };
 }
 
+/** Resolve a promise, or null if it doesn't settle within `ms`. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise<T | null>((resolve) => {
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; resolve(null); } }, ms);
+    p.then((v) => { if (!done) { done = true; clearTimeout(t); resolve(v); } },
+           () => { if (!done) { done = true; clearTimeout(t); resolve(null); } });
+  });
+}
+
+// Hard budget for a single quote resolution. The upstream chain (Twelve Data
+// -> Yahoo host 1 -> Yahoo host 2 -> frankfurter) can take many seconds; the
+// client polls every second, so a slow answer blocks the whole UI. After the
+// budget we answer from the last known good price instead of waiting.
+const QUOTE_BUDGET_MS = 4000;
+
 // API Route: Latest Spot Quote (fast, lightweight). Returns { symbol, price, ts }
 // Used by the paper-trading live P&L engine so open trades move with REAL market
 // prices instead of polling full 5m candle histories. Per-class source:
@@ -710,16 +724,40 @@ const _lastKnownQuote = new Map<string, { price: number; ts: number }>();
 //   1. a short TTL cache per symbol (1s — still "live" for a spot price), and
 //   2. an in-flight map so concurrent requests for the SAME symbol share one
 //      upstream round trip instead of racing each other.
-const QUOTE_TTL_MS = 1000;
+const QUOTE_TTL_MS = 3000;
+// A cached price may still be served while it is being refreshed (stale-while-
+// revalidate). The client polls once per second, so with a 1s TTL every poll
+// landed exactly on the expiry boundary and re-hit Yahoo/Binance/Twelve Data.
+const QUOTE_STALE_MS = 30000;
 const _quoteCache = new Map<string, { price: number; ts: number }>();
 const _quoteInflight = new Map<string, Promise<number | null>>();
 
 function cachedQuote(symbol: string): { price: number; ts: number } | null {
   const c = _quoteCache.get(symbol);
   if (!c) return null;
-  if (Date.now() - c.ts < QUOTE_TTL_MS) return c;
+  const age = Date.now() - c.ts;
+  if (age < QUOTE_TTL_MS) return c;
+  if (age < QUOTE_STALE_MS) {
+    // Fresh enough to serve instantly; refresh it in the background.
+    scheduleRefresh(symbol);
+    return c;
+  }
   _quoteCache.delete(symbol);
   return null;
+}
+
+/** Trigger a background upstream refresh for a symbol (fire-and-forget). */
+function scheduleRefresh(symbol: string): void {
+  if (_quoteInflight.has(symbol)) return;
+  const ctx = symbolContext(symbol);
+  const promise = resolveQuoteUpstream(symbol, ctx)
+    .then((price) => {
+      if (price != null && price > 0) storeQuote(symbol, price);
+      return price;
+    })
+    .catch(() => null)
+    .finally(() => { _quoteInflight.delete(symbol); });
+  _quoteInflight.set(symbol, promise);
 }
 
 /** Cache the price and mirror it into the never-empty last-known map. */
@@ -744,7 +782,7 @@ app.get("/api/quote", async (req, res) => {
     //    upstream round trip instead of each firing its own Yahoo/Binance fan-out.
     const pending = _quoteInflight.get(symbol);
     if (pending) {
-      const price = await pending;
+      const price = await withTimeout(pending, QUOTE_BUDGET_MS);
       if (price != null && price > 0) {
         const e = storeQuote(symbol, price);
         return res.json({ symbol, price: e.price, ts: e.ts });
@@ -756,9 +794,12 @@ app.get("/api/quote", async (req, res) => {
 
     const promise = resolveQuoteUpstream(symbol, ctx);
     _quoteInflight.set(symbol, promise);
+    // Cache any price that arrives late (after our 4s budget) so the next poll
+    // hits cache instead of re-hitting upstream — never throw a fetched price away.
+    promise.then((p) => { if (p != null && p > 0) storeQuote(symbol, p); }).catch(() => {});
     let price: number | null = null;
     try {
-      price = await promise;
+      price = await withTimeout(promise, QUOTE_BUDGET_MS);
     } finally {
       _quoteInflight.delete(symbol);
     }
@@ -793,20 +834,22 @@ async function resolveQuoteUpstream(
   // ── 1) CRYPTO: Binance real-time ticker price ──
   if (isCrypto) {
     const pair = findServerCryptoPair(symbol)!;
+    // Try the Binance endpoints SEQUENTIALLY with an early exit. Racing all
+    // four in parallel meant every cache refresh fired 4 identical requests
+    // (api.binance.com almost always answers) — pure waste and a fast way to
+    // get rate-limited.
     const ac = new AbortController();
     const timeout = setTimeout(() => ac.abort(), 8000);
     try {
-      const results = await Promise.allSettled(
-        BINANCE_ENDPOINTS.map(async (base) => {
+      for (const base of BINANCE_ENDPOINTS) {
+        try {
           const r = await fetch(`${base}/api/v3/ticker/price?symbol=${pair}`, { signal: ac.signal });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json();
-        })
-      );
-      clearTimeout(timeout);
-      const hit = results.find((x): x is PromiseFulfilledResult<any> => x.status === 'fulfilled' && typeof x.value?.price === 'number');
-      const price = hit?.value?.price as number | undefined;
-      if (typeof price === 'number' && price > 0) return price;
+          if (!r.ok) continue;
+          const j = await r.json();
+          const p = Number(j?.price);
+          if (typeof p === 'number' && p > 0) { clearTimeout(timeout); return p; }
+        } catch { if (ac.signal.aborted) break; continue; }
+      }
     } catch { clearTimeout(timeout); }
     // Fallback: last 1m kline close
     const k = await fetchBinanceData(symbol, '1m');
@@ -874,7 +917,7 @@ app.get("/api/quotes", async (req, res) => {
       if (hit) { out[symbol] = hit; return; }
       const pending = _quoteInflight.get(symbol);
       if (pending) {
-        const price = await pending;
+        const price = await withTimeout(pending, QUOTE_BUDGET_MS);
         if (price != null && price > 0) { out[symbol] = storeQuote(symbol, price); return; }
         const ck = _lastKnownQuote.get(symbol);
         out[symbol] = ck ? { price: ck.price, ts: ck.ts } : null;
@@ -882,8 +925,11 @@ app.get("/api/quotes", async (req, res) => {
       }
       const promise = resolveQuoteUpstream(symbol, symbolContext(symbol));
       _quoteInflight.set(symbol, promise);
+      // Cache any price that arrives late (after our 4s budget) so the next poll
+      // hits cache instead of re-hitting upstream — never throw a fetched price away.
+      promise.then((p) => { if (p != null && p > 0) storeQuote(symbol, p); }).catch(() => {});
       try {
-        const price = await promise;
+        const price = await withTimeout(promise, QUOTE_BUDGET_MS);
         if (price != null && price > 0) { out[symbol] = storeQuote(symbol, price); return; }
         const ck = _lastKnownQuote.get(symbol);
         out[symbol] = ck ? { price: ck.price, ts: ck.ts } : null;

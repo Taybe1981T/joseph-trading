@@ -310,7 +310,7 @@ async function hubTick() {
   _hubBusy = true;
   _hubInFlight = (async () => {
     try {
-      const prices = await fetchBatchPrices(symbols);
+      const prices = await fetchBatchPrices(symbols, { force: true });
       for (const [sym, price] of prices) {
         _hubPrices.set(sym, price);
         const set = _hubListeners.get(sym);
@@ -348,10 +348,26 @@ function chunk<T>(items: T[], size: number): T[][] {
 
 // Fetch several quotes in ONE /api/quotes request (chunked if needed).
 // Falls back to per-symbol requests when the batch endpoint is unavailable.
-async function fetchBatchPrices(symbols: string[]): Promise<Map<string, number>> {
+async function fetchBatchPrices(symbols: string[], opts?: { force?: boolean }): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!symbols.length) return out;
-  const chunks = chunk(symbols, BATCH_LIMIT);
+
+  // Serve the still-fresh ones from the client cache first. Several mobile
+  // surfaces (positions, account header, trailing manager) ask for the SAME
+  // symbols at nearly the same time; without this every one of them issued
+  // its own network round trip even though the price was already known.
+  // The quote hub passes force=true — it IS the refresh loop and must always
+  // hit the network, otherwise the whole app would freeze on a cached price.
+  const force = opts?.force === true;
+  const need: string[] = [];
+  for (const sym of symbols) {
+    const c = _priceCache.get(sym);
+    if (!force && c && Date.now() - c.ts < PRICE_TTL) out.set(sym, c.price);
+    else need.push(sym);
+  }
+  if (!need.length) return out;
+
+  const chunks = chunk(need, BATCH_LIMIT);
 
   const batchOk = await Promise.all(chunks.map(async (chunkSymbols) => {
     try {
@@ -373,7 +389,7 @@ async function fetchBatchPrices(symbols: string[]): Promise<Map<string, number>>
   // If ANY chunk failed, fill the gaps with per-symbol fetches
   // (these share the cache / in-flight dedup and are much cheaper).
   if (batchOk.some((ok) => !ok)) {
-    const missing = symbols.filter((sym) => !out.has(sym));
+    const missing = need.filter((sym) => !out.has(sym));
     await Promise.all(missing.map(async (sym) => {
       const p = await getLivePrice(sym);
       if (p != null && p > 0) out.set(sym, p);

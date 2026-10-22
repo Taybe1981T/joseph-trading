@@ -4,7 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import fs from "fs";
-import apiApp from "./api/index.ts";
+import apiApp from "./api/server.ts";
 
 dotenv.config();
 
@@ -24,7 +24,9 @@ async function startServer() {
   app.use(express.json());
   console.log("[Server] Initializing Finalyze Engine...");
 
-  // Mount API endpoints from api/index.ts
+  // Mount API endpoints from api/server.ts (the same file Vercel serves via the
+  // /api/(.*) rewrite). api/index.ts was an older, partial copy without
+  // /api/quote or /api/quotes — the live-price routes the UI depends on.
   app.use(apiApp);
 
   // API Route: Health check
