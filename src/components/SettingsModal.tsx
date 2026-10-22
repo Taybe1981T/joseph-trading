@@ -81,7 +81,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
   const [saveStableDone, setSaveStableDone] = useState(false);
   const [saveStableError, setSaveStableError] = useState('');
 
-  const GITHUB_REPO = 'kraa1981t/finalyze-ai';
+  const GITHUB_REPO = 'Taybe1981T/joseph-trading';
   const STABLE_TAG = 'stable-v2';
 
   const ghHeaders = () => {

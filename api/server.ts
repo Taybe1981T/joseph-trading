@@ -1090,7 +1090,7 @@ app.get("/api/market-data", async (req, res) => {
 // API Route: Factory Reset — trigger redeploy from stable-v1
 const STABLE_VERSION_HASH = '62c47deed780f1122533632a688f7760ff0c71f5';
 const STABLE_VERSION_TAG = 'stable-v1';
-const GITHUB_REPO = 'kraa1981t/finalyze-ai';
+const GITHUB_REPO = 'Taybe1981T/joseph-trading';
 const GITHUB_ACTIONS_URL = `https://github.com/${GITHUB_REPO}/actions/new`;
 
 app.post("/api/factory-reset", async (req, res) => {
