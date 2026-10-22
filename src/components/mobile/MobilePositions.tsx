@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { X, Pencil, Check } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
-import { closeMobileTrade, updateMobileTradeLevels } from '../../services/mobileTradeBridge';
+import { closeMobileTrade, updateMobileTradeLevels, detectMobileTradeCategory } from '../../services/mobileTradeBridge';
 import { subscribeQuoteBatch } from '../../services/paperTradingService';
+import { slAmountUSD, usdToPrice } from '../../lib/positionMath';
 
 export interface MobilePosition {
   id: string;
@@ -50,10 +51,24 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
   const [live, setLive] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [tab, setTab] = useState<'open' | 'history'>('open');
-  // SL/TP inline editor (desktop parity: pencil → inputs → save).
-  const [editing, setEditing] = useState<string | null>(null);
-  const [editSl, setEditSl] = useState('');
-  const [editTp, setEditTp] = useState('');
+  // SL/TP/Trailing edit modal (desktop parity: pencil → modal → save).
+  // Values are entered in USD and converted to/from price via positionMath.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editSlUsd, setEditSlUsd] = useState('');
+  const [editTpUsd, setEditTpUsd] = useState('');
+  const [editTrailAct, setEditTrailAct] = useState('');
+  const [editTrailStep, setEditTrailStep] = useState('');
+
+  const loadTrailingDefaults = () => {
+    const fallback = { baseActivationUSD: 5, baseStepUSD: 2 };
+    try {
+      const s = JSON.parse(localStorage.getItem('strategy_settings') || '{}');
+      return {
+        baseActivationUSD: (s as any).trailingBaseActivationUSD ?? fallback.baseActivationUSD,
+        baseStepUSD: (s as any).trailingBaseStepUSD ?? fallback.baseStepUSD,
+      };
+    } catch { return fallback; }
+  };
 
   // Live P&L from the SAME real quote path as desktop (getLivePrice → /api/quote).
   // Now driven by the shared quote hub: one batched request for the whole app
@@ -87,22 +102,57 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
   };
 
   const startEdit = (p: MobilePosition) => {
-    setEditing(p.id);
-    setEditSl(p.sl != null ? String(p.sl) : '');
-    setEditTp(p.tp != null ? String(p.tp) : '');
+    const category = p.category || detectMobileTradeCategory(p.symbol);
+    const entry = p.openPrice;
+    const qty = p.volume;
+    setEditingId(p.id);
+    // Convert current SL/TP prices to USD amounts for editing.
+    setEditSlUsd(p.sl != null && entry > 0 && qty > 0
+      ? slAmountUSD(p.symbol, Math.abs(entry - p.sl), qty, category).toFixed(2)
+      : '');
+    setEditTpUsd(p.tp != null && entry > 0 && qty > 0
+      ? slAmountUSD(p.symbol, Math.abs(entry - p.tp), qty, category).toFixed(2)
+      : '');
+    const d = loadTrailingDefaults();
+    setEditTrailAct(String(d.baseActivationUSD));
+    setEditTrailStep(String(d.baseStepUSD));
   };
 
   const saveLevels = async (p: MobilePosition) => {
-    const sl = editSl.trim() === '' ? null : Number(editSl);
-    const tp = editTp.trim() === '' ? null : Number(editTp);
-    if ((sl != null && !(sl > 0)) || (tp != null && !(tp > 0))) return;
+    const category = p.category || detectMobileTradeCategory(p.symbol);
+    const entry = p.openPrice;
+    const qty = p.volume;
+    const slUsd = parseFloat(editSlUsd);
+    const tpUsd = parseFloat(editTpUsd);
+    const trailAct = parseFloat(editTrailAct);
+    const trailStep = parseFloat(editTrailStep);
+
+    let nextSl: number | null = null;
+    let nextTp: number | null = null;
+    if (isFinite(slUsd) && slUsd > 0 && entry > 0 && qty > 0) {
+      nextSl = usdToPrice(p.symbol, slUsd, entry, p.side !== 'buy', qty, category);
+    }
+    if (isFinite(tpUsd) && tpUsd > 0 && entry > 0 && qty > 0) {
+      nextTp = usdToPrice(p.symbol, tpUsd, entry, p.side === 'buy', qty, category);
+    }
+
     setBusy(p.id);
     try {
-      await updateMobileTradeLevels(p.id, sl, tp);
-      // Optimistic: update the row instantly (layout re-fetch confirms).
-      p.sl = sl; p.tp = tp;
+      await updateMobileTradeLevels(p.id, nextSl, nextTp);
+      p.sl = nextSl; p.tp = nextTp;
     } catch {}
-    setEditing(null);
+    // Persist trailing defaults if changed.
+    if (isFinite(trailAct) || isFinite(trailStep)) {
+      try {
+        const s = JSON.parse(localStorage.getItem('strategy_settings') || '{}');
+        if (isFinite(trailAct) && trailAct > 0) s.trailingBaseActivationUSD = trailAct;
+        if (isFinite(trailStep) && trailStep > 0) s.trailingBaseStepUSD = trailStep;
+        localStorage.setItem('strategy_settings', JSON.stringify(s));
+      } catch {}
+    }
+    setEditingId(null);
+    setBusy(null);
+  };
     setBusy(null);
   };
 
@@ -247,47 +297,18 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
               <div className="mt5-card-subtitle" style={{ fontSize: 12, color: '#ccc' }}>
                 {mobileT(lang, 'Entry', 'الدخول')}: {p.openPrice.toFixed(dec)} → {mobileT(lang, 'Now', 'الحالي')}: {cur.toFixed(dec)}
               </div>
-              {/* SL/TP viewer + inline editor (desktop parity: pencil → inputs → check) */}
-              {editing === p.id ? (
-                <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
-                  <label style={{ fontSize: 11, color: '#ff8888', fontWeight: 800 }}>SL
-                    <input
-                      type="number" step="any" value={editSl}
-                      onChange={(e) => setEditSl(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ width: 90, marginLeft: 4, background: '#0a0a0a', border: '1px solid rgba(255,51,51,0.4)', color: '#fff', borderRadius: 6, padding: '4px 6px', fontSize: 12 }}
-                    />
-                  </label>
-                  <label style={{ fontSize: 11, color: '#88ffaa', fontWeight: 800 }}>TP
-                    <input
-                      type="number" step="any" value={editTp}
-                      onChange={(e) => setEditTp(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{ width: 90, marginLeft: 4, background: '#0a0a0a', border: '1px solid rgba(0,255,136,0.4)', color: '#fff', borderRadius: 6, padding: '4px 6px', fontSize: 12 }}
-                    />
-                  </label>
-                  <button
-                    type="button" title={mobileT(lang, 'Save', 'حفظ')}
-                    disabled={busy === p.id}
-                    onClick={(e) => { e.stopPropagation(); saveLevels(p); }}
-                    style={{ padding: '5px 10px', borderRadius: 8, border: 'none', background: '#00ff88', color: '#000', fontWeight: 800, cursor: 'pointer' }}
-                  >
-                    <Check size={14} />
-                  </button>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', gap: 10, marginTop: 2, fontSize: 11, fontWeight: 700, alignItems: 'center' }}>
-                  <span style={{ color: '#ff8888' }}>SL: {p.sl != null ? Number(p.sl).toFixed(dec) : '—'}</span>
-                  <span style={{ color: '#88ffaa' }}>TP: {p.tp != null ? Number(p.tp).toFixed(dec) : '—'}</span>
-                  <button
-                    type="button" title={mobileT(lang, 'Edit SL/TP', 'تعديل الوقف/الهدف')}
-                    onClick={(e) => { e.stopPropagation(); startEdit(p); }}
-                    style={{ padding: '3px 8px', borderRadius: 6, border: '1px solid #2a2a2a', background: '#0a0a0a', color: '#ffaa44', cursor: 'pointer' }}
-                  >
-                    <Pencil size={12} />
-                  </button>
-                </div>
-              )}
+              {/* SL/TP viewer + edit button (desktop parity: pencil → modal in USD) */}
+              <div style={{ display: 'flex', gap: 10, marginTop: 2, fontSize: 11, fontWeight: 700, alignItems: 'center' }}>
+                <span style={{ color: '#ff8888' }}>SL: {p.sl != null ? Number(p.sl).toFixed(dec) : '—'}</span>
+                <span style={{ color: '#88ffaa' }}>TP: {p.tp != null ? Number(p.tp).toFixed(dec) : '—'}</span>
+                <button
+                  type="button" title={mobileT(lang, 'Edit SL/TP/Trailing (USD)', 'تعديل الوقف/الهدف/تريلنغ (دولار)')}
+                  onClick={(e) => { e.stopPropagation(); startEdit(p); }}
+                  style={{ padding: '3px 8px', borderRadius: 6, border: '1px solid #2a2a2a', background: '#0a0a0a', color: '#ffaa44', cursor: 'pointer' }}
+                >
+                  <Pencil size={12} />
+                </button>
+              </div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div className={`mt5-position-profit ${pnl >= 0 ? 'positive' : 'negative'}`}>
@@ -310,4 +331,97 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
       })}
     </div>
   );
+
+  // ── Edit modal: SL/TP in USD + Trailing defaults ──
+  const editPos = editingId ? positions.find((p) => p.id === editingId) : null;
+  if (editingId && editPos) {
+    const category = editPos.category || detectMobileTradeCategory(editPos.symbol);
+    const dec = editPos.openPrice < 10 ? 4 : 2;
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.7)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <div style={{
+          background: '#0d1117', border: '1px solid #2a2a2a', borderRadius: 12,
+          width: 'min(92vw, 380px)', padding: 16,
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12, color: '#fff' }}>
+            {mobileT(lang, 'Edit Levels', 'تعديل المستويات')} — {editPos.symbol}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, color: '#ff8888', fontWeight: 800 }}>
+                SL ({mobileT(lang, 'USD', 'دولار')})
+              </label>
+              <input
+                type="number" step="any" value={editSlUsd}
+                onChange={(e) => setEditSlUsd(e.target.value)}
+                style={{ width: '100%', background: '#0a0a0a', border: '1px solid rgba(255,51,51,0.4)',
+                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
+              />
+              <span style={{ fontSize: 10, color: '#666' }}>
+                {editPos.sl != null ? editPos.sl.toFixed(dec) : '—'} {mobileT(lang, 'current price', 'السعر الحالي')}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, color: '#88ffaa', fontWeight: 800 }}>
+                TP ({mobileT(lang, 'USD', 'دولار')})
+              </label>
+              <input
+                type="number" step="any" value={editTpUsd}
+                onChange={(e) => setEditTpUsd(e.target.value)}
+                style={{ width: '100%', background: '#0a0a0a', border: '1px solid rgba(0,255,136,0.4)',
+                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
+              />
+              <span style={{ fontSize: 10, color: '#666' }}>
+                {editPos.tp != null ? editPos.tp.toFixed(dec) : '—'} {mobileT(lang, 'current price', 'السعر الحالي')}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
+              <label style={{ fontSize: 11, color: '#ffaa44', fontWeight: 800 }}>
+                {mobileT(lang, 'Trailing activation ($)', 'تفعيل التريلنغ ($)')}
+              </label>
+              <input
+                type="number" step="any" value={editTrailAct}
+                onChange={(e) => setEditTrailAct(e.target.value)}
+                style={{ width: '100%', background: '#0a0a0a', border: '1px solid #ffaa44',
+                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, color: '#ffaa44', fontWeight: 800 }}>
+                {mobileT(lang, 'Trailing step ($)', 'خطوة التريلنغ ($)')}
+              </label>
+              <input
+                type="number" step="any" value={editTrailStep}
+                onChange={(e) => setEditTrailStep(e.target.value)}
+                style={{ width: '100%', background: '#0a0a0a', border: '1px solid #ffaa44',
+                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => { setEditingId(null); }}
+                style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid #2a2a2a',
+                  background: '#0a0a0a', color: '#888', cursor: 'pointer' }}
+              >
+                {mobileT(lang, 'Cancel', 'إلغاء')}
+              </button>
+              <button
+                type="button"
+                disabled={busy === editPos.id}
+                onClick={(e) => { e.stopPropagation(); saveLevels(editPos); }}
+                style={{ padding: '6px 14px', borderRadius: 8, border: 'none',
+                  background: '#00ff88', color: '#000', fontWeight: 800, cursor: 'pointer' }}
+              >
+                {mobileT(lang, 'Save', 'حفظ')}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 }

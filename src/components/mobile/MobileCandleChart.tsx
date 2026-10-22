@@ -11,17 +11,9 @@ interface Candle {
 
 interface Props {
   symbol: string;
-  entryPrice?: number | null;
-  sl?: number | null;
-  tp?: number | null;
-  side?: 'buy' | 'sell' | null;
   /** Live market price (from the shared quote hub) — drawn as the last-price line. */
   livePrice?: number | null;
-  /** True when the dynamic trailing stop has ratcheted the stop into profit. */
-  trailingActive?: boolean;
   lang?: 'ar' | 'en';
-  onSlChange?: (price: number) => void;
-  onTpChange?: (price: number) => void;
 }
 
 const TF_LIST = ['15m', '1h', '4h', '1d', '1w'];
@@ -31,26 +23,25 @@ function fmt(n: number): string {
 }
 
 /**
- * Mobile candle chart — real candles from /api/market-data (same backend as
- * desktop TradingViewWidget) rendered on canvas, with draggable
- * entry/SL/TP levels (desktop parity: drag the line, level saves to trade).
+ * Mobile candle chart — clean view.
+ * Real candles from /api/market-data (same backend as desktop TradingViewWidget)
+ * rendered on canvas with a live last-price line. No SL/TP/TS levels are drawn
+ * here — those are managed in the background by mobileTradeBridge and edited
+ * via the position editor (MobilePositions) in USD/pip terms.
  */
-export function MobileCandleChart({ symbol, entryPrice, sl, tp, side, livePrice, trailingActive, lang, onSlChange, onTpChange }: Props) {
+export function MobileCandleChart({ symbol, livePrice, lang }: Props) {
   const isAr = lang === 'ar';
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [tf, setTf] = useState('1h');
   const [candles, setCandles] = useState<Candle[]>([]);
   const [status, setStatus] = useState<'loading' | 'ok' | 'empty'>('loading');
-  const [drag, setDrag] = useState<'sl' | 'tp' | null>(null);
   // The live price the chart renders. Kept in state (not a ref) so the canvas
   // effect re-runs when the quote changes and the price line follows the market.
   const [tickPrice, setTickPrice] = useState<number | null>(null);
   // Last live price per symbol — a symbol switch must NOT show the previous
   // symbol's price, so the value is reset the moment the symbol changes.
   const [priceSymbol, setPriceSymbol] = useState<string>(symbol);
-  const viewRef = useRef({ entryPrice, sl, tp, side });
-  viewRef.current = { entryPrice, sl, tp, side };
   // Canvas width is tracked explicitly so the render effect can depend on it
   // (the canvas must be re-sized when the device rotates or the layout shifts).
   const [width, setWidth] = useState(0);
@@ -157,9 +148,6 @@ export function MobileCandleChart({ symbol, entryPrice, sl, tp, side, livePrice,
     }
     let mn = Infinity, mx = -Infinity;
     for (const c of candles) { mn = Math.min(mn, c.low); mx = Math.max(mx, c.high); }
-    for (const lv of [entryPrice, sl, tp]) {
-      if (lv != null && isFinite(lv)) { mn = Math.min(mn, lv); mx = Math.max(mx, lv); }
-    }
     // The live price is part of the scale so the last-price line is always
     // visible (and never clipped off the top/bottom of the plot).
     if (effectivePrice != null && isFinite(effectivePrice)) {
@@ -259,43 +247,9 @@ export function MobileCandleChart({ symbol, entryPrice, sl, tp, side, livePrice,
       ctx.textAlign = 'left';
       ctx.fillText(label + ' ' + fmt(price), W - 46, Math.max(10, Math.min(H - 24, yy - 3)));
     };
-    line(entryPrice, '#e5e7eb', side === 'sell' ? 'S' : 'B', true);
-    // Trailing stop: when active and price moved into profit, colour the SL line
-    // gold and label it "TS" so the user sees the stop is locking in profit.
-    const slIsTrailing = !!trailingActive && sl != null && entryPrice != null &&
-      (side === 'buy' ? sl > entryPrice : sl < entryPrice);
-    line(sl, slIsTrailing ? '#f59e0b' : '#ff5555', slIsTrailing ? 'TS' : 'SL', false);
-    line(tp, '#00ff88', 'TP', false);
-    // Redraw only when pixels actually change: candles, levels, timeframe, drag
-    // handle, canvas size, live price (tickPrice) and trailing state. This keeps
-    // the canvas from repainting on every parent render (the old source of jank)
-    // while still following live quotes and trailing-stop moves.
-  }, [candles, status, entryPrice, sl, tp, side, tf, isAr, drag, width, tickPrice, livePrice, trailingActive]);
-
-  const yToPrice = (clientY: number): number | null => {
-    try {
-      const cv = canvasRef.current;
-      if (!cv) return null;
-      const fn = (cv as any)._yToPrice;
-      if (typeof fn !== 'function') return null;
-      const r = cv.getBoundingClientRect();
-      return fn(clientY - r.top);
-    } catch { return null; }
-  };
-
-  const nearLine = (clientY: number): 'sl' | 'tp' | null => {
-    try {
-      const cv = canvasRef.current;
-      if (!cv) return null;
-      const fn = (cv as any)._priceToY;
-      if (typeof fn !== 'function') return null;
-      const r = cv.getBoundingClientRect();
-      const py = clientY - r.top;
-      if (sl != null && Math.abs(fn(sl) - py) < 14) return 'sl';
-      if (tp != null && Math.abs(fn(tp) - py) < 14) return 'tp';
-      return null;
-    } catch { return null; }
-  };
+    // Redraw only when pixels actually change: candles, timeframe, canvas size,
+    // and live price (tickPrice). Clean chart — no SL/TP lines drawn here.
+  }, [candles, status, tf, isAr, width, tickPrice, livePrice]);
 
   return (
     <div>
@@ -317,36 +271,11 @@ export function MobileCandleChart({ symbol, entryPrice, sl, tp, side, livePrice,
         ))}
       </div>
       <div ref={wrapRef} style={{ position: 'relative' }}>
-        <canvas
-          ref={canvasRef}
-          style={{ display: 'block', borderRadius: 10, touchAction: 'none', cursor: drag ? 'ns-resize' : 'default' }}
-          onPointerDown={(e) => {
-            const hit = nearLine(e.clientY);
-            if (hit) {
-              setDrag(hit);
-              try { (e.target as any).setPointerCapture(e.pointerId); } catch {}
-            }
-          }}
-          onPointerMove={(e) => {
-            if (!drag) return;
-            const p = yToPrice(e.clientY);
-            if (p == null || !(p > 0)) return;
-            if (drag === 'sl') onSlChange?.(p);
-            else onTpChange?.(p);
-          }}
-          onPointerUp={() => setDrag(null)}
-          onPointerCancel={() => setDrag(null)}
-        />
-        {drag && (
-          <div style={{ position: 'absolute', top: 6, left: 8, fontSize: 11, fontWeight: 800, color: '#ffaa44', background: 'rgba(0,0,0,0.7)', padding: '2px 8px', borderRadius: 6 }}>
-            {isAr ? 'اسحب لتغيير ' : 'Dragging '} {drag.toUpperCase()}…
-          </div>
-        )}
+        <canvas ref={canvasRef} style={{ display: 'block', borderRadius: 10, touchAction: 'none', cursor: 'default' }} />
       </div>
       <div style={{ fontSize: 11, color: '#666', marginTop: 6, fontWeight: 600 }}>
-        {isAr ? 'اسحب خط SL أو TP على الشارت لتعديله — يُحفظ تلقائياً' : 'Drag the SL / TP line on the chart to adjust — saves automatically'}
+        {isAr ? 'شارت مباشر — الشموع من /api/market-data' : 'Live chart — candles from /api/market-data'}
       </div>
     </div>
   );
 }
-

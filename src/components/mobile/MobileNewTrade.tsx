@@ -12,11 +12,9 @@ import {
   detectMobileTradeCategory,
   mobileLivePrice,
   mobileTradeUser,
-  updateMobileTradeLevels,
 } from '../../services/mobileTradeBridge';
-import { getTradeStore, calcPnl, START_BALANCE, getLivePrices, baseQtyPerCategory } from '../../services/paperTradingService';
+import { getTradeStore, calcPnl, START_BALANCE, getLivePrices } from '../../services/paperTradingService';
 import { notionalInUSD } from '../../lib/positionMath';
-import { calcTrailingStop } from '../../lib/trailingStop';
 import type { PaperTrade } from '../../services/paperTradingService';
 import { MobileCandleChart } from './MobileCandleChart';
 
@@ -105,40 +103,6 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   // Live price for the chart's last-price line — the same bid the watchlist
   // uses (shared quote hub), so no extra polling here.
   const chartLivePrice = current?.bid ?? null;
-
-  // Trailing-stop state (desktop parity with TradeNowPage): active once the
-  // dynamic trail has triggered AND the stop is locked into profit.
-  const chartTrailingActive = useMemo(() => {
-    if (!openForSymbol || typeof openForSymbol.qty !== 'number' || openForSymbol.qty <= 0) return false;
-    if (typeof openForSymbol.entryPrice !== 'number' || typeof openForSymbol.sl !== 'number') return false;
-    const live = chartLivePrice ?? openForSymbol.entryPrice;
-    const pnl = calcPnl(openForSymbol, live);
-    const category = openForSymbol.category || detectMobileTradeCategory(openForSymbol.symbol);
-    const trail = calcTrailingStop({
-      qty: openForSymbol.qty,
-      openPnlUSD: pnl,
-      baseUnit: baseQtyPerCategory(category),
-    });
-    const intoProfit = openForSymbol.side === 'buy'
-      ? openForSymbol.sl >= openForSymbol.entryPrice
-      : openForSymbol.sl <= openForSymbol.entryPrice;
-    return trail.active && intoProfit;
-  }, [openForSymbol, chartLivePrice]);
-
-  const onChartSl = async (p: number) => {
-    if (openForSymbol) {
-      const next = { ...openForSymbol, sl: p };
-      setOpenForSymbol(next);
-      try { await updateMobileTradeLevels(openForSymbol.id, p, openForSymbol.tp ?? null); } catch {}
-    }
-  };
-  const onChartTp = async (p: number) => {
-    if (openForSymbol) {
-      const next = { ...openForSymbol, tp: p };
-      setOpenForSymbol(next);
-      try { await updateMobileTradeLevels(openForSymbol.id, openForSymbol.sl ?? null, p); } catch {}
-    }
-  };
 
   // ── Account header: balance + equity + margin + margin level + floating P&L
   //    (desktop parity: TradeNowPage header — same live math, refresh + reset)
@@ -373,15 +337,8 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
           <div style={{ marginTop: 8 }}>
             <MobileCandleChart
               symbol={symbol}
-              entryPrice={chartEntry}
-              sl={chartSl}
-              tp={chartTp}
-              side={chartSide}
               livePrice={chartLivePrice}
-              trailingActive={chartTrailingActive}
               lang={lang}
-              onSlChange={onChartSl}
-              onTpChange={onChartTp}
             />
           </div>
         </div>
