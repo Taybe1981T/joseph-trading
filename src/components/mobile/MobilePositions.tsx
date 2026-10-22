@@ -424,4 +424,3 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
       </div>
     );
   }
-}
