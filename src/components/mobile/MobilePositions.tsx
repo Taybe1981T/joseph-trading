@@ -130,10 +130,10 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
     let nextSl: number | null = null;
     let nextTp: number | null = null;
     if (isFinite(slUsd) && slUsd > 0 && entry > 0 && qty > 0) {
-      nextSl = usdToPrice(p.symbol, slUsd, entry, p.side !== 'buy', qty, category);
+      nextSl = usdToPrice(p.symbol, slUsd, entry, p.type !== 'buy', qty, category);
     }
     if (isFinite(tpUsd) && tpUsd > 0 && entry > 0 && qty > 0) {
-      nextTp = usdToPrice(p.symbol, tpUsd, entry, p.side === 'buy', qty, category);
+      nextTp = usdToPrice(p.symbol, tpUsd, entry, p.type === 'buy', qty, category);
     }
 
     setBusy(p.id);
@@ -154,7 +154,6 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
     setBusy(null);
   };
     setBusy(null);
-  };
 
   const fmtDate = (ts?: number | null): string => {
     if (!ts) return '—';
@@ -424,3 +423,4 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
       </div>
     );
   }
+}
