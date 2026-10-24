@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { X, Pencil, Check } from 'lucide-react';
+import { X, Check } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
 import { closeMobileTrade, updateMobileTradeLevels, detectMobileTradeCategory } from '../../services/mobileTradeBridge';
@@ -302,14 +302,15 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
               <div style={{ display: 'flex', gap: 10, marginTop: 2, fontSize: 11, fontWeight: 700, alignItems: 'center' }}>
                 <span style={{ color: '#ff8888' }}>SL: {p.sl != null ? Number(p.sl).toFixed(dec) : '—'}</span>
                 <span style={{ color: '#88ffaa' }}>TP: {p.tp != null ? Number(p.tp).toFixed(dec) : '—'}</span>
+               </div>
+
                 <button
                   type="button" title={mobileT(lang, 'Edit SL/TP/Trailing (USD)', 'تعديل الوقف/الهدف/تريلنغ (دولار)')}
                   onClick={(e) => { e.stopPropagation(); startEdit(p); }}
-                  style={{ padding: '3px 8px', borderRadius: 6, border: '1px solid #2a2a2a', background: '#0a0a0a', color: '#ffaa44', cursor: 'pointer' }}
+                  style={{ marginTop: 6, width: '100%', height: 24, borderRadius: 6, border: 'none', background: 'linear-gradient(90deg, #ffaa44, #ff8800)', color: '#000', fontWeight: 800, fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  <Pencil size={12} />
+                  {mobileT(lang, 'Edit SL / TP / Trailing', 'تعديل الوقف / الهدف / التريلنغ')}
                 </button>
-              </div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div className={`mt5-position-profit ${pnl >= 0 ? 'positive' : 'negative'}`}>

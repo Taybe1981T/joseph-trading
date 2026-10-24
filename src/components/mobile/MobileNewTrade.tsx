@@ -101,6 +101,8 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   const chartTp = openForSymbol?.tp ?? sig?.takeProfit ?? null;
   const chartEntry = openForSymbol?.entryPrice ?? sig?.entryPrice ?? null;
   const chartSide = openForSymbol?.side ?? null;
+  // Live price for the chart's last-price line — needed below for trailing calc.
+  const chartLivePrice = current?.bid ?? null;
   // Trailing-stop price drawn on the chart (USD-based, per-position settings).
   const chartCategory = openForSymbol?.category || detectMobileTradeCategory(symbol);
   let chartTrailingPrice: number | null = null;
@@ -122,9 +124,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
     }
   }
 
-  // Live price for the chart's last-price line — the same bid the watchlist
-  // uses (shared quote hub), so no extra polling here.
-  const chartLivePrice = current?.bid ?? null;
+  // (chartLivePrice is computed above, before the trailing calculation.)
 
   // ── Account header: balance + equity + margin + margin level + floating P&L
   //    (desktop parity: TradeNowPage header — same live math, refresh + reset)
