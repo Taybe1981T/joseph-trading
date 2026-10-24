@@ -116,20 +116,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     return () => { window.removeEventListener('storage', check); clearInterval(iv); };
   }, []);
 
-  // Global click sound (deferred to avoid blocking).
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      try {
-        const t = e.target as HTMLElement | null;
-        if (!t) return;
-        if (t.closest && t.closest('button, [role="button"], a, .mt5-btn, .mt5-tab')) {
-          setTimeout(() => { try { playClick(0.25); } catch {} }, 0);
-        }
-      } catch {}
-    };
-    document.addEventListener('click', handler, true);
-    return () => document.removeEventListener('click', handler, true);
-  }, []);
+  // (click sounds disabled to debug freeze)
   const setAutoBoth = useCallback((v: boolean) => {
     setAuto(v);
     setMobileAutoTrade(v);
