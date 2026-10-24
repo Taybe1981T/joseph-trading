@@ -371,7 +371,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       {showLogin && createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#0d1117', padding: 20, borderRadius: 12, width: '90%', maxWidth: 360, color: '#fff' }}>
-            <h3 style={{ marginTop: 0 }}>Switch account</h3>
+            <h3 style={{ marginTop: 0 }}>{email ? 'Switch account' : 'Login'}</h3>
             {(() => {
               let saved: string[] = [];
               try { saved = JSON.parse(localStorage.getItem('finalyze_saved_accounts') || '[]'); } catch {}
@@ -403,6 +403,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
               {email && (
                 <button
                   onClick={() => {
+                    if (!confirm('Logout?')) return;
                     try { localStorage.removeItem('finalyze_user'); } catch {}
                     setShowLogin(false);
                     window.location.reload();
