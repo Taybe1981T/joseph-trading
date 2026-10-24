@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Check } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
@@ -311,6 +312,8 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
                 <button
                   type="button" title={mobileT(lang, 'Edit SL/TP/Trailing (USD)', 'تعديل الوقف/الهدف/تريلنغ (دولار)')}
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); startEdit(p); }}
+                  onPointerDown={(e) => { e.preventDefault(); e.stopPropagation(); startEdit(p); }}
+                  onTouchStart={(e) => { e.stopPropagation(); }}
                   onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); startEdit(p); }}
                   style={{ marginTop: 6, width: '100%', height: 30, borderRadius: 6, border: 'none', background: 'linear-gradient(90deg, #ffaa44, #ff8800)', position: 'relative', zIndex: 5, color: '#000', fontWeight: 800, fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
@@ -344,7 +347,7 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
   if (editingId && editPos) {
     const category = editPos.category || detectMobileTradeCategory(editPos.symbol);
     const dec = editPos.openPrice < 10 ? 4 : 2;
-    return (
+    return createPortal(
       <div style={{
         position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.7)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -429,6 +432,6 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
           </div>
         </div>
       </div>
-    );
+    , document.body);
   }
 }
