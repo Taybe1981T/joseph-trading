@@ -381,37 +381,6 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
       {detail && <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />}
       {alert && <div className="mt5-signal-alert">{alert}</div>}
-      {showLogin && createPortal(
-        <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#0d1117', padding: 20, borderRadius: 12, width: '90%', maxWidth: 360, color: '#fff' }}>
-            <h3 style={{ marginTop: 0 }}>{auth.currentUser ? 'Logout' : 'Login'}</h3>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-              {auth.currentUser ? (
-                <button
-                  onClick={async () => {
-                    if (!confirm('Logout?')) return;
-                    try { await signOut(auth); } catch {}
-                    try { localStorage.removeItem('finalyze_user'); localStorage.removeItem('finalyze_auth_user'); } catch {}
-                    setShowLogin(false);
-                    window.location.reload();
-                  }}
-                  style={{ padding: '10px 16px', borderRadius: 8, background: '#ff5555', color: '#fff', border: 'none', fontWeight: 800 }}
-                >Logout</button>
-              ) : (
-                <button
-                  onClick={async () => {
-                    try { await signInWithPopup(auth, new GoogleAuthProvider()); } catch (e) { console.error(e); }
-                    setShowLogin(false);
-                  }}
-                  style={{ padding: '10px 16px', borderRadius: 8, background: '#fff', color: '#111', border: 'none', fontWeight: 800 }}
-                >Sign in with Google</button>
-              )}
-              <button onClick={() => setShowLogin(false)} style={{ padding: '10px 16px', borderRadius: 8, background: '#333', color: '#fff', border: 'none' }}>Cancel</button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
     </div>
   );
 }
