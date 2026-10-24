@@ -116,20 +116,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     return () => { window.removeEventListener('storage', check); clearInterval(iv); };
   }, []);
 
-  // Global click sound for any button/tap inside the mobile app.
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      try {
-        const t = e.target as HTMLElement | null;
-        if (!t) return;
-        if (t.closest && t.closest('button, [role="button"], a, .mt5-btn, .mt5-tab')) {
-          playClick(0.25);
-        }
-      } catch {}
-    };
-    document.addEventListener('click', handler, true);
-    return () => document.removeEventListener('click', handler, true);
-  }, []);
+  // Global click sound disabled for debugging.
   const setAutoBoth = useCallback((v: boolean) => {
     setAuto(v);
     setMobileAutoTrade(v);
