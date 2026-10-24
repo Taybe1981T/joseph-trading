@@ -103,7 +103,6 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
   };
 
   const startEdit = (p: MobilePosition) => {
-    try { window.alert('EDIT: ' + p.symbol); } catch (e) { console.error(e); }
     const category = p.category || detectMobileTradeCategory(p.symbol);
     const entry = p.openPrice;
     const qty = p.volume;
