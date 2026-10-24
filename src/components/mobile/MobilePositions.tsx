@@ -271,7 +271,11 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
         const dateStr = d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '—';
         return (
           <div key={p.id} className="mt5-position-card"
-            onClick={() => onSelect?.(p.symbol)}
+            onClick={(e) => {
+              // Don't navigate to trade tab when tapping inner buttons (e.g. orange edit).
+              if ((e.target as HTMLElement)?.closest?.('button')) return;
+              onSelect?.(p.symbol);
+            }}
             style={{ cursor: onSelect ? 'pointer' : undefined, alignItems: 'flex-start' }}
             title={onSelect ? (p.symbol + ' — tap to open chart') : undefined}>
             <div className="mt5-position-info" style={{ flex: 1 }}>
