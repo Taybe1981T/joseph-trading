@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { getCachedQuote, subscribeQuoteBatch } from '../../services/paperTradingService';
+import { mobileT } from '../../lib/mobileMode';
+import type { Language } from '../../lib/i18n';
 
 interface Candle {
   time: number;
@@ -13,7 +15,11 @@ interface Props {
   symbol: string;
   /** Live market price (from the shared quote hub) — drawn as the last-price line. */
   livePrice?: number | null;
-  lang?: 'ar' | 'en';
+  /** Open-position levels (price) to draw on the chart — desktop platform parity. */
+  slPrice?: number | null;
+  tpPrice?: number | null;
+  trailingPrice?: number | null;
+  lang?: Language;
 }
 
 const TF_LIST = ['15m', '1h', '4h', '1d', '1w'];
@@ -23,11 +29,11 @@ function fmt(n: number): string {
 }
 
 /**
- * Mobile candle chart — clean view.
+ * Mobile candle chart — platform view.
  * Real candles from /api/market-data (same backend as desktop TradingViewWidget)
- * rendered on canvas with a live last-price line. No SL/TP/TS levels are drawn
- * here — those are managed in the background by mobileTradeBridge and edited
- * via the position editor (MobilePositions) in USD/pip terms.
+ * rendered on canvas with a live last-price line. Draws the open-position
+ * SL/TP/trailing-stop levels (passed as props, computed in USD via positionMath)
+ * so the chart matches the desktop trading platform.
  */
 export function MobileCandleChart({ symbol, livePrice, lang }: Props) {
   const isAr = lang === 'ar';
@@ -247,9 +253,13 @@ export function MobileCandleChart({ symbol, livePrice, lang }: Props) {
       ctx.textAlign = 'left';
       ctx.fillText(label + ' ' + fmt(price), W - 46, Math.max(10, Math.min(H - 24, yy - 3)));
     };
+    // ── Platform-parity levels: SL (red), TP (green), Trailing stop (orange) ──
+    line(slPrice, '#ff5550', mobileT(lang!, 'SL', 'وقف'), true);
+    line(tpPrice, '#00ff88', mobileT(lang!, 'TP', 'هدف'), true);
+    line(trailingPrice, '#ffaa44', mobileT(lang!, 'TS', 'تريلنغ'), true);
     // Redraw only when pixels actually change: candles, timeframe, canvas size,
-    // and live price (tickPrice). Clean chart — no SL/TP lines drawn here.
-  }, [candles, status, tf, isAr, width, tickPrice, livePrice]);
+    // live price, and the SL/TP/trailing levels.
+  }, [candles, status, tf, isAr, width, tickPrice, livePrice, slPrice, tpPrice, trailingPrice, lang]);
 
   return (
     <div>

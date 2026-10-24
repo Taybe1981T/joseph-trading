@@ -14,8 +14,10 @@ import {
   mobileTradeUser,
 } from '../../services/mobileTradeBridge';
 import { getTradeStore, calcPnl, START_BALANCE, getLivePrices } from '../../services/paperTradingService';
-import { notionalInUSD } from '../../lib/positionMath';
+import { notionalInUSD, usdToPrice } from '../../lib/positionMath';
+import { calcTrailingStop } from '../../lib/trailingStop';
 import type { PaperTrade } from '../../services/paperTradingService';
+import { baseQtyPerCategory } from '../../services/paperTradingService';
 import { MobileCandleChart } from './MobileCandleChart';
 
 interface MobileNewTradeProps {
@@ -99,6 +101,26 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   const chartTp = openForSymbol?.tp ?? sig?.takeProfit ?? null;
   const chartEntry = openForSymbol?.entryPrice ?? sig?.entryPrice ?? null;
   const chartSide = openForSymbol?.side ?? null;
+  // Trailing-stop price drawn on the chart (USD-based, per-position settings).
+  const chartCategory = openForSymbol?.category || detectMobileTradeCategory(symbol);
+  let chartTrailingPrice: number | null = null;
+  if (openForSymbol && openForSymbol.qty > 0 && openForSymbol.entryPrice > 0) {
+    const live = chartLivePrice ?? openForSymbol.entryPrice;
+    const pnl = calcPnl(openForSymbol, live);
+    const tr = calcTrailingStop({
+      qty: openForSymbol.qty,
+      openPnlUSD: pnl,
+      baseUnit: baseQtyPerCategory(chartCategory),
+      baseActivationUSD: (openForSymbol as any).trailingActivationUSD ?? 5,
+      baseStepUSD: (openForSymbol as any).trailingStepUSD ?? 2,
+      activationLotStep: 2,
+      stepLotStep: 1,
+    });
+    if (tr.active) {
+      const isBuy = openForSymbol.side === 'buy';
+      chartTrailingPrice = usdToPrice(symbol, tr.offsetUSD, openForSymbol.entryPrice, isBuy, openForSymbol.qty, chartCategory);
+    }
+  }
 
   // Live price for the chart's last-price line — the same bid the watchlist
   // uses (shared quote hub), so no extra polling here.
@@ -338,6 +360,9 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
             <MobileCandleChart
               symbol={symbol}
               livePrice={chartLivePrice}
+              slPrice={chartSl}
+              tpPrice={chartTp}
+              trailingPrice={chartTrailingPrice}
               lang={lang}
             />
           </div>

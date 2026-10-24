@@ -138,10 +138,13 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
 
     setBusy(p.id);
     try {
-      await updateMobileTradeLevels(p.id, nextSl, nextTp);
+      await updateMobileTradeLevels(p.id, nextSl, nextTp, {
+        activationUSD: isFinite(trailAct) && trailAct > 0 ? trailAct : undefined,
+        stepUSD: isFinite(trailStep) && trailStep > 0 ? trailStep : undefined,
+      });
       p.sl = nextSl; p.tp = nextTp;
     } catch {}
-    // Persist trailing defaults if changed.
+    // Persist trailing defaults if changed (global fallback for the background manager).
     if (isFinite(trailAct) || isFinite(trailStep)) {
       try {
         const s = JSON.parse(localStorage.getItem('strategy_settings') || '{}');
@@ -153,7 +156,6 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
     setEditingId(null);
     setBusy(null);
   };
-    setBusy(null);
 
   const fmtDate = (ts?: number | null): string => {
     if (!ts) return '—';

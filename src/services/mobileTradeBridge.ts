@@ -130,11 +130,21 @@ export async function closeMobileTrade(id: string): Promise<void> {
 }
 
 /** Update SL/TP of an open trade from chart drag or the position card editor. */
-export async function updateMobileTradeLevels(id: string, sl: number | null, tp: number | null): Promise<void> {
+export async function updateMobileTradeLevels(
+  id: string,
+  sl: number | null,
+  tp: number | null,
+  trailing?: { activationUSD?: number; stepUSD?: number }
+): Promise<void> {
   if (!id) return;
   const store = getTradeStore(mobileTradeUser() as any);
   try {
-    await store.updateTrade(id, { sl, tp });
+    await store.updateTrade(id, {
+      sl,
+      tp,
+      ...(trailing && trailing.activationUSD != null ? { trailingActivationUSD: trailing.activationUSD } : {}),
+      ...(trailing && trailing.stepUSD != null ? { trailingStepUSD: trailing.stepUSD } : {}),
+    });
   } catch { /* best effort */ }
   try { window.dispatchEvent(new CustomEvent('mobile-trades-changed', { detail: { action: 'levels', id } })); } catch {}
 }
@@ -217,9 +227,13 @@ async function mobileManagePositions(): Promise<void> {
       const { calcTrailingStop } = await import('../lib/trailingStop');
       const { usdToPrice } = await import('../lib/positionMath');
       const pnl = calcPnl(t, price);
+      // Per-position trailing settings (edited via the pencil modal in USD)
+      // take precedence over the global strategy_settings defaults.
+      const act = (t as any).trailingActivationUSD != null ? (t as any).trailingActivationUSD : cfg.baseActivationUSD;
+      const step = (t as any).trailingStepUSD != null ? (t as any).trailingStepUSD : cfg.baseStepUSD;
       const tr = calcTrailingStop({
         qty: t.qty, openPnlUSD: pnl, baseUnit: baseQtyPerCategory(t.category || detectMobileTradeCategory(t.symbol)),
-        baseActivationUSD: cfg.baseActivationUSD, baseStepUSD: cfg.baseStepUSD,
+        baseActivationUSD: act, baseStepUSD: step,
         activationLotStep: cfg.activationLotStep, stepLotStep: cfg.stepLotStep,
       });
       if (tr.active) {

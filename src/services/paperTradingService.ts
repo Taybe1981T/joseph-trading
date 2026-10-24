@@ -24,6 +24,11 @@ export interface PaperTrade {
   // 'manual' = the user's own ticket on the trade page. Exactly one engine
   // manages a given trade so SL/TP/trailing is never applied twice.
   source?: 'auto' | 'manual';
+  // Per-position trailing-stop settings (USD) edited via the position editor
+  // (pencil → modal). When set, the background position manager uses these
+  // instead of the global strategy_settings defaults.
+  trailingActivationUSD?: number;
+  trailingStepUSD?: number;
 }
 
 export const START_BALANCE = 10000;
