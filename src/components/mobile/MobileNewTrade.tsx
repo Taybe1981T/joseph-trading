@@ -18,7 +18,7 @@ import { notionalInUSD, usdToPrice } from '../../lib/positionMath';
 import { calcTrailingStop } from '../../lib/trailingStop';
 import type { PaperTrade } from '../../services/paperTradingService';
 import { baseQtyPerCategory } from '../../services/paperTradingService';
-import { MobileCandleChart } from './MobileCandleChart';
+import TradingViewEmbed from '../TradingViewEmbed';
 
 interface MobileNewTradeProps {
   quotes: MobileQuote[];
@@ -356,15 +356,8 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
               </span>
             )}
           </div>
-          <div style={{ marginTop: 8 }}>
-            <MobileCandleChart
-              symbol={symbol}
-              entryPrice={chartEntry}
-              sl={chartSl}
-              tp={chartTp}
-              side={chartSide}
-              lang={lang}
-            />
+          <div style={{ marginTop: 8, height: 320, borderRadius: 10, overflow: 'hidden' }}>
+            <TradingViewEmbed symbol={symbol} interval="60" />
           </div>
         </div>
       )}
