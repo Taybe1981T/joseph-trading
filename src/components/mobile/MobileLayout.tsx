@@ -340,7 +340,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         }}
         clientCount={isDev ? clientCount : 0}
         onClientsClick={() => goTab('clients')}
-        onNotificationsClick={goHome} onProfileClick={() => goTab('settings')} />
+        onNotificationsClick={goHome} onProfileClick={() => setShowLogin(true)} />
       {tab !== 'home' && (
         <button
           type="button"
@@ -368,34 +368,67 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
       {detail && <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />}
       {alert && <div className="mt5-signal-alert">{alert}</div>}
-      <button
-          type="button"
-          onClick={() => setShowLogin(true)}
-          style={{ position: 'fixed', bottom: 80, right: 16, zIndex: 9999, padding: '10px 16px', borderRadius: 12, background: '#F59E0B', color: '#000', fontWeight: 800, border: 'none', cursor: 'pointer' }}
-        >{email ? 'Switch' : 'Login'}</button>
       {showLogin && createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#0d1117', padding: 20, borderRadius: 12, width: '90%', maxWidth: 360, color: '#fff' }}>
-            <h3 style={{ marginTop: 0 }}>Login / Switch account</h3>
+            <h3 style={{ marginTop: 0 }}>Switch account</h3>
+            {(() => {
+              let saved: string[] = [];
+              try { saved = JSON.parse(localStorage.getItem('finalyze_saved_accounts') || '[]'); } catch {}
+              if (!Array.isArray(saved)) saved = [];
+              if (email && !saved.includes(email)) saved = [email, ...saved];
+              return saved.length ? (
+                <div style={{ marginBottom: 12, maxHeight: 160, overflow: 'auto' }}>
+                  {saved.map((e) => (
+                    <button
+                      key={e}
+                      onClick={() => {
+                        try { localStorage.setItem('finalyze_user', JSON.stringify({ email: e, uid: e })); } catch {}
+                        setShowLogin(false);
+                        window.location.reload();
+                      }}
+                      style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', marginBottom: 4, borderRadius: 8, background: e === email ? 'rgba(245,158,11,0.15)' : '#1a1a1a', border: '1px solid #333', color: '#fff', cursor: 'pointer' }}
+                    >{e}{e === email ? ' (current)' : ''}</button>
+                  ))}
+                </div>
+              ) : null;
+            })()}
             <input
               value={loginEmail}
               onChange={(e) => setLoginEmail(e.target.value)}
               placeholder="email"
               style={{ width: '100%', padding: 8, borderRadius: 8, border: '1px solid #333', background: '#1a1a1a', color: '#fff', marginBottom: 10 }}
             />
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setShowLogin(false)} style={{ padding: '8px 14px', borderRadius: 8, background: '#333', color: '#fff', border: 'none' }}>Cancel</button>
-              <button
-                onClick={() => {
-                  const em = loginEmail.trim().toLowerCase();
-                  if (!em) return;
-                  try { localStorage.setItem('finalyze_user', JSON.stringify({ email: em, uid: em })); } catch {}
-                  try { localStorage.setItem('finalyze_dev_email', em); } catch {}
-                  setShowLogin(false);
-                  window.location.reload();
-                }}
-                style={{ padding: '8px 14px', borderRadius: 8, background: '#F59E0B', color: '#000', border: 'none', fontWeight: 800 }}
-              >Save</button>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between' }}>
+              {email && (
+                <button
+                  onClick={() => {
+                    try { localStorage.removeItem('finalyze_user'); } catch {}
+                    setShowLogin(false);
+                    window.location.reload();
+                  }}
+                  style={{ padding: '8px 14px', borderRadius: 8, background: '#333', color: '#ff6b6b', border: 'none' }}
+                >Logout</button>
+              )}
+              <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+                <button onClick={() => setShowLogin(false)} style={{ padding: '8px 14px', borderRadius: 8, background: '#333', color: '#fff', border: 'none' }}>Cancel</button>
+                <button
+                  onClick={() => {
+                    const em = loginEmail.trim().toLowerCase();
+                    if (!em) return;
+                    try {
+                      localStorage.setItem('finalyze_user', JSON.stringify({ email: em, uid: em }));
+                      const saved = JSON.parse(localStorage.getItem('finalyze_saved_accounts') || '[]');
+                      const arr = Array.isArray(saved) ? saved : [];
+                      if (!arr.includes(em)) arr.unshift(em);
+                      localStorage.setItem('finalyze_saved_accounts', JSON.stringify(arr.slice(0, 20)));
+                    } catch {}
+                    setShowLogin(false);
+                    window.location.reload();
+                  }}
+                  style={{ padding: '8px 14px', borderRadius: 8, background: '#F59E0B', color: '#000', border: 'none', fontWeight: 800 }}
+                >Save</button>
+              </div>
             </div>
           </div>
         </div>,

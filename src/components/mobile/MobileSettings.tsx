@@ -227,17 +227,6 @@ export function MobileSettings({
         </div>
       )}
 
-      {/* Desktop parity: developer login lives here. Clients see a discreet
-          login button; once a dev email signs in, dev sections unlock. */}
-      <DevLoginRow
-        language={language}
-        onDeveloperLogin={onDeveloperLogin}
-        devLoginBusy={devLoginBusy}
-        devLoginError={devLoginError}
-      />
-
-      <DevLogoutButton language={language} />
-
       <div className="mt5-empty-subtitle" style={{ textAlign: 'center', marginTop: 12 }}>
         Joseph.Trading v{version} — MT5 Mobile Edition
       </div>
