@@ -168,6 +168,111 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
   const closedList = (closed || []).slice().sort((a, b) => (b.closedAt || 0) - (a.closedAt || 0));
   const closedPnl = closedList.reduce((s, c) => s + (c.profit || 0), 0);
 
+  // ── Edit modal: SL/TP in USD + Trailing defaults ──
+  const editPos = editingId ? positions.find((p) => p.id === editingId) : null;
+  if (editingId) {
+    if (!editPos) {
+      // fallback: reset editing state so we never get stuck
+      setTimeout(() => setEditingId(null), 0);
+      return createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#0d1117', padding: 16, borderRadius: 12, color: '#fff' }}>
+            Position not found. <button onClick={() => setEditingId(null)} style={{ marginLeft: 8 }}>Close</button>
+          </div>
+        </div>,
+        document.body
+      );
+    }
+    const category = editPos.category || detectMobileTradeCategory(editPos.symbol);
+    const dec = editPos.openPrice < 10 ? 4 : 2;
+    return createPortal(
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.7)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <div style={{
+          background: '#0d1117', border: '1px solid #2a2a2a', borderRadius: 12,
+          width: 'min(92vw, 380px)', padding: 16,
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12, color: '#fff' }}>
+            {mobileT(lang, 'Edit Levels', 'تعديل المستويات')} — {editPos.symbol}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, color: '#ff8888', fontWeight: 800 }}>
+                SL ({mobileT(lang, 'USD', 'دولار')})
+              </label>
+              <input
+                type="number" step="any" value={editSlUsd}
+                onChange={(e) => setEditSlUsd(e.target.value)}
+                style={{ width: '100%', background: '#0a0a0a', border: '1px solid rgba(255,51,51,0.4)',
+                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
+              />
+              <span style={{ fontSize: 10, color: '#666' }}>
+                {editPos.sl != null ? editPos.sl.toFixed(dec) : '—'} {mobileT(lang, 'current price', 'السعر الحالي')}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, color: '#88ffaa', fontWeight: 800 }}>
+                TP ({mobileT(lang, 'USD', 'دولار')})
+              </label>
+              <input
+                type="number" step="any" value={editTpUsd}
+                onChange={(e) => setEditTpUsd(e.target.value)}
+                style={{ width: '100%', background: '#0a0a0a', border: '1px solid rgba(0,255,136,0.4)',
+                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
+              />
+              <span style={{ fontSize: 10, color: '#666' }}>
+                {editPos.tp != null ? editPos.tp.toFixed(dec) : '—'} {mobileT(lang, 'current price', 'السعر الحالي')}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
+              <label style={{ fontSize: 11, color: '#ffaa44', fontWeight: 800 }}>
+                {mobileT(lang, 'Trailing activation ($)', 'تفعيل التريلنغ ($)')}
+              </label>
+              <input
+                type="number" step="any" value={editTrailAct}
+                onChange={(e) => setEditTrailAct(e.target.value)}
+                style={{ width: '100%', background: '#0a0a0a', border: '1px solid #ffaa44',
+                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: 11, color: '#ffaa44', fontWeight: 800 }}>
+                {mobileT(lang, 'Trailing step ($)', 'خطوة التريلنغ ($)')}
+              </label>
+              <input
+                type="number" step="any" value={editTrailStep}
+                onChange={(e) => setEditTrailStep(e.target.value)}
+                style={{ width: '100%', background: '#0a0a0a', border: '1px solid #ffaa44',
+                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => { setEditingId(null); }}
+                style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid #2a2a2a',
+                  background: '#0a0a0a', color: '#888', cursor: 'pointer' }}
+              >
+                {mobileT(lang, 'Cancel', 'إلغاء')}
+              </button>
+              <button
+                type="button"
+                disabled={busy === editPos.id}
+                onClick={(e) => { e.stopPropagation(); saveLevels(editPos); }}
+                style={{ padding: '6px 14px', borderRadius: 8, border: 'none',
+                  background: '#00ff88', color: '#000', fontWeight: 800, cursor: 'pointer' }}
+              >
+                {mobileT(lang, 'Save', 'حفظ')}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    , document.body);
+  }
+
   if (!positions.length && !closedList.length) {
     return (
       <div className="mt5-page-container">
@@ -342,109 +447,4 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
       })}
     </div>
   );
-
-  // ── Edit modal: SL/TP in USD + Trailing defaults ──
-  const editPos = editingId ? positions.find((p) => p.id === editingId) : null;
-  if (editingId) {
-    if (!editPos) {
-      // fallback: reset editing state so we never get stuck
-      setTimeout(() => setEditingId(null), 0);
-      return createPortal(
-        <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#0d1117', padding: 16, borderRadius: 12, color: '#fff' }}>
-            Position not found. <button onClick={() => setEditingId(null)} style={{ marginLeft: 8 }}>Close</button>
-          </div>
-        </div>,
-        document.body
-      );
-    }
-    const category = editPos.category || detectMobileTradeCategory(editPos.symbol);
-    const dec = editPos.openPrice < 10 ? 4 : 2;
-    return createPortal(
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.7)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <div style={{
-          background: '#0d1117', border: '1px solid #2a2a2a', borderRadius: 12,
-          width: 'min(92vw, 380px)', padding: 16,
-        }}>
-          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 12, color: '#fff' }}>
-            {mobileT(lang, 'Edit Levels', 'تعديل المستويات')} — {editPos.symbol}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 11, color: '#ff8888', fontWeight: 800 }}>
-                SL ({mobileT(lang, 'USD', 'دولار')})
-              </label>
-              <input
-                type="number" step="any" value={editSlUsd}
-                onChange={(e) => setEditSlUsd(e.target.value)}
-                style={{ width: '100%', background: '#0a0a0a', border: '1px solid rgba(255,51,51,0.4)',
-                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
-              />
-              <span style={{ fontSize: 10, color: '#666' }}>
-                {editPos.sl != null ? editPos.sl.toFixed(dec) : '—'} {mobileT(lang, 'current price', 'السعر الحالي')}
-              </span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 11, color: '#88ffaa', fontWeight: 800 }}>
-                TP ({mobileT(lang, 'USD', 'دولار')})
-              </label>
-              <input
-                type="number" step="any" value={editTpUsd}
-                onChange={(e) => setEditTpUsd(e.target.value)}
-                style={{ width: '100%', background: '#0a0a0a', border: '1px solid rgba(0,255,136,0.4)',
-                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
-              />
-              <span style={{ fontSize: 10, color: '#666' }}>
-                {editPos.tp != null ? editPos.tp.toFixed(dec) : '—'} {mobileT(lang, 'current price', 'السعر الحالي')}
-              </span>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
-              <label style={{ fontSize: 11, color: '#ffaa44', fontWeight: 800 }}>
-                {mobileT(lang, 'Trailing activation ($)', 'تفعيل التريلنغ ($)')}
-              </label>
-              <input
-                type="number" step="any" value={editTrailAct}
-                onChange={(e) => setEditTrailAct(e.target.value)}
-                style={{ width: '100%', background: '#0a0a0a', border: '1px solid #ffaa44',
-                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
-              />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <label style={{ fontSize: 11, color: '#ffaa44', fontWeight: 800 }}>
-                {mobileT(lang, 'Trailing step ($)', 'خطوة التريلنغ ($)')}
-              </label>
-              <input
-                type="number" step="any" value={editTrailStep}
-                onChange={(e) => setEditTrailStep(e.target.value)}
-                style={{ width: '100%', background: '#0a0a0a', border: '1px solid #ffaa44',
-                  color: '#fff', borderRadius: 6, padding: '6px 8px', fontSize: 13 }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                onClick={() => { setEditingId(null); }}
-                style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid #2a2a2a',
-                  background: '#0a0a0a', color: '#888', cursor: 'pointer' }}
-              >
-                {mobileT(lang, 'Cancel', 'إلغاء')}
-              </button>
-              <button
-                type="button"
-                disabled={busy === editPos.id}
-                onClick={(e) => { e.stopPropagation(); saveLevels(editPos); }}
-                style={{ padding: '6px 14px', borderRadius: 8, border: 'none',
-                  background: '#00ff88', color: '#000', fontWeight: 800, cursor: 'pointer' }}
-              >
-                {mobileT(lang, 'Save', 'حفظ')}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    , document.body);
-  }
 }
