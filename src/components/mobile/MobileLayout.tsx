@@ -1,5 +1,4 @@
 ﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { ArrowLeft } from 'lucide-react';
 import { MobileBottomNav, MobileTab } from './MobileBottomNav';
 import { MobileHeader } from './MobileHeader';
@@ -19,9 +18,6 @@ import { MobileManualSheet } from './MobileManualSheet';
 import { MobileStore } from './MobileStore';
 import { MobileClientMonitor } from './MobileClientMonitor';
 import TransactionsPage from '../TransactionsPage';
-import { playClick } from '../../lib/audioEngine';
-import { auth } from '../../lib/firebase';
-import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import { useMobileSignalAlert } from './useMobileSignalAlert';
 import { AnalysisResult, SignalType } from '../../types';
 import {
@@ -329,18 +325,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         }}
         clientCount={isDev ? clientCount : 0}
         onClientsClick={() => goTab('clients')}
-        onNotificationsClick={goHome} onProfileClick={async () => {
-          try {
-            if (auth.currentUser) {
-              if (!confirm('Logout?')) return;
-              await signOut(auth);
-              try { localStorage.removeItem('finalyze_user'); localStorage.removeItem('finalyze_auth_user'); } catch {}
-              window.location.reload();
-            } else {
-              await signInWithPopup(auth, new GoogleAuthProvider());
-            }
-          } catch (e) { console.error(e); }
-        }} />
+        onNotificationsClick={goHome} onProfileClick={() => goTab('settings')} />
       {tab !== 'home' && (
         <button
           type="button"
