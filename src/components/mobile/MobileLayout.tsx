@@ -154,7 +154,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         full.push(s);
       }
       full.sort((a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
-      setFullSignals(full.slice(0, 40));
+      // Only update state when the data really changed (avoids needless re-renders every 5s).
+      const nextFull = full.slice(0, 40);
+      setFullSignals((prev) => {
+        try { if (JSON.stringify(prev) === JSON.stringify(nextFull)) return prev; } catch {}
+        return nextFull as AnalysisResult[];
+      });
       setSignals(full.map((s: any) => ({
         symbol: String(s.symbol || ''),
         type: (String(s.signal || '').includes('sell') ? 'sell' : 'buy') as 'buy' | 'sell',
@@ -228,13 +233,20 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   }, []);
 
   // Live store sync: trades opened/closed (auto engine or this device) refresh instantly.
+  // IMPORTANT: this effect must NOT depend on fullSignals. loadAll() calls
+  // setFullSignals(new array) every run, so depending on it created an endless
+  // render loop (loadAll -> setFullSignals -> effect re-run -> loadAll ...) that
+  // froze the mobile UI. The latest signals are read through a ref instead.
+  const fullSignalsRef = useRef<AnalysisResult[]>([]);
+  useEffect(() => { fullSignalsRef.current = fullSignals; }, [fullSignals]);
+
   useEffect(() => {
     loadAll();
     // Desktop parity: background TP/SL/trailing manager for ALL open trades.
     try { startMobilePositionManager(); } catch {}
     const iv = setInterval(loadAll, 5000);
     const h = () => { loadAll(); };
-    const rs = () => { syncMobileAutoEngine(fullSignals); };
+    const rs = () => { syncMobileAutoEngine(fullSignalsRef.current); };
     window.addEventListener('mobile-trades-changed', h);
     window.addEventListener('mobile-autotrade-resync', rs);
     return () => {
@@ -242,7 +254,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       window.removeEventListener('mobile-trades-changed', h);
       window.removeEventListener('mobile-autotrade-resync', rs);
     };
-  }, [loadAll, fullSignals]);
+  }, [loadAll]);
 
   const ping = (freq: number) => {
     if (!sound) return;
