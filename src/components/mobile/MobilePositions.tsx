@@ -103,7 +103,6 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
   };
 
   const startEdit = (p: MobilePosition) => {
-    try { window.alert('EDIT CLICKED: ' + p.symbol); } catch {}
     const category = p.category || detectMobileTradeCategory(p.symbol);
     const entry = p.openPrice;
     const qty = p.volume;
@@ -345,7 +344,19 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
 
   // ── Edit modal: SL/TP in USD + Trailing defaults ──
   const editPos = editingId ? positions.find((p) => p.id === editingId) : null;
-  if (editingId && editPos) {
+  if (editingId) {
+    if (!editPos) {
+      // fallback: reset editing state so we never get stuck
+      setTimeout(() => setEditingId(null), 0);
+      return createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#0d1117', padding: 16, borderRadius: 12, color: '#fff' }}>
+            Position not found. <button onClick={() => setEditingId(null)} style={{ marginLeft: 8 }}>Close</button>
+          </div>
+        </div>,
+        document.body
+      );
+    }
     const category = editPos.category || detectMobileTradeCategory(editPos.symbol);
     const dec = editPos.openPrice < 10 ? 4 : 2;
     return createPortal(
