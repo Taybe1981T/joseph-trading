@@ -1,0 +1,70 @@
+61 
+62   const symbolUniverse = useMemo(() => {
+63     const set = new Set<string>();
+64     const flat = groups.map((g) => { g.symbols.forEach((s) => set.add(s)); return g; });
+65     const extra = quotes.map((q) => q.symbol).filter((s) => s && !set.has(s));
+66     if (extra.length) flat.push({ id: 'live', label: isAr ? 'أسعار حية' : 'Live', symbols: [...new Set(extra)] });
+67     if (symbol && !set.has(symbol)) flat.push({ id: 'current', label: isAr ? 'الحالي' : 'Current', symbols: [symbol] });
+68     return flat;
+69   }, [groups, quotes, symbol, isAr]);
+70 
+71   const current = quotes.find((q) => q.symbol === symbol);
+72   const sig = useMemo(() => (signalFor ? signalFor(symbol) : undefined), [signalFor, symbol]);
+73 
+74   // Open trade on this symbol (if any) → show its entry/SL/TP on the chart.
+75   const [openForSymbol, setOpenForSymbol] = useState<PaperTrade | null>(null);
+76   useEffect(() => {
+77     let alive = true;
+78     (async () => {
+79       try {
+80         const store = getTradeStore(mobileTradeUser() as any);
+81         const all = await store.listTrades();
+82         const t = all.find((x) => x.status === 'open' && x.symbol === symbol) || null;
+83         if (alive) setOpenForSymbol(t as PaperTrade | null);
+84       } catch { if (alive) setOpenForSymbol(null); }
+85     })();
+86     const h = () => {
+87       (async () => {
+88         try {
+89           const store = getTradeStore(mobileTradeUser() as any);
+90           const all = await store.listTrades();
+91           const t = all.find((x) => x.status === 'open' && x.symbol === symbol) || null;
+92           if (alive) setOpenForSymbol(t as PaperTrade | null);
+93         } catch {}
+94       })();
+95     };
+96     try { window.addEventListener('mobile-trades-changed', h); } catch {}
+97     return () => { alive = false; try { window.removeEventListener('mobile-trades-changed', h); } catch {} };
+98   }, [symbol]);
+99 
+100   const chartSl = openForSymbol?.sl ?? sig?.stopLoss ?? null;
+101   const chartTp = openForSymbol?.tp ?? sig?.takeProfit ?? null;
+102   const chartEntry = openForSymbol?.entryPrice ?? sig?.entryPrice ?? null;
+103   const chartSide = openForSymbol?.side ?? null;
+104   // Live price for the chart's last-price line — needed below for trailing calc.
+105   const chartLivePrice = current?.bid ?? null;
+106   // Trailing-stop price drawn on the chart (USD-based, per-position settings).
+107   const chartCategory = openForSymbol?.category || detectMobileTradeCategory(symbol);
+108   let chartTrailingPrice: number | null = null;
+109   if (openForSymbol && openForSymbol.qty > 0 && openForSymbol.entryPrice > 0) {
+110     const live = chartLivePrice ?? openForSymbol.entryPrice;
+111     const pnl = calcPnl(openForSymbol, live);
+112     const tr = calcTrailingStop({
+113       qty: openForSymbol.qty,
+114       openPnlUSD: pnl,
+115       baseUnit: baseQtyPerCategory(chartCategory),
+116       baseActivationUSD: (openForSymbol as any).trailingActivationUSD ?? 5,
+117       baseStepUSD: (openForSymbol as any).trailingStepUSD ?? 2,
+118       activationLotStep: 2,
+119       stepLotStep: 1,
+120     });
+121     if (tr.active) {
+122       const isBuy = openForSymbol.side === 'buy';
+123       chartTrailingPrice = usdToPrice(symbol, tr.offsetUSD, openForSymbol.entryPrice, isBuy, openForSymbol.qty, chartCategory);
+124     }
+125   }
+126 
+127   // (chartLivePrice is computed above, before the trailing calculation.)
+128 
+129   // ── Account header: balance + equity + margin + margin level + floating P&L
+130   //    (desktop parity: TradeNowPage header — same live math, refresh + reset)

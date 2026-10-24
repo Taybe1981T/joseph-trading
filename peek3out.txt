@@ -1,0 +1,61 @@
+256                   <div className={`mt5-position-profit ${c.profit >= 0 ? 'positive' : 'negative'}`}>
+257                     {c.profit >= 0 ? '+' : ''}{c.profit.toFixed(2)}$
+258                   </div>
+259                 </div>
+260               </div>
+261             );
+262           })}
+263         </div>
+264       )}
+265 
+266       {tab === 'open' && positions.map((p) => {
+267         const cur = live[p.symbol] ?? p.currentPrice;
+268         const pnl = p.profit;
+269         const dec = cur < 10 ? 4 : 2;
+270         const d = p.openedAt ? new Date(p.openedAt) : null;
+271         const dateStr = d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '—';
+272         return (
+273           <div key={p.id} className="mt5-position-card"
+274             onClick={() => onSelect?.(p.symbol)}
+275             style={{ cursor: onSelect ? 'pointer' : undefined, alignItems: 'flex-start' }}
+276             title={onSelect ? (p.symbol + ' — tap to open chart') : undefined}>
+277             <div className="mt5-position-info" style={{ flex: 1 }}>
+278               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+279                 <span className="mt5-position-symbol">{p.symbol}</span>
+280                 <span className={`mt5-position-type ${p.type}`} style={{ fontSize: 11 }}>
+281                   {p.type.toUpperCase()} {p.volume.toFixed(2)}
+282                 </span>
+283                 {p.category && (
+284                   <span style={{ fontSize: 10, color: '#666', fontWeight: 700, background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 6, padding: '1px 6px' }}>
+285                     {p.category}
+286                   </span>
+287                 )}
+288                 {p.source && (
+289                   <span style={{ fontSize: 10, color: p.source === 'auto' ? '#00ff88' : '#60a5fa', fontWeight: 700 }}>
+290                     {p.source === 'auto' ? (lang === 'ar' ? 'تلقائي' : 'AUTO') : (lang === 'ar' ? 'يدوي' : 'MANUAL')}
+291                   </span>
+292                 )}
+293               </div>
+294               {/* Dates + prices — exactly like the original account table */}
+295               <div className="mt5-card-subtitle" style={{ marginTop: 4, fontSize: 11 }}>
+296                 📅 {mobileT(lang, 'Opened', 'الفتح')}: {dateStr}
+297               </div>
+298               <div className="mt5-card-subtitle" style={{ fontSize: 12, color: '#ccc' }}>
+299                 {mobileT(lang, 'Entry', 'الدخول')}: {p.openPrice.toFixed(dec)} → {mobileT(lang, 'Now', 'الحالي')}: {cur.toFixed(dec)}
+300               </div>
+301               {/* SL/TP viewer + edit button (desktop parity: pencil → modal in USD) */}
+302               <div style={{ display: 'flex', gap: 10, marginTop: 2, fontSize: 11, fontWeight: 700, alignItems: 'center' }}>
+303                 <span style={{ color: '#ff8888' }}>SL: {p.sl != null ? Number(p.sl).toFixed(dec) : '—'}</span>
+304                 <span style={{ color: '#88ffaa' }}>TP: {p.tp != null ? Number(p.tp).toFixed(dec) : '—'}</span>
+305                </div>
+306 
+307                 <button
+308                   type="button" title={mobileT(lang, 'Edit SL/TP/Trailing (USD)', 'تعديل الوقف/الهدف/تريلنغ (دولار)')}
+309                   onClick={(e) => { e.stopPropagation(); startEdit(p); }}
+310                   style={{ marginTop: 6, width: '100%', height: 24, borderRadius: 6, border: 'none', background: 'linear-gradient(90deg, #ffaa44, #ff8800)', color: '#000', fontWeight: 800, fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+311                 >
+312                   {mobileT(lang, 'Edit SL / TP / Trailing', 'تعديل الوقف / الهدف / التريلنغ')}
+313                 </button>
+314             </div>
+315             <div style={{ textAlign: 'right' }}>
+316               <div className={`mt5-position-profit ${pnl >= 0 ? 'positive' : 'negative'}`}>

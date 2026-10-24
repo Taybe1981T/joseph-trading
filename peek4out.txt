@@ -1,0 +1,32 @@
+104   const startEdit = (p: MobilePosition) => {
+105     const category = p.category || detectMobileTradeCategory(p.symbol);
+106     const entry = p.openPrice;
+107     const qty = p.volume;
+108     setEditingId(p.id);
+109     // Convert current SL/TP prices to USD amounts for editing.
+110     setEditSlUsd(p.sl != null && entry > 0 && qty > 0
+111       ? slAmountUSD(p.symbol, Math.abs(entry - p.sl), qty, category).toFixed(2)
+112       : '');
+113     setEditTpUsd(p.tp != null && entry > 0 && qty > 0
+114       ? slAmountUSD(p.symbol, Math.abs(entry - p.tp), qty, category).toFixed(2)
+115       : '');
+116     const d = loadTrailingDefaults();
+117     setEditTrailAct(String(d.baseActivationUSD));
+118     setEditTrailStep(String(d.baseStepUSD));
+119   };
+120 
+121   const saveLevels = async (p: MobilePosition) => {
+122     const category = p.category || detectMobileTradeCategory(p.symbol);
+123     const entry = p.openPrice;
+124     const qty = p.volume;
+125     const slUsd = parseFloat(editSlUsd);
+126     const tpUsd = parseFloat(editTpUsd);
+127     const trailAct = parseFloat(editTrailAct);
+128     const trailStep = parseFloat(editTrailStep);
+129 
+130     let nextSl: number | null = null;
+131     let nextTp: number | null = null;
+132     if (isFinite(slUsd) && slUsd > 0 && entry > 0 && qty > 0) {
+133       nextSl = usdToPrice(p.symbol, slUsd, entry, p.type !== 'buy', qty, category);
+134     }
+135     if (isFinite(tpUsd) && tpUsd > 0 && entry > 0 && qty > 0) {

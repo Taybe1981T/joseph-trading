@@ -35,7 +35,7 @@ function fmt(n: number): string {
  * SL/TP/trailing-stop levels (passed as props, computed in USD via positionMath)
  * so the chart matches the desktop trading platform.
  */
-export function MobileCandleChart({ symbol, livePrice, lang }: Props) {
+export function MobileCandleChart({ symbol, livePrice, slPrice, tpPrice, trailingPrice, lang }: Props) {
   const isAr = lang === 'ar';
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
