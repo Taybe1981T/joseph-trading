@@ -1,4 +1,5 @@
 ﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft } from 'lucide-react';
 import { MobileBottomNav, MobileTab } from './MobileBottomNav';
 import { MobileHeader } from './MobileHeader';
@@ -18,6 +19,7 @@ import { MobileManualSheet } from './MobileManualSheet';
 import { MobileStore } from './MobileStore';
 import { MobileClientMonitor } from './MobileClientMonitor';
 import TransactionsPage from '../TransactionsPage';
+import { playClick } from '../../lib/audioEngine';
 import { useMobileSignalAlert } from './useMobileSignalAlert';
 import { AnalysisResult, SignalType } from '../../types';
 import {
@@ -88,6 +90,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [isDev, setIsDev] = useState(false);
   const [email, setEmail] = useState('');
   const [clientCount, setClientCount] = useState(0);
+  const [showLogin, setShowLogin] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
 
   useEffect(() => {
     const check = () => {
@@ -108,6 +112,21 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     window.addEventListener('storage', check);
     const iv = setInterval(check, 5000);
     return () => { window.removeEventListener('storage', check); clearInterval(iv); };
+  }, []);
+
+  // Global click sound for any button/tap inside the mobile app.
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      try {
+        const t = e.target as HTMLElement | null;
+        if (!t) return;
+        if (t.closest && t.closest('button, [role="button"], a, .mt5-btn, .mt5-tab')) {
+          playClick(0.25);
+        }
+      } catch {}
+    };
+    document.addEventListener('click', handler, true);
+    return () => document.removeEventListener('click', handler, true);
   }, []);
   const setAutoBoth = useCallback((v: boolean) => {
     setAuto(v);
@@ -349,6 +368,39 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
       {detail && <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />}
       {alert && <div className="mt5-signal-alert">{alert}</div>}
+      <button
+          type="button"
+          onClick={() => setShowLogin(true)}
+          style={{ position: 'fixed', bottom: 80, right: 16, zIndex: 9999, padding: '10px 16px', borderRadius: 12, background: '#F59E0B', color: '#000', fontWeight: 800, border: 'none', cursor: 'pointer' }}
+        >{email ? 'Switch' : 'Login'}</button>
+      {showLogin && createPortal(
+        <div style={{ position: 'fixed', inset: 0, zIndex: 99999, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#0d1117', padding: 20, borderRadius: 12, width: '90%', maxWidth: 360, color: '#fff' }}>
+            <h3 style={{ marginTop: 0 }}>Login / Switch account</h3>
+            <input
+              value={loginEmail}
+              onChange={(e) => setLoginEmail(e.target.value)}
+              placeholder="email"
+              style={{ width: '100%', padding: 8, borderRadius: 8, border: '1px solid #333', background: '#1a1a1a', color: '#fff', marginBottom: 10 }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowLogin(false)} style={{ padding: '8px 14px', borderRadius: 8, background: '#333', color: '#fff', border: 'none' }}>Cancel</button>
+              <button
+                onClick={() => {
+                  const em = loginEmail.trim().toLowerCase();
+                  if (!em) return;
+                  try { localStorage.setItem('finalyze_user', JSON.stringify({ email: em, uid: em })); } catch {}
+                  try { localStorage.setItem('finalyze_dev_email', em); } catch {}
+                  setShowLogin(false);
+                  window.location.reload();
+                }}
+                style={{ padding: '8px 14px', borderRadius: 8, background: '#F59E0B', color: '#000', border: 'none', fontWeight: 800 }}
+              >Save</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
