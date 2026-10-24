@@ -359,10 +359,10 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
           <div style={{ marginTop: 8 }}>
             <MobileCandleChart
               symbol={symbol}
-              livePrice={chartLivePrice}
-              slPrice={chartSl}
-              tpPrice={chartTp}
-              trailingPrice={chartTrailingPrice}
+              entryPrice={chartEntry}
+              sl={chartSl}
+              tp={chartTp}
+              side={chartSide}
               lang={lang}
             />
           </div>

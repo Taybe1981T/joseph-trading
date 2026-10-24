@@ -1,7 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { getCachedQuote, subscribeQuoteBatch } from '../../services/paperTradingService';
-import { mobileT } from '../../lib/mobileMode';
-import type { Language } from '../../lib/i18n';
 
 interface Candle {
   time: number;
@@ -13,13 +10,13 @@ interface Candle {
 
 interface Props {
   symbol: string;
-  /** Live market price (from the shared quote hub) — drawn as the last-price line. */
-  livePrice?: number | null;
-  /** Open-position levels (price) to draw on the chart — desktop platform parity. */
-  slPrice?: number | null;
-  tpPrice?: number | null;
-  trailingPrice?: number | null;
-  lang?: Language;
+  entryPrice?: number | null;
+  sl?: number | null;
+  tp?: number | null;
+  side?: 'buy' | 'sell' | null;
+  lang?: 'ar' | 'en';
+  onSlChange?: (price: number) => void;
+  onTpChange?: (price: number) => void;
 }
 
 const TF_LIST = ['15m', '1h', '4h', '1d', '1w'];
@@ -29,73 +26,20 @@ function fmt(n: number): string {
 }
 
 /**
- * Mobile candle chart — platform view.
- * Real candles from /api/market-data (same backend as desktop TradingViewWidget)
- * rendered on canvas with a live last-price line. Draws the open-position
- * SL/TP/trailing-stop levels (passed as props, computed in USD via positionMath)
- * so the chart matches the desktop trading platform.
+ * Mobile candle chart — real candles from /api/market-data (same backend as
+ * desktop TradingViewWidget) rendered on canvas, with draggable
+ * entry/SL/TP levels (desktop parity: drag the line, level saves to trade).
  */
-export function MobileCandleChart({ symbol, livePrice, slPrice, tpPrice, trailingPrice, lang }: Props) {
+export function MobileCandleChart({ symbol, entryPrice, sl, tp, side, lang, onSlChange, onTpChange }: Props) {
   const isAr = lang === 'ar';
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [tf, setTf] = useState('1h');
   const [candles, setCandles] = useState<Candle[]>([]);
   const [status, setStatus] = useState<'loading' | 'ok' | 'empty'>('loading');
-  // The live price the chart renders. Kept in state (not a ref) so the canvas
-  // effect re-runs when the quote changes and the price line follows the market.
-  const [tickPrice, setTickPrice] = useState<number | null>(null);
-  // Last live price per symbol — a symbol switch must NOT show the previous
-  // symbol's price, so the value is reset the moment the symbol changes.
-  const [priceSymbol, setPriceSymbol] = useState<string>(symbol);
-  // Canvas width is tracked explicitly so the render effect can depend on it
-  // (the canvas must be re-sized when the device rotates or the layout shifts).
-  const [width, setWidth] = useState(0);
-
-  // ── Live price feed ────────────────────────────────────────────────────────
-  // The chart subscribes to the SAME shared quote hub the rest of the mobile app
-  // uses (watchlist / positions / account bar), so there is exactly one batched
-  // /api/quotes request per tick for the whole app — no extra polling here.
-  useEffect(() => {
-    const sym = (symbol || '').trim().toUpperCase();
-    if (!sym) return;
-    let alive = true;
-    // Seed with the hub's cached price so the line appears immediately instead
-    // of waiting for the first poll (and so a stale symbol price is never used).
-    const cached = getCachedQuote(sym);
-    setPriceSymbol(sym);
-    setTickPrice(cached != null && cached > 0 ? cached : null);
-    const unsub = subscribeQuoteBatch([sym], (batch) => {
-      if (!alive) return;
-      const p = batch.get(sym);
-      if (p != null && p > 0) setTickPrice(p);
-    });
-    return () => { alive = false; try { unsub(); } catch {} };
-  }, [symbol]);
-
-  // The price prop (owned by the parent) wins when it is for the SAME symbol;
-  // otherwise the chart's own subscription drives it.
-  const effectivePrice = priceSymbol === (symbol || '').trim().toUpperCase()
-    ? (livePrice != null && livePrice > 0 ? livePrice : tickPrice)
-    : tickPrice;
-
-  useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
-    const measure = () => setWidth(wrap.clientWidth || 320);
-    measure();
-    let ro: ResizeObserver | null = null;
-    try {
-      ro = new ResizeObserver(measure);
-      ro.observe(wrap);
-    } catch {
-      window.addEventListener('resize', measure);
-    }
-    return () => {
-      try { ro?.disconnect(); } catch {}
-      window.removeEventListener('resize', measure);
-    };
-  }, []);
+  const [drag, setDrag] = useState<'sl' | 'tp' | null>(null);
+  const viewRef = useRef({ entryPrice, sl, tp, side });
+  viewRef.current = { entryPrice, sl, tp, side };
 
   // Fetch candles from the same backend the desktop chart uses.
   useEffect(() => {
@@ -123,14 +67,13 @@ export function MobileCandleChart({ symbol, livePrice, slPrice, tpPrice, trailin
     return () => { alive = false; };
   }, [symbol, tf]);
 
-  // Canvas render: professional chart (desktop parity — TradingViewWidget logic:
-  // grid + time axis + live last-price line + entry/SL/TP + trailing display).
+  // Canvas render: candles + entry/SL/TP lines (same colors as desktop).
   useEffect(() => {
     const cv = canvasRef.current;
     const wrap = wrapRef.current;
     if (!cv || !wrap) return;
-    const W = width || wrap.clientWidth || 320;
-    const H = 300;
+    const W = wrap.clientWidth || 320;
+    const H = 260;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     cv.width = W * dpr;
     cv.height = H * dpr;
@@ -139,76 +82,34 @@ export function MobileCandleChart({ symbol, livePrice, slPrice, tpPrice, trailin
     const ctx = cv.getContext('2d');
     if (!ctx) return;
     ctx.scale(dpr, dpr);
-    // Background (same as desktop chart).
-    const bg = ctx.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, '#0d1117');
-    bg.addColorStop(1, '#0b0e14');
-    ctx.fillStyle = bg;
+    ctx.fillStyle = '#0b0e14';
     ctx.fillRect(0, 0, W, H);
     if (!candles.length) {
-      ctx.fillStyle = status === 'loading' ? '#00ff88' : '#666';
-      ctx.font = 'bold 13px sans-serif';
+      ctx.fillStyle = '#666';
+      ctx.font = '12px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(status === 'loading' ? (isAr ? 'جاري تحميل الشموع…' : 'Loading candles…') : (isAr ? 'لا توجد شموع' : 'No candles'), W / 2, H / 2);
+      ctx.fillText(status === 'loading' ? '…' : (isAr ? 'لا توجد شموع' : 'No candles'), W / 2, H / 2);
       return;
     }
     let mn = Infinity, mx = -Infinity;
     for (const c of candles) { mn = Math.min(mn, c.low); mx = Math.max(mx, c.high); }
-    // The live price is part of the scale so the last-price line is always
-    // visible (and never clipped off the top/bottom of the plot).
-    if (effectivePrice != null && isFinite(effectivePrice)) {
-      mn = Math.min(mn, effectivePrice); mx = Math.max(mx, effectivePrice);
+    for (const lv of [entryPrice, sl, tp]) {
+      if (lv != null && isFinite(lv)) { mn = Math.min(mn, lv); mx = Math.max(mx, lv); }
     }
     const pad = (mx - mn) * 0.12 || mx * 0.01 || 1;
     mn -= pad; mx += pad;
-    const plotH = H - 44;
-    const y = (p: number) => plotH - ((p - mn) / (mx - mn)) * (plotH - 10) + 4;
-    (cv as any)._yToPrice = (py: number) => mn + ((plotH + 4 - py) / (plotH - 10)) * (mx - mn);
+    const y = (p: number) => H - 14 - ((p - mn) / (mx - mn)) * (H - 34);
+    (cv as any)._yToPrice = (py: number) => mn + ((H - 14 - py) / (H - 34)) * (mx - mn);
     (cv as any)._priceToY = y;
-    // ── Grid: horizontal price lines + vertical time lines (desktop-style) ──
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.font = '9px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.lineWidth = 1;
-    for (let g = 0; g <= 5; g++) {
-      const gp = mn + ((mx - mn) * g) / 5;
-      const gy = y(gp);
-      ctx.beginPath();
-      ctx.moveTo(0, gy);
-      ctx.lineTo(W - 48, gy);
-      ctx.stroke();
-      ctx.fillText(fmt(gp), W - 45, gy + 3);
-    }
     const n = candles.length;
-    const stepT = Math.max(1, Math.floor(n / 5));
-    ctx.textAlign = 'center';
-    for (let i = 0; i < n; i += stepT) {
-      const c = candles[i];
-      const x = 4 + i * ((W - 52) / n) + ((W - 52) / n) / 2;
-      ctx.strokeStyle = 'rgba(255,255,255,0.03)';
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, plotH + 4);
-      ctx.stroke();
-      try {
-        const d = new Date(c.time * 1000);
-        const lbl = tf === '1d' || tf === '1w'
-          ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`
-          : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-        ctx.fillStyle = 'rgba(255,255,255,0.35)';
-        ctx.fillText(lbl, Math.min(Math.max(x, 20), W - 66), H - 6);
-      } catch {}
-    }
-    ctx.textAlign = 'left';
-    const cw = Math.max(2, Math.min(10, (W - 52) / n - 1));
-    const step = (W - 52) / n;
+    const cw = Math.max(2, Math.min(10, (W - 46) / n - 1));
+    const step = (W - 46) / n;
     for (let i = 0; i < n; i++) {
       const c = candles[i];
       const x = 4 + i * step + step / 2;
       const up = c.close >= c.open;
-      ctx.strokeStyle = up ? '#26a69a' : '#ef5350';
-      ctx.fillStyle = up ? '#26a69a' : '#ef5350';
+      ctx.strokeStyle = up ? '#00ff88' : '#ff5555';
+      ctx.fillStyle = up ? '#00ff88' : '#ff5555';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x, y(c.high));
@@ -217,25 +118,6 @@ export function MobileCandleChart({ symbol, livePrice, slPrice, tpPrice, trailin
       const yo = y(c.open), yc = y(c.close);
       ctx.fillRect(x - cw / 2, Math.min(yo, yc), cw, Math.max(1.5, Math.abs(yc - yo)));
     }
-    // ── Live last-price line (desktop-style: live market price, not candle close) ──
-    const last = effectivePrice != null ? effectivePrice : candles[candles.length - 1].close;
-    const ly = y(last);
-    const upLast = last >= candles[candles.length - 1].open;
-    ctx.strokeStyle = upLast ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)';
-    ctx.setLineDash([4, 3]);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, ly);
-    ctx.lineTo(W - 48, ly);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = upLast ? '#26a69a' : '#ef5350';
-    const lbl = fmt(last);
-    const tw = ctx.measureText(lbl).width + 8;
-    ctx.fillRect(W - 48, ly - 8, 46, 15);
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 9px sans-serif';
-    ctx.fillText(lbl, W - 44, ly + 3);
     const line = (price: number | null | undefined, color: string, label: string, dashed: boolean) => {
       if (price == null || !isFinite(price)) return;
       const yy = y(price);
@@ -245,21 +127,48 @@ export function MobileCandleChart({ symbol, livePrice, slPrice, tpPrice, trailin
       ctx.setLineDash(dashed ? [5, 4] : []);
       ctx.beginPath();
       ctx.moveTo(0, yy);
-      ctx.lineTo(W - 48, yy);
+      ctx.lineTo(W - 44, yy);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = color;
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(label + ' ' + fmt(price), W - 46, Math.max(10, Math.min(H - 24, yy - 3)));
+      ctx.fillText(label + ' ' + fmt(price), W - 42, Math.max(10, Math.min(H - 4, yy - 3)));
     };
-    // ── Platform-parity levels: SL (red), TP (green), Trailing stop (orange) ──
-    line(slPrice, '#ff5550', mobileT(lang!, 'SL', 'وقف'), true);
-    line(tpPrice, '#00ff88', mobileT(lang!, 'TP', 'هدف'), true);
-    line(trailingPrice, '#ffaa44', mobileT(lang!, 'TS', 'تريلنغ'), true);
-    // Redraw only when pixels actually change: candles, timeframe, canvas size,
-    // live price, and the SL/TP/trailing levels.
-  }, [candles, status, tf, isAr, width, tickPrice, livePrice, slPrice, tpPrice, trailingPrice, lang]);
+    line(entryPrice, '#e5e7eb', side === 'sell' ? 'S' : 'B', true);
+    line(sl, '#ff5555', 'SL', false);
+    line(tp, '#00ff88', 'TP', false);
+    const last = candles[candles.length - 1].close;
+    ctx.fillStyle = '#888';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(fmt(last), W - 42, Math.max(10, Math.min(H - 4, y(last) + 10)));
+  });
+
+  const yToPrice = (clientY: number): number | null => {
+    try {
+      const cv = canvasRef.current;
+      if (!cv) return null;
+      const fn = (cv as any)._yToPrice;
+      if (typeof fn !== 'function') return null;
+      const r = cv.getBoundingClientRect();
+      return fn(clientY - r.top);
+    } catch { return null; }
+  };
+
+  const nearLine = (clientY: number): 'sl' | 'tp' | null => {
+    try {
+      const cv = canvasRef.current;
+      if (!cv) return null;
+      const fn = (cv as any)._priceToY;
+      if (typeof fn !== 'function') return null;
+      const r = cv.getBoundingClientRect();
+      const py = clientY - r.top;
+      if (sl != null && Math.abs(fn(sl) - py) < 14) return 'sl';
+      if (tp != null && Math.abs(fn(tp) - py) < 14) return 'tp';
+      return null;
+    } catch { return null; }
+  };
 
   return (
     <div>
@@ -281,11 +190,36 @@ export function MobileCandleChart({ symbol, livePrice, slPrice, tpPrice, trailin
         ))}
       </div>
       <div ref={wrapRef} style={{ position: 'relative' }}>
-        <canvas ref={canvasRef} style={{ display: 'block', borderRadius: 10, touchAction: 'none', cursor: 'default' }} />
+        <canvas
+          ref={canvasRef}
+          style={{ display: 'block', borderRadius: 10, touchAction: 'none', cursor: drag ? 'ns-resize' : 'default' }}
+          onPointerDown={(e) => {
+            const hit = nearLine(e.clientY);
+            if (hit) {
+              setDrag(hit);
+              try { (e.target as any).setPointerCapture(e.pointerId); } catch {}
+            }
+          }}
+          onPointerMove={(e) => {
+            if (!drag) return;
+            const p = yToPrice(e.clientY);
+            if (p == null || !(p > 0)) return;
+            if (drag === 'sl') onSlChange?.(p);
+            else onTpChange?.(p);
+          }}
+          onPointerUp={() => setDrag(null)}
+          onPointerCancel={() => setDrag(null)}
+        />
+        {drag && (
+          <div style={{ position: 'absolute', top: 6, left: 8, fontSize: 11, fontWeight: 800, color: '#ffaa44', background: 'rgba(0,0,0,0.7)', padding: '2px 8px', borderRadius: 6 }}>
+            {isAr ? 'اسحب لتغيير ' : 'Dragging '} {drag.toUpperCase()}…
+          </div>
+        )}
       </div>
       <div style={{ fontSize: 11, color: '#666', marginTop: 6, fontWeight: 600 }}>
-        {isAr ? 'شارت مباشر — الشموع من /api/market-data' : 'Live chart — candles from /api/market-data'}
+        {isAr ? 'اسحب خط SL أو TP على الشارت لتعديله — يُحفظ تلقائياً' : 'Drag the SL / TP line on the chart to adjust — saves automatically'}
       </div>
     </div>
   );
 }
+
