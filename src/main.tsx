@@ -36,6 +36,8 @@ function AppWrapper() {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
+  // على الجوال (≤768px): أي زائر (عميل أو غير مسجل) يفتح التطبيق مباشرةً
+  // بدون بوابة تسجيل دخول — مستوى العميل يُكتشف من المتجر المحلي.
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
@@ -47,7 +49,9 @@ function AppWrapper() {
         }
       } catch {}
     });
-    return () => unsub();
+    // لا ننتظر Firebase ببطء: لو لم يتوفر المستخدم بعد، نعرّف الواجهة فوراً.
+    const t = setTimeout(() => setAuthLoading(false), 3000);
+    return () => { unsub(); clearTimeout(t); };
   }, []);
 
   useEffect(() => {
