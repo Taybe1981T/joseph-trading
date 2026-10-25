@@ -95,6 +95,13 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   });
   const [customAvatar, setCustomAvatar] = useState(() => localStorage.getItem('finalyze_custom_avatar') || null);
   const [customLogo, setCustomLogo] = useState(() => localStorage.getItem('finalyze_custom_logo') || null);
+  const [following, setFollowing] = useState(() => localStorage.getItem('finalyze_following') === 'true');
+
+  const toggleFollowing = () => {
+    const next = !following;
+    setFollowing(next);
+    try { localStorage.setItem('finalyze_following', String(next)); } catch {}
+  };
 
   // Firebase auth state
   const [user, setUser] = useState<any>(null);
@@ -439,7 +446,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} />}
         {tab === 'store' && isDev && <MobileStore lang={lang} onClose={goHome} />}
         {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} />}
-        {tab === 'profile' && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} />}
+        {tab === 'profile' && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} isLoggedIn={!!(user?.email || email)} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} isFollowing={following} onFollowToggle={toggleFollowing} />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} />}
         {children}
       </div>

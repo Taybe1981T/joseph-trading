@@ -1,17 +1,23 @@
 import React, { useState } from 'react';
-import { User, Shield, Camera, Image } from 'lucide-react';
+import { User, Shield, Camera, Image, LogOut, LogIn, Check, X } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 
 interface MobileProfileProps {
   language: Language;
   userEmail?: string | null;
   avatarUrl?: string | null;
+  isLoggedIn?: boolean;
+  onLoginClick?: () => void;
+  onLogoutClick?: () => void;
   onProfileImageChange?: (url: string) => void;
   onLogoChange?: (url: string) => void;
+  isFollowing?: boolean;
+  onFollowToggle?: () => void;
 }
 
 export function MobileProfile({
-  language, userEmail, avatarUrl, onProfileImageChange, onLogoChange,
+  language, userEmail, avatarUrl, isLoggedIn = false, onLoginClick, onLogoutClick,
+  onProfileImageChange, onLogoChange, isFollowing = false, onFollowToggle,
 }: MobileProfileProps) {
   const isAr = language === 'ar';
   const [customAvatar, setCustomAvatar] = useState(() => localStorage.getItem('finalyze_custom_avatar') || null);
@@ -92,16 +98,57 @@ export function MobileProfile({
             input.type = 'file';
             input.accept = 'image/*';
             input.onchange = handleLogoChange;
-            input.click();
-          }}>
-            {isAr ? 'تغيير' : 'Change'}
+        {/* Follow / Tracking toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 10, background: '#2a2a2a', border: '1px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <User size={18} style={{ color: '#888' }} />
+          </div>
+          <div className="mt5-signal-info" style={{ flex: 1 }}>
+            <div className="mt5-card-title" style={{ fontSize: 15 }}>{isAr ? '?????? ??????' : 'Follow Account'}</div>
+            <div className="mt5-card-subtitle">{isAr ? '???? ???? ??? ?????? ??????????' : 'Track account activity and notifications'}</div>
+          </div>
+          <button
+            className={mt5-btn }
+            style={{ padding: '8px 18px', minWidth: 100 }}
+            onClick={() => onFollowToggle?.()}
+          >
+            {isFollowing ? (isAr ? '????? ????????' : 'Unfollow') : (isAr ? '??????' : 'Follow')}
+            {isFollowing ? <Check size={14} style={{ marginLeft: 6 }} /> : <X size={14} style={{ marginLeft: 6 }} />}
           </button>
         </div>
-      </div>
 
-      <div className="mt5-empty-subtitle" style={{ textAlign: 'center', marginTop: 16 }}>
-        Joseph.Trading v3.1.0 — MT5 Mobile Edition
-      </div>
-    </div>
-  );
-}
+        {/* Account login/logout at bottom of profile */}
+        <div style={{ marginTop: 20 }}>
+          {isLoggedIn ? (
+            <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {avatarUrl || customAvatar ? (
+                  <img src={avatarUrl || customAvatar} alt="Avatar" style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover' }} />
+                ) : (
+                  <User size={20} style={{ color: '#888' }} />
+                )}
+                <div className="mt5-signal-info" style={{ flex: 1 }}>
+                  <div className="mt5-card-title">{userEmail || (isAr ? '??????' : 'User')}</div>
+                  <div className="mt5-card-subtitle">{isAr ? '????' : 'Signed in'}</div>
+                </div>
+              </div>
+              <button className="mt5-btn mt5-btn-danger mt5-btn-block" onClick={() => onLogoutClick?.()}>
+                <LogOut size={16} /> {isAr ? '????? ??????' : 'Sign out'}
+              </button>
+            </div>
+          ) : (
+            <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <LogIn size={20} style={{ color: '#F59E0B', flexShrink: 0 }} />
+                <div className="mt5-signal-info" style={{ flex: 1 }}>
+                  <div className="mt5-card-title">{isAr ? '????? ??????' : 'Sign in'}</div>
+                  <div className="mt5-card-subtitle">{isAr ? '???? ?????? ???????? ????? ??????' : 'Sign in to use account features'}</div>
+                </div>
+              </div>
+              <button className="mt5-btn mt5-btn-primary mt5-btn-block" onClick={() => onLoginClick?.()}>
+                <LogIn size={16} /> {isAr ? '????? ?????? ????? Google' : 'Sign in with Google'}
+              </button>
+            </div>
+          )
+        </div>
+            input.click();
