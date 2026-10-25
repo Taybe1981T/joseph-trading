@@ -163,7 +163,18 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   };
 
   const doLogout = async () => {
-    await signOut(auth).catch(() => {});
+    try {
+      await signOut(auth);
+    } catch {}
+    try {
+      localStorage.removeItem('finalyze_user');
+      localStorage.removeItem('finalyze_auth_user');
+      localStorage.removeItem('finalyze_dev_email');
+    } catch {}
+    setUser(null);
+    setEmail('');
+    setIsDev(false);
+    try { window.location.reload(); } catch {}
   };
 
   const onProfileImageChange = (url: string) => {
