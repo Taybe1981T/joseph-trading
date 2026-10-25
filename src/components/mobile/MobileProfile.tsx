@@ -149,5 +149,4 @@ export function MobileProfile({
                 <LogIn size={16} /> {isAr ? '????? ?????? ????? Google' : 'Sign in with Google'}
               </button>
             </div>
-          )
-        </div>
+          </div>
