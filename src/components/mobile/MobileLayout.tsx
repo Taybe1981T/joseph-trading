@@ -8,6 +8,7 @@ import { useLiveQuotes } from './useLiveQuotes';
 import { MobilePositions, MobilePosition } from './MobilePositions';
 import { MobileNewTrade } from './MobileNewTrade';
 import { MobileSettings } from './MobileSettings';
+import { MobileProfile } from './MobileProfile';
 import { MobileTradeDialog } from './MobileTradeDialog';
 import { MobileSignalDetail } from './MobileSignalDetail';
 import { Language } from '../../lib/i18n';
@@ -42,7 +43,7 @@ interface MobileSignal {
 
 const TITLES: Record<MobileTab, string> = {
   home: 'Joseph.Trading', quotes: 'Market Watch', positions: 'Open Positions', trade: 'Trading Platform',
-  settings: 'Settings', analysis: 'Auto Analysis', manual: 'Manual Analysis', store: 'Store', clients: 'Clients', transactions: 'My Transactions',
+  settings: 'Settings', profile: 'Profile', analysis: 'Auto Analysis', manual: 'Manual Analysis', store: 'Store', clients: 'Clients', transactions: 'My Transactions',
 };
 
 export function MobileLayout({ children }: { children?: React.ReactNode }) {
@@ -406,7 +407,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         onNotificationsClick={goHome}
         userEmail={user?.email || email || null}
         avatarUrl={customAvatar || user?.photoURL || null}
-        onProfileClick={() => goTab('settings')} />
+        onProfileClick={() => goTab('profile')} />
       {tab !== 'home' && (
         <button
           type="button"
@@ -426,7 +427,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} />}
         {tab === 'store' && isDev && <MobileStore lang={lang} onClose={goHome} />}
-        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} />}
+        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} />}
+        {tab === 'profile' && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} />}
         {children}
       </div>

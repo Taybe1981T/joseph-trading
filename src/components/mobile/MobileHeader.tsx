@@ -85,13 +85,13 @@ export function MobileHeader({
             <Bell size={17} />
           </button>
         )}
-        {/* Profile icon — goes to Settings */}
+        {/* Profile icon — goes to Profile */}
         <div style={{ position: 'relative' }}>
           <button
             className="mt5-icon-btn"
             style={{ width: 36, height: 36 }}
             onClick={() => { onProfileClick?.(); }}
-            aria-label="Profile / Settings"
+            aria-label="Profile"
           >
             {avatarUrl ? (
               <img src={avatarUrl} alt="Avatar" style={{ width: 24, height: 24, borderRadius: '50%', objectFit: 'cover' }} />

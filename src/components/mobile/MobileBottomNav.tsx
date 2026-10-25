@@ -1,7 +1,7 @@
 import React from 'react';
 import { Home, Briefcase, Settings, Zap, Package, Receipt, TrendingUp, Hand } from 'lucide-react';
 
-export type MobileTab = 'home' | 'quotes' | 'positions' | 'trade' | 'settings' | 'analysis' | 'manual' | 'store' | 'clients' | 'transactions';
+export type MobileTab = 'home' | 'quotes' | 'positions' | 'trade' | 'settings' | 'profile' | 'analysis' | 'manual' | 'store' | 'clients' | 'transactions';
 
 interface MobileBottomNavProps {
   activeTab: MobileTab;
