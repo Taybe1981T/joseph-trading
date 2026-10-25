@@ -29,7 +29,8 @@ import {
   closeMobileTrade,
   startMobilePositionManager,
 } from '../../services/mobileTradeBridge';
-import { auth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from '../../lib/firebase';
+import { auth } from '../../lib/firebase';
+import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
 
 interface MobileSignal {
   symbol: string;
