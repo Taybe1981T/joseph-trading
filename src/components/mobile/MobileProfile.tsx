@@ -97,7 +97,8 @@ export function MobileProfile({
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = 'image/*';
-            input.onchange = handleLogoChange;
+            input.onChange = handleLogoChange;
+          }}>
         {/* Follow / Tracking toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ width: 44, height: 44, borderRadius: 10, background: '#2a2a2a', border: '1px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -108,7 +109,7 @@ export function MobileProfile({
             <div className="mt5-card-subtitle">{isAr ? '???? ???? ??? ?????? ??????????' : 'Track account activity and notifications'}</div>
           </div>
           <button
-            className={mt5-btn }
+            className="mt5-btn"
             style={{ padding: '8px 18px', minWidth: 100 }}
             onClick={() => onFollowToggle?.()}
           >
