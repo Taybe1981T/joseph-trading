@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
-import { Bell, Volume2, Globe, Shield, LogOut, LogIn, Loader2, RefreshCw, User } from 'lucide-react';
+import { Bell, Volume2, Globe, Shield, LogOut, LogIn, Loader2, RefreshCw, User, Camera } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { useMobileMode } from '../../lib/mobileMode';
 
@@ -194,6 +194,11 @@ export function MobileSettings({
             {language === 'ar' ? 'تغيير' : 'Change'}
           </button>
         </div>
+        {userEmail && (
+          <button className="mt5-btn mt5-btn-danger mt5-btn-block" onClick={() => onLogoutClick?.()}>
+            <LogOut size={16} /> {language === 'ar' ? 'تسجيل الخروج من كافة الأجهزة' : 'Sign out from all devices'}
+          </button>
+        )}
       </div>
 
       <div className="mt5-empty-subtitle" style={{ textAlign: 'center', marginTop: 12 }}>
