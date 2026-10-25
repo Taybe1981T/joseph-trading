@@ -18,6 +18,8 @@ interface MobileSettingsProps {
   savedAccounts?: string[];
   onLoginClick?: () => void;
   onLogoutClick?: () => void;
+  userEmail?: string | null;
+  avatarUrl?: string | null;
 }
 
 export function MobileSettings({
@@ -35,6 +37,8 @@ export function MobileSettings({
   devLoginBusy,
   devLoginError,
   version,
+  userEmail,
+  avatarUrl,
 }: MobileSettingsProps) {
   const Row = ({ icon: Icon, title, subtitle, control }: { icon: React.ElementType; title: string; subtitle: string; control: React.ReactNode }) => (
     <div className="mt5-signal-card">
@@ -76,14 +80,59 @@ export function MobileSettings({
         </div>
       } />
 
+      {/* Account section at bottom */}
+      <div className="mt5-section-title" style={{ marginTop: 24 }}>
+        <User size={16} /> {language === 'ar' ? 'الحساب' : 'Account'}
+      </div>
+      {userEmail ? (
+        <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="Avatar" style={{ width: 40, height: 40, borderRadius: '50%', objectFit: 'cover' }} />
+            ) : (
+              <User size={20} style={{ color: '#888' }} />
+            )}
+            <div className="mt5-signal-info" style={{ flex: 1 }}>
+              <div className="mt5-card-title">{userEmail}</div>
+              <div className="mt5-card-subtitle">{language === 'ar' ? 'متصل' : 'Signed in'}</div>
+            </div>
+          </div>
+          <button className="mt5-btn mt5-btn-danger mt5-btn-block" onClick={() => onLogoutClick?.()}>
+            <LogOut size={16} /> {language === 'ar' ? 'تسجيل الخروج' : 'Sign out'}
+          </button>
+        </div>
+      ) : (
+        <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <LogIn size={20} style={{ color: '#F59E0B', flexShrink: 0 }} />
+            <div className="mt5-signal-info" style={{ flex: 1 }}>
+              <div className="mt5-card-title">{language === 'ar' ? 'تسجيل الدخول' : 'Sign in'}</div>
+              <div className="mt5-card-subtitle">{language === 'ar' ? 'اختر حساباً أو سجّل باستخدام Google' : 'Choose an account or sign in with Google'}</div>
+            </div>
+          </div>
+          {savedAccounts && savedAccounts.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {savedAccounts.map((em) => (
+                <button key={em} className="mt5-btn mt5-btn-secondary mt5-btn-block" onClick={() => { onLoginClick?.(); }}>
+                  {em}
+                </button>
+              ))}
+            </div>
+          )}
+          <button className="mt5-btn mt5-btn-primary mt5-btn-block" onClick={() => onLoginClick?.()}>
+            <LogIn size={16} /> {language === 'ar' ? 'تسجيل الدخول بحساب Google' : 'Sign in with Google'}
+          </button>
+        </div>
+      )}
+
       <div className="mt5-empty-subtitle" style={{ textAlign: 'center', marginTop: 12 }}>
-        Joseph.Trading v{version} � MT5 Mobile Edition
+        Joseph.Trading v{version} � MT5 Mobile Edition
       </div>
     </div>
   );
 }
 
-/** Developer login row � desktop parity (App.tsx guest mode shows a developer login; clients never get the dev sections until a dev email signs in). */
+/** Developer login row � desktop parity (App.tsx guest mode shows a developer login; clients never get the dev sections until a dev email signs in). */
 function DevLoginRow({ language, onDeveloperLogin, devLoginBusy, devLoginError }: { language: Language; onDeveloperLogin?: () => void; devLoginBusy?: boolean; devLoginError?: string | null }) {
   const { isDev } = useMobileMode();
   if (isDev) return null;
@@ -94,7 +143,7 @@ function DevLoginRow({ language, onDeveloperLogin, devLoginBusy, devLoginError }
         <div className="mt5-signal-info">
           <div className="mt5-card-title">{language === 'ar' ? '???? ??????' : 'Developer Login'}</div>
           <div className="mt5-card-subtitle">
-            {language === 'ar' ? '???????? ??? � ???? ????? ???????' : 'Developers only � unlocks developer tools'}
+            {language === 'ar' ? '???????? ??? � ???? ????? ???????' : 'Developers only � unlocks developer tools'}
           </div>
         </div>
       </div>
@@ -107,7 +156,7 @@ function DevLoginRow({ language, onDeveloperLogin, devLoginBusy, devLoginError }
   );
 }
 
-/** Logout button � only meaningful while a developer session is active. */
+/** Logout button � only meaningful while a developer session is active. */
 function DevLogoutButton({ language }: { language: Language }) {
   const { isDev } = useMobileMode();
   if (!isDev) return null;
