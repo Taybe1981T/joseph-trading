@@ -92,6 +92,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [savedAccounts, setSavedAccounts] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('finalyze_saved_accounts') || '[]'); } catch { return []; }
   });
+  const [customAvatar, setCustomAvatar] = useState(() => localStorage.getItem('finalyze_custom_avatar') || null);
+  const [customLogo, setCustomLogo] = useState(() => localStorage.getItem('finalyze_custom_logo') || null);
 
   // Firebase auth state
   const [user, setUser] = useState<any>(null);
@@ -161,6 +163,16 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
 
   const doLogout = async () => {
     await signOut(auth).catch(() => {});
+  };
+
+  const onProfileImageChange = (url: string) => {
+    setCustomAvatar(url);
+    try { localStorage.setItem('finalyze_custom_avatar', url); } catch {}
+  };
+
+  const onLogoChange = (url: string) => {
+    setCustomLogo(url);
+    try { localStorage.setItem('finalyze_custom_logo', url); } catch {}
   };
 
   // Modal for login
@@ -393,9 +405,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         onClientsClick={() => goTab('clients')}
         onNotificationsClick={goHome}
         userEmail={user?.email || email || null}
-        avatarUrl={user?.photoURL || localStorage.getItem('finalyze_custom_avatar') || null}
-        onLoginClick={() => setShowLoginModal(true)}
-        onLogoutClick={() => doLogout()} />
+        avatarUrl={customAvatar || user?.photoURL || null}
+        onProfileClick={() => goTab('settings')} />
       {tab !== 'home' && (
         <button
           type="button"
@@ -415,7 +426,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} />}
         {tab === 'store' && isDev && <MobileStore lang={lang} onClose={goHome} />}
-        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={user?.photoURL || localStorage.getItem('finalyze_custom_avatar') || null} />}
+        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} />}
         {children}
       </div>

@@ -20,6 +20,8 @@ interface MobileSettingsProps {
   onLogoutClick?: () => void;
   userEmail?: string | null;
   avatarUrl?: string | null;
+  onProfileImageChange?: (url: string) => void;
+  onLogoChange?: (url: string) => void;
 }
 
 export function MobileSettings({
@@ -36,6 +38,8 @@ export function MobileSettings({
   onLogoutClick,
   userEmail,
   avatarUrl,
+  onProfileImageChange,
+  onLogoChange,
   devLoginBusy,
   devLoginError,
   version,
@@ -126,6 +130,71 @@ export function MobileSettings({
       )}
 
       <button className="mt5-btn mt5-btn-secondary mt5-btn-block" onClick={onClearCache}>Clear Cache</button>
+
+      {/* Personal Profile section */}
+      <div className="mt5-section-title" style={{ marginTop: 24 }}>
+        <User size={16} /> {language === 'ar' ? 'الملف الشخصي' : 'Personal Profile'}
+      </div>
+      <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <div style={{ position: 'relative', width: 96, height: 96 }}>
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="Profile" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', border: '2px solid rgba(255,255,255,0.2)' }} />
+            ) : (
+              <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#2a2a2a', border: '2px dashed rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <User size={32} style={{ color: '#888' }} />
+              </div>
+            )}
+            <label style={{ position: 'absolute', bottom: 2, right: 2, background: '#10B981', borderRadius: '50%', padding: 6, cursor: 'pointer', border: '2px solid #1a1a1a' }}>
+              <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                  const dataUrl = ev.target?.result as string;
+                  try { localStorage.setItem('finalyze_custom_avatar', dataUrl); } catch {}
+                  onProfileImageChange?.(dataUrl);
+                };
+                reader.readAsDataURL(file);
+              }} />
+              <Camera size={14} style={{ color: '#fff' }} />
+            </label>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, width: '100%' }}>
+            <div className="mt5-card-title" style={{ textAlign: 'center' }}>{userEmail || (language === 'ar' ? 'غير مسجل الدخول' : 'Not signed in')}</div>
+            <div className="mt5-card-subtitle" style={{ textAlign: 'center', color: '#888' }}>{language === 'ar' ? 'صورة البروفيل' : 'Profile picture'}</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
+          <div style={{ width: 40, height: 40, borderRadius: 8, background: '#2a2a2a', border: '1px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Shield size={16} style={{ color: '#888' }} />
+          </div>
+          <div className="mt5-signal-info" style={{ flex: 1 }}>
+            <div className="mt5-card-title">{language === 'ar' ? 'شعار التطبيق' : 'App Logo'}</div>
+            <div className="mt5-card-subtitle">{language === 'ar' ? 'تغيير شعار التطبيق الظاهر في الهيدر' : 'Change app logo shown in header'}</div>
+          </div>
+          <button className="mt5-btn mt5-btn-secondary" onClick={() => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = (e: any) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = (ev) => {
+                const dataUrl = ev.target?.result as string;
+                try { localStorage.setItem('finalyze_custom_logo', dataUrl); } catch {}
+                onLogoChange?.(dataUrl);
+              };
+              reader.readAsDataURL(file);
+            };
+            input.click();
+          }}>
+            {language === 'ar' ? 'تغيير' : 'Change'}
+          </button>
+        </div>
+      </div>
 
       <div className="mt5-empty-subtitle" style={{ textAlign: 'center', marginTop: 12 }}>
         Joseph.Trading v{version} — MT5 Mobile Edition
