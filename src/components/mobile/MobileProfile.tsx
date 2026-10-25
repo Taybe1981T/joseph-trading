@@ -151,4 +151,3 @@ export function MobileProfile({
             </div>
           )
         </div>
-            input.click();
