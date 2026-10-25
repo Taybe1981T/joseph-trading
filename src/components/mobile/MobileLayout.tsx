@@ -172,12 +172,6 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     // Force the shared engine to resync immediately (same-tab toggles don't re-run effects).
     try { window.dispatchEvent(new CustomEvent('mobile-autotrade-resync')); } catch {}
   }, []);
-  const setAutoBoth = useCallback((v: boolean) => {
-    setAuto(v);
-    setMobileAutoTrade(v);
-    // Force the shared engine to resync immediately (same-tab toggles don't re-run effects).
-    try { window.dispatchEvent(new CustomEvent('mobile-autotrade-resync')); } catch {}
-  }, []);
 
   // Sync the shared mobile auto engine with the SAME home-page signals (desktop parity: App.tsx).
   useEffect(() => {
