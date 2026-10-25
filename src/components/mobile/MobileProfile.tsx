@@ -148,5 +148,5 @@ export function MobileProfile({
               <button className="mt5-btn mt5-btn-primary mt5-btn-block" onClick={() => onLoginClick?.()}>
                 <LogIn size={16} /> {isAr ? '????? ?????? ????? Google' : 'Sign in with Google'}
               </button>
+              </div>
             </div>
-          </div>
