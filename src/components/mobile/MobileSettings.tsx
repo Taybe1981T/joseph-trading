@@ -76,7 +76,7 @@ export function MobileSettings({
         </div>
       } />
 
-       style={{ textAlign: 'center', marginTop: 12 }}>
+      <div className="mt5-empty-subtitle" style={{ textAlign: 'center', marginTop: 12 }}>
         Joseph.Trading v{version} — MT5 Mobile Edition
       </div>
     </div>
@@ -121,5 +121,6 @@ function DevLogoutButton({ language }: { language: Language }) {
     </button>
   );
 }
+
 
 
