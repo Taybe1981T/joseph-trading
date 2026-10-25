@@ -29,7 +29,7 @@ import {
   closeMobileTrade,
   startMobilePositionManager,
 } from '../../services/mobileTradeBridge';
-import { calcPnl, getLivePrices } from '../../services/paperTradingService';
+import { auth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from '../../lib/firebase';
 
 interface MobileSignal {
   symbol: string;
@@ -88,8 +88,13 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [isDev, setIsDev] = useState(false);
   const [email, setEmail] = useState('');
   const [clientCount, setClientCount] = useState(0);
-  const [showLogin, setShowLogin] = useState(false);
-  const [loginEmail, setLoginEmail] = useState('');
+  const [savedAccounts, setSavedAccounts] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('finalyze_saved_accounts') || '[]'); } catch { return []; }
+  });
+
+  // Firebase auth state
+  const [user, setUser] = useState<any>(null);
+  const [loadingAuth, setLoadingAuth] = useState(false);
 
   useEffect(() => {
     const check = () => {
@@ -112,7 +117,61 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     return () => { window.removeEventListener('storage', check); clearInterval(iv); };
   }, []);
 
+  // Firebase auth effect
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (u?.email) {
+        try {
+          localStorage.setItem('finalyze_user', JSON.stringify({ email: u.email.toLowerCase().trim(), uid: u.uid }));
+          localStorage.setItem('finalyze_auth_user', JSON.stringify({ email: u.email.toLowerCase().trim(), uid: u.uid }));
+        } catch {}
+      }
+      setLoadingAuth(false);
+    });
+    const t = setTimeout(() => setLoadingAuth(false), 3000);
+    return () => { unsub(); clearTimeout(t); };
+  }, []);
+
+  // Login / logout helpers
+  const doLogin = async (emailHint?: string) => {
+    setLoadingAuth(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      if (emailHint) {
+        provider.setCustomParameters({ login_hint: emailHint });
+      }
+      const result = await signInWithPopup(auth, provider);
+      if (result?.user?.email) {
+        const em = result.user.email.toLowerCase().trim();
+        setSavedAccounts(prev => {
+          if (prev.includes(em)) return prev;
+          const next = [...prev, em];
+          try { localStorage.setItem('finalyze_saved_accounts', JSON.stringify(next)); } catch {}
+          return next;
+        });
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingAuth(false);
+    }
+  };
+
+  const doLogout = async () => {
+    await signOut(auth).catch(() => {});
+  };
+
+  // Modal for login
+  const [showLoginModal, setShowLoginModal] = useState(false);
+
   // (click sounds disabled to debug freeze)
+  const setAutoBoth = useCallback((v: boolean) => {
+    setAuto(v);
+    setMobileAutoTrade(v);
+    // Force the shared engine to resync immediately (same-tab toggles don't re-run effects).
+    try { window.dispatchEvent(new CustomEvent('mobile-autotrade-resync')); } catch {}
+  }, []);
   const setAutoBoth = useCallback((v: boolean) => {
     setAuto(v);
     setMobileAutoTrade(v);
@@ -337,7 +396,11 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         }}
         clientCount={isDev ? clientCount : 0}
         onClientsClick={() => goTab('clients')}
-        onNotificationsClick={goHome} onProfileClick={() => goTab('settings')} />
+        onNotificationsClick={goHome}
+        userEmail={user?.email || email || null}
+        avatarUrl={user?.photoURL || localStorage.getItem('finalyze_custom_avatar') || null}
+        onLoginClick={() => setShowLoginModal(true)}
+        onLogoutClick={() => doLogout()} />
       {tab !== 'home' && (
         <button
           type="button"
@@ -357,13 +420,37 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} />}
         {tab === 'store' && isDev && <MobileStore lang={lang} onClose={goHome} />}
-        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" />}
+        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={user?.photoURL || localStorage.getItem('finalyze_custom_avatar') || null} />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} />}
         {children}
       </div>
       <MobileBottomNav activeTab={tab} onTabChange={goTab} isDeveloper={isDev} lang={lang} />
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
       {detail && <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />}
+      {showLoginModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#1a1a1a', borderRadius: 16, padding: 24, width: '90%', maxWidth: 400, color: '#fff' }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>{lang === 'ar' ? 'تسجيل الدخول' : 'Login'}</h3>
+            {savedAccounts.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{lang === 'ar' ? 'الحسابات المحفوظة:' : 'Saved accounts:'}</div>
+                {savedAccounts.map((em) => (
+                  <button key={em} onClick={() => { doLogin(em); setShowLoginModal(false); }} style={{ display: 'block', width: '100%', padding: '10px 12px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#fff', fontSize: 13, marginBottom: 8, cursor: 'pointer', textAlign: 'left' }}>
+                    {em}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button onClick={() => { doLogin(); setShowLoginModal(false); }} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '12px 16px', background: '#4285F4', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', justifyContent: 'center' }}>
+              <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" width="18" height="18" alt="Google" />
+              {lang === 'ar' ? 'تسجيل الدخول بحساب Google' : 'Sign in with Google'}
+            </button>
+            <button onClick={() => setShowLoginModal(false)} style={{ marginTop: 12, width: '100%', padding: '8px', background: 'transparent', border: 'none', color: '#888', fontSize: 12, cursor: 'pointer' }}>
+              {lang === 'ar' ? 'إلغاء' : 'Cancel'}
+            </button>
+          </div>
+        </div>
+      )}
       {alert && <div className="mt5-signal-alert">{alert}</div>}
     </div>
   );

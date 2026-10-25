@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Globe, Sun, Moon, Bell, User, Users } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Globe, Sun, Moon, Bell, User, Users, LogOut, LogIn, Camera } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { getOpenStockExchanges } from '../../lib/marketHours';
 import { BASE_URL } from '../../lib/firebase';
@@ -13,7 +13,10 @@ interface MobileHeaderProps {
   clientCount?: number;
   onClientsClick?: () => void;
   onNotificationsClick?: () => void;
-  onProfileClick?: () => void;
+  userEmail?: string | null;
+  avatarUrl?: string | null;
+  onLoginClick?: () => void;
+  onLogoutClick?: () => void;
 }
 
 function isCatOpen(key: string, now: Date): boolean {
@@ -32,10 +35,11 @@ const CATS = [
 
 export function MobileHeader({
   title, lang, onLangChange, isDark, toggleTheme, clientCount, onClientsClick,
-  onNotificationsClick, onProfileClick,
+  onNotificationsClick, userEmail, avatarUrl, onLoginClick, onLogoutClick,
 }: MobileHeaderProps) {
   const [logo, setLogo] = useState<string | null>(null);
   const [showLang, setShowLang] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     try { setLogo(localStorage.getItem('finalyze_custom_logo')); } catch {}
@@ -83,11 +87,45 @@ export function MobileHeader({
             <Bell size={17} />
           </button>
         )}
-        {onProfileClick && (
-          <button className="mt5-icon-btn" style={{ width: 36, height: 36 }} onClick={onProfileClick} aria-label="Profile">
-            <User size={17} />
-          </button>
-        )}
+        {/* Profile / Login icon */}
+        <div style={{ position: 'relative' }}>
+          {userEmail ? (
+            <button
+              className="mt5-icon-btn"
+              style={{ width: 36, height: 36 }}
+              onClick={() => setShowUserMenu(v => !v)}
+              aria-label="User menu"
+            >
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="Avatar" style={{ width: 24, height: 24, borderRadius: '50%', objectFit: 'cover' }} />
+              ) : (
+                <User size={17} />
+              )}
+            </button>
+          ) : (
+            <button
+              className="mt5-icon-btn"
+              style={{ width: 36, height: 36 }}
+              onClick={() => { onLoginClick?.(); }}
+              aria-label="Login"
+            >
+              <User size={17} />
+            </button>
+          )}
+
+          {/* Dropdown for logged-in user */}
+          {showUserMenu && userEmail && (
+            <div style={{ position: 'absolute', top: 42, right: 0, background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 10, overflow: 'hidden', zIndex: 300, minWidth: 180, padding: 10 }}>
+              <div style={{ color: '#e0e0e0', fontSize: 13, marginBottom: 8 }}>{userEmail}</div>
+              <button
+                onClick={() => { onLogoutClick?.(); setShowUserMenu(false); }}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 10px', background: 'transparent', border: 'none', color: '#ff6b6b', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+              >
+                <LogOut size={14} /> تسجيل الخروج
+              </button>
+            </div>
+          )}
+        </div>
         {clientCount && clientCount > 0 && onClientsClick && (
           <button className="mt5-icon-btn" style={{ width: 36, height: 36, position: 'relative' }} onClick={onClientsClick} aria-label="Clients">
             <Users size={16} />
