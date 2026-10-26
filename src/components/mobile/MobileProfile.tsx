@@ -100,7 +100,7 @@ export function MobileProfile({
             <div className="mt5-card-title" style={{ fontSize: 15 }}>{isAr ? 'شعار التطبيق (مصغر)' : 'App Logo (Thumbnail)'}</div>
             <div className="mt5-card-subtitle">{isAr ? 'الشعار الظاهر في شريط الرأس أعلى التطبيق' : 'Logo shown in the header bar at the top'}</div>
           </div>
-          <button className="mt5-btn mt5-btn-secondary" onClick={handleLogoClick}>
+          <button className="mt5-btn mt5-btn-secondary" onClick={handleLogoClick} />
         {/* Follow / Tracking toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ width: 44, height: 44, borderRadius: 10, background: '#2a2a2a', border: '1px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
