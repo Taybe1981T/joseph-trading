@@ -148,7 +148,7 @@ export function MobileProfile({
                   <div className="mt5-card-subtitle">{isAr ? '???? ?????? ???????? ????? ??????' : 'Sign in to use account features'}</div>
                 </div>
               </div>
-              <button className="mt5-btn mt5-btn-primary mt5-btn-block" onClick={() => onLoginClick?.()}>
+              <button className="mt5-btn mt5-btn-primary mt5-btn-block" onClick={handleLoginClick}>
                 <LogIn size={16} /> {isAr ? '????? ?????? ????? Google' : 'Sign in with Google'}
               </button>
               </div>
