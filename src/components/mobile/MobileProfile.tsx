@@ -67,7 +67,7 @@ export function MobileProfile({
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/png';
-    input.onChange = handleLogoChange;
+    input.onchange = handleLogoChange;
   };
 
   return (
