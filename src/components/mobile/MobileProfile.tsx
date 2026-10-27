@@ -20,30 +20,48 @@ export function MobileProfile({
   onProfileImageChange, onLogoChange, isFollowing = false, onFollowToggle,
 }: MobileProfileProps) {
   const isAr = language === 'ar';
-  const [customAvatar, setCustomAvatar] = useState(() => localStorage.getItem('finalyze_custom_avatar') || null);
-  const [customLogo, setCustomLogo] = useState(() => localStorage.getItem('finalyze_custom_logo') || null);
+  const [customAvatar, setCustomAvatar] = useState(() => {
+    try {
+      const email = userEmail || '';
+      return email ? (localStorage.getItem('finalyze_custom_avatar_' + email) || null) : null;
+    } catch { return null; }
+  });
+  const [customLogo, setCustomLogo] = useState(() => {
+    try {
+      const email = userEmail || '';
+      return email ? (localStorage.getItem('finalyze_custom_logo_' + email) || null) : null;
+    } catch { return null; }
+  });
 
   const handleAvatarChange = (e: any) => {
+    if (!isLoggedIn) return;
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
       setCustomAvatar(dataUrl);
-      try { localStorage.setItem('finalyze_custom_avatar', dataUrl); } catch {}
+      try {
+        const email = userEmail || '';
+        if (email) localStorage.setItem('finalyze_custom_avatar_' + email, dataUrl);
+      } catch {}
       onProfileImageChange?.(dataUrl);
     };
     reader.readAsDataURL(file);
   };
 
   const handleLogoChange = (e: any) => {
+    if (!isLoggedIn) return;
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
       setCustomLogo(dataUrl);
-      try { localStorage.setItem('finalyze_custom_logo', dataUrl); } catch {}
+      try {
+        const email = userEmail || '';
+        if (email) localStorage.setItem('finalyze_custom_logo_' + email, dataUrl);
+      } catch {}
       onLogoChange?.(dataUrl);
     };
     reader.readAsDataURL(file);
@@ -64,6 +82,7 @@ export function MobileProfile({
   };
 
   const handleLogoClick = () => {
+    if (!isLoggedIn) return;
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/png';
@@ -87,10 +106,12 @@ export function MobileProfile({
                 <User size={36} style={{ color: '#888' }} />
               </div>
             )}
+            {isLoggedIn && (
             <label style={{ position: 'absolute', bottom: 2, right: 2, background: '#10B981', borderRadius: '50%', padding: 8, cursor: 'pointer', border: '3px solid #1a1a1a', zIndex: 10 }}>
               <input type="file" accept="image/png" style={{ display: 'none' }} onChange={handleAvatarChange} />
               <Camera size={16} style={{ color: '#fff' }} />
             </label>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, width: '100%' }}>
@@ -112,7 +133,7 @@ export function MobileProfile({
             <div className="mt5-card-title" style={{ fontSize: 15 }}>{isAr ? 'شعار التطبيق (مصغر)' : 'App Logo (Thumbnail)'}</div>
             <div className="mt5-card-subtitle">{isAr ? 'الشعار الظاهر في شريط الرأس أعلى التطبيق' : 'Logo shown in the header bar at the top'}</div>
           </div>
-          <button className="mt5-btn mt5-btn-secondary" onClick={handleLogoClick} />
+          {isLoggedIn && <button className="mt5-btn mt5-btn-secondary" onClick={handleLogoClick} />}
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
@@ -120,15 +141,15 @@ export function MobileProfile({
             <User size={18} style={{ color: '#888' }} />
           </div>
           <div className="mt5-signal-info" style={{ flex: 1 }}>
-            <div className="mt5-card-title" style={{ fontSize: 15 }}>{isAr ? '?????? ??????' : 'Follow Account'}</div>
-            <div className="mt5-card-subtitle">{isAr ? '???? ???? ??? ?????? ??????????' : 'Track account activity and notifications'}</div>
+            <div className="mt5-card-title" style={{ fontSize: 15 }}>{isAr ? 'متابعة الحساب' : 'Follow Account'}</div>
+            <div className="mt5-card-subtitle">{isAr ? 'تتبع نشاط الحساب والتنبيهات' : 'Track account activity and notifications'}</div>
           </div>
           <button
             className="mt5-btn"
             style={{ padding: '8px 18px', minWidth: 100 }}
             onClick={handleFollowToggle}
           >
-            {isFollowing ? (isAr ? '????? ????????' : 'Unfollow') : (isAr ? '??????' : 'Follow')}
+            {isFollowing ? (isAr ? 'إلغاء المتابعة' : 'Unfollow') : (isAr ? 'متابعة' : 'Follow')}
             {isFollowing ? <Check size={14} style={{ marginLeft: 6 }} /> : <X size={14} style={{ marginLeft: 6 }} />}
           </button>
         </div>
@@ -144,12 +165,12 @@ export function MobileProfile({
                   <User size={20} style={{ color: '#888' }} />
                 )}
                 <div className="mt5-signal-info" style={{ flex: 1 }}>
-                  <div className="mt5-card-title">{userEmail || (isAr ? '??????' : 'User')}</div>
-                  <div className="mt5-card-subtitle">{isAr ? '????' : 'Signed in'}</div>
+                  <div className="mt5-card-title">{userEmail || (isAr ? 'مستخدم' : 'User')}</div>
+                  <div className="mt5-card-subtitle">{isAr ? 'مسجل الدخول' : 'Signed in'}</div>
                 </div>
               </div>
               <button className="mt5-btn mt5-btn-danger mt5-btn-block" onClick={handleLogoutClick}>
-                <LogOut size={16} /> {isAr ? '????? ??????' : 'Sign out'}
+                <LogOut size={16} /> {isAr ? 'تسجيل الخروج' : 'Sign out'}
               </button>
             </div>
           ) : (
@@ -157,12 +178,12 @@ export function MobileProfile({
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <LogIn size={20} style={{ color: '#F59E0B', flexShrink: 0 }} />
                 <div className="mt5-signal-info" style={{ flex: 1 }}>
-                  <div className="mt5-card-title">{isAr ? '????? ??????' : 'Sign in'}</div>
-                  <div className="mt5-card-subtitle">{isAr ? '???? ?????? ???????? ????? ??????' : 'Sign in to use account features'}</div>
+                  <div className="mt5-card-title">{isAr ? 'تسجيل الدخول' : 'Sign in'}</div>
+                  <div className="mt5-card-subtitle">{isAr ? 'سجل الدخول لاستخدام ميزات الحساب' : 'Sign in to use account features'}</div>
                 </div>
               </div>
               <button className="mt5-btn mt5-btn-primary mt5-btn-block" onClick={handleLoginClick}>
-                <LogIn size={16} /> {isAr ? '????? ?????? ????? Google' : 'Sign in with Google'}
+                <LogIn size={16} /> {isAr ? 'تسجيل الدخول' : 'Sign in with Google'}
               </button>
               </div>
             )}

@@ -93,8 +93,22 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [savedAccounts, setSavedAccounts] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('finalyze_saved_accounts') || '[]'); } catch { return []; }
   });
-  const [customAvatar, setCustomAvatar] = useState(() => localStorage.getItem('finalyze_custom_avatar') || null);
-  const [customLogo, setCustomLogo] = useState(() => localStorage.getItem('finalyze_custom_logo') || null);
+  const [customAvatar, setCustomAvatar] = useState(() => {
+    try {
+      const u = localStorage.getItem('finalyze_user') || localStorage.getItem('finalyze_auth_user');
+      const parsed = u ? JSON.parse(u) : null;
+      const email = parsed?.email || '';
+      return email ? (localStorage.getItem('finalyze_custom_avatar_' + email) || null) : null;
+    } catch { return null; }
+  });
+  const [customLogo, setCustomLogo] = useState(() => {
+    try {
+      const u = localStorage.getItem('finalyze_user') || localStorage.getItem('finalyze_auth_user');
+      const parsed = u ? JSON.parse(u) : null;
+      const email = parsed?.email || '';
+      return email ? (localStorage.getItem('finalyze_custom_logo_' + email) || null) : null;
+    } catch { return null; }
+  });
   const [following, setFollowing] = useState(() => localStorage.getItem('finalyze_following') === 'true');
 
   const toggleFollowing = () => {
@@ -174,9 +188,19 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       await signOut(auth);
     } catch {}
     try {
+      const u = localStorage.getItem('finalyze_user') || localStorage.getItem('finalyze_auth_user');
+      const parsed = u ? JSON.parse(u) : null;
+      const email = parsed?.email || '';
       localStorage.removeItem('finalyze_user');
       localStorage.removeItem('finalyze_auth_user');
       localStorage.removeItem('finalyze_dev_email');
+      if (email) {
+        localStorage.removeItem('finalyze_custom_avatar_' + email);
+        localStorage.removeItem('finalyze_custom_logo_' + email);
+      }
+      // Also remove global keys for backward compatibility
+      localStorage.removeItem('finalyze_custom_avatar');
+      localStorage.removeItem('finalyze_custom_logo');
     } catch {}
     setUser(null);
     setEmail('');
@@ -186,12 +210,22 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
 
   const onProfileImageChange = (url: string) => {
     setCustomAvatar(url);
-    try { localStorage.setItem('finalyze_custom_avatar', url); } catch {}
+    try {
+      const u = localStorage.getItem('finalyze_user') || localStorage.getItem('finalyze_auth_user');
+      const parsed = u ? JSON.parse(u) : null;
+      const email = parsed?.email || '';
+      if (email) localStorage.setItem('finalyze_custom_avatar_' + email, url);
+    } catch {}
   };
 
   const onLogoChange = (url: string) => {
     setCustomLogo(url);
-    try { localStorage.setItem('finalyze_custom_logo', url); } catch {}
+    try {
+      const u = localStorage.getItem('finalyze_user') || localStorage.getItem('finalyze_auth_user');
+      const parsed = u ? JSON.parse(u) : null;
+      const email = parsed?.email || '';
+      if (email) localStorage.setItem('finalyze_custom_logo_' + email, url);
+    } catch {}
   };
 
   // Modal for login
