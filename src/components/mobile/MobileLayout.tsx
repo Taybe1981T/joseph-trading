@@ -247,14 +247,16 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const loadAll = useCallback(async () => {
     try {
       const merged: any[] = [];
-      // Auto radar signals (same as desktop AnalysisResults)
-      try {
-        const raw = localStorage.getItem('top_signals_persistent');
-        const auto = raw ? JSON.parse(raw) : [];
-        if (Array.isArray(auto)) {
-          merged.push(...auto.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).map((s: any) => ({ ...s, source: s.source || 'auto' })));
-        }
-      } catch {}
+      // Auto radar signals (same as desktop AnalysisResults) - only for developers
+      if (isDev) {
+        try {
+          const raw = localStorage.getItem('top_signals_persistent');
+          const auto = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(auto)) {
+            merged.push(...auto.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).map((s: any) => ({ ...s, source: s.source || 'auto' })));
+          }
+        } catch {}
+      }
       // Manual analysis results (same as desktop — always in sync)
       try {
         const mraw = localStorage.getItem('manual_results');
@@ -349,7 +351,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       } catch {}
       setPositions(mapped);
     } catch {}
-  }, []);
+  }, [isDev]);
 
   // Live store sync: trades opened/closed (auto engine or this device) refresh instantly.
   // IMPORTANT: this effect must NOT depend on fullSignals. loadAll() calls
