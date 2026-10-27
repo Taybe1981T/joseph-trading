@@ -459,7 +459,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         onNotificationsClick={goHome}
         userEmail={user?.email || email || null}
         avatarUrl={customAvatar || user?.photoURL || null}
-        onProfileClick={() => goTab('profile')} />
+        onProfileClick={() => goTab('profile')}
+        autoAnalysisRunning={auto} />
       {tab !== 'home' && (
         <button
           type="button"

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Globe, Sun, Moon, Bell, User, Users } from 'lucide-react';
+import { Globe, Sun, Moon, Bell, User, Users, Activity } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { getOpenStockExchanges } from '../../lib/marketHours';
 import { BASE_URL } from '../../lib/firebase';
@@ -16,6 +16,7 @@ interface MobileHeaderProps {
   userEmail?: string | null;
   avatarUrl?: string | null;
   onProfileClick?: () => void;
+  autoAnalysisRunning?: boolean;
 }
 
 function isCatOpen(key: string, now: Date): boolean {
@@ -34,7 +35,7 @@ const CATS = [
 
 export function MobileHeader({
   title, lang, onLangChange, isDark, toggleTheme, clientCount, onClientsClick,
-  onNotificationsClick, userEmail, avatarUrl, onProfileClick,
+  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning,
 }: MobileHeaderProps) {
   const [logo, setLogo] = useState<string | null>(null);
   const [showLang, setShowLang] = useState(false);
@@ -48,7 +49,9 @@ export function MobileHeader({
   }, []);
   const isAr = lang === 'ar';
   return (
-    <header className="mt5-header" style={{ height: 'auto', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '8px 12px' }}>
+    <>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.2); } }`}</style>
+      <header className="mt5-header" style={{ height: 'auto', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '8px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ width: 38, height: 38, borderRadius: 10, overflow: 'hidden', background: '#000', border: '1px solid rgba(255,255,255,0.25)', flexShrink: 0 }}>
           <img src={logo || (BASE_URL + 'logo.png')} alt="JT" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -77,6 +80,12 @@ export function MobileHeader({
             </div>
           )}
         </div>
+        {autoAnalysisRunning && (
+          <button className="mt5-icon-btn" style={{ width: 36, height: 36, position: 'relative' }} aria-label="Auto Analysis">
+            <Activity size={17} style={{ color: '#10B981', animation: 'pulse 1.5s infinite' }} />
+            <span style={{ position: 'absolute', top: 2, right: 2, width: 8, height: 8, borderRadius: '50%', background: '#10B981', animation: 'pulse 1.5s infinite' }} />
+          </button>
+        )}
         <button className="mt5-icon-btn" style={{ width: 36, height: 36 }} onClick={toggleTheme} aria-label="Theme">
           {isDark ? <Sun size={17} /> : <Moon size={17} />}
         </button>
@@ -127,5 +136,6 @@ export function MobileHeader({
         })}
       </div>
     </header>
+    </>
   );
 }
