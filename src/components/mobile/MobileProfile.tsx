@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Shield, Camera, Image, LogOut, LogIn, Check, X } from 'lucide-react';
+import { User, Shield, Camera, LogOut, LogIn, Check, X } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 
 interface MobileProfileProps {
@@ -51,10 +51,22 @@ export function MobileProfile({
 
   const displayName = userEmail ? String(userEmail).split('@')[0] : (isAr ? 'مستخدم' : 'User');
 
+  const handleFollowToggle = () => {
+    if (onFollowToggle) onFollowToggle();
+  };
+
+  const handleLoginClick = () => {
+    if (onLoginClick) onLoginClick();
+  };
+
+  const handleLogoutClick = () => {
+    if (onLogoutClick) onLogoutClick();
+  };
+
   const handleLogoClick = () => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*';
+    input.accept = 'image/png';
     input.onChange = handleLogoChange;
   };
 
@@ -64,7 +76,7 @@ export function MobileProfile({
         <User size={18} /> {isAr ? 'الملف الشخصي' : 'Personal Profile'}
       </div>
 
-      {/* Profile info card */}
+      
       <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 16, padding: 20 }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
           <div style={{ position: 'relative', width: 110, height: 110 }}>
@@ -76,7 +88,7 @@ export function MobileProfile({
               </div>
             )}
             <label style={{ position: 'absolute', bottom: 2, right: 2, background: '#10B981', borderRadius: '50%', padding: 8, cursor: 'pointer', border: '3px solid #1a1a1a', zIndex: 10 }}>
-              <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarChange} />
+              <input type="file" accept="image/png" style={{ display: 'none' }} onChange={handleAvatarChange} />
               <Camera size={16} style={{ color: '#fff' }} />
             </label>
           </div>
@@ -87,7 +99,7 @@ export function MobileProfile({
           </div>
         </div>
 
-        {/* App Logo (small / thumbnail) */}
+        
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ width: 44, height: 44, borderRadius: 10, background: '#2a2a2a', border: '1px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             {customLogo ? (
@@ -101,7 +113,8 @@ export function MobileProfile({
             <div className="mt5-card-subtitle">{isAr ? 'الشعار الظاهر في شريط الرأس أعلى التطبيق' : 'Logo shown in the header bar at the top'}</div>
           </div>
           <button className="mt5-btn mt5-btn-secondary" onClick={handleLogoClick} />
-        {/* Follow / Tracking toggle */}
+        </div>
+        
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
           <div style={{ width: 44, height: 44, borderRadius: 10, background: '#2a2a2a', border: '1px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <User size={18} style={{ color: '#888' }} />
@@ -113,14 +126,14 @@ export function MobileProfile({
           <button
             className="mt5-btn"
             style={{ padding: '8px 18px', minWidth: 100 }}
-            onClick={() => onFollowToggle?.()}
+            onClick={handleFollowToggle}
           >
             {isFollowing ? (isAr ? '????? ????????' : 'Unfollow') : (isAr ? '??????' : 'Follow')}
             {isFollowing ? <Check size={14} style={{ marginLeft: 6 }} /> : <X size={14} style={{ marginLeft: 6 }} />}
           </button>
         </div>
 
-        {/* Account login/logout at bottom of profile */}
+        
         <div style={{ marginTop: 20 }}>
           {isLoggedIn ? (
             <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 16 }}>
@@ -135,7 +148,7 @@ export function MobileProfile({
                   <div className="mt5-card-subtitle">{isAr ? '????' : 'Signed in'}</div>
                 </div>
               </div>
-              <button className="mt5-btn mt5-btn-danger mt5-btn-block" onClick={() => onLogoutClick?.()}>
+              <button className="mt5-btn mt5-btn-danger mt5-btn-block" onClick={handleLogoutClick}>
                 <LogOut size={16} /> {isAr ? '????? ??????' : 'Sign out'}
               </button>
             </div>
@@ -152,6 +165,9 @@ export function MobileProfile({
                 <LogIn size={16} /> {isAr ? '????? ?????? ????? Google' : 'Sign in with Google'}
               </button>
               </div>
-            </div>
+            )}
           </div>
         </div>
+    </div>
+  );
+}
