@@ -99,7 +99,7 @@ export function MobileHome({
         )}
       </div>
 
-      {radarProgress && (
+      {radarProgress && isDev && (
         <div style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10, padding: '9px 14px', fontSize: 12, fontWeight: 700, color: '#00ff88', marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <Zap size={14} /> {mobileT(lang, 'Analyzing...', 'جاري التحليل...')} {radarProgress.current}
