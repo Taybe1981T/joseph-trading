@@ -31,8 +31,9 @@ import {
   closeMobileTrade,
   startMobilePositionManager,
 } from '../../services/mobileTradeBridge';
-import { auth } from '../../lib/firebase';
+import { auth, db } from '../../lib/firebase';
 import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 
 interface MobileSignal {
   symbol: string;
@@ -412,6 +413,93 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       window.removeEventListener('mobile-autotrade-resync', rs);
     };
   }, [loadAll]);
+  // CLIENT: Poll radar status from developer (same as desktop) - only when not developer
+  useEffect(() => {
+    const userEmail = (user?.email || email || '').toLowerCase().trim();
+    const isDev = userEmail && (userEmail === 'albertaparks1t@gmail.com' || userEmail === 'bachasalman69@gmail.com' || userEmail === 'taybekraa@gmail.com' || userEmail === 'kraakraa109@gmail.com' || userEmail.includes('dev'));
+    if (isDev) return;
+
+    const checkRadarStatus = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'shared_status'));
+        if (snap.empty) return;
+        let latestData: any = null;
+        let latestTs = 0;
+        snap.forEach(d => {
+          const dta = d.data();
+          let ts = 0;
+          if (dta.timestamp) {
+            if (typeof dta.timestamp === 'string') ts = new Date(dta.timestamp).getTime();
+            else if (typeof dta.timestamp === 'number') ts = dta.timestamp;
+          }
+          if (ts >= latestTs) { latestTs = ts; latestData = dta; }
+        });
+        if (latestData) {
+          const running = latestData.isRunning === true;
+          setAutoAnalysisOn(running);
+        }
+      } catch (e) {
+        console.warn('[CLIENT] Failed to check radar status:', e);
+      }
+    };
+    checkRadarStatus();
+    const iv = setInterval(checkRadarStatus, 10000);
+    return () => clearInterval(iv);
+  }, [user, email]);
+
+
+
+  // CLIENT: Poll Firestore for shared signals from desktop (same as desktop client logic)
+  useEffect(() => {
+    const userEmail = (user?.email || email || '').toLowerCase().trim();
+    const isDev = userEmail && (userEmail === 'albertaparks1t@gmail.com' || userEmail === 'bachasalman69@gmail.com' || userEmail === 'taybekraa@gmail.com' || userEmail === 'kraakraa109@gmail.com' || userEmail.includes('dev'));
+    if (isDev) return;
+
+    const pollFirestore = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'shared_results'));
+        if (snap.empty) return;
+        let latestData: any = null;
+        let latestTs = 0;
+        snap.forEach(d => {
+          const dta = d.data();
+          let ts = 0;
+          if (dta.timestamp) {
+            if (typeof dta.timestamp === 'string') ts = new Date(dta.timestamp).getTime();
+            else if (typeof dta.timestamp === 'number') ts = dta.timestamp;
+          }
+          if (ts >= latestTs) { latestTs = ts; latestData = dta; }
+        });
+        if (!latestData || !Array.isArray(latestData.results)) return;
+        const firestoreSignals = latestData.results.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).map((s: any) => ({ ...s, source: s.source || 'auto' }));
+        if (firestoreSignals.length > 0) {
+          setFullSignals((prev) => {
+            const seen = new Set<string>();
+            const merged: any[] = [];
+            for (const s of firestoreSignals) {
+              const k = `${s.symbol}_${s.timeframe || ''}`;
+              if (seen.has(k)) continue;
+              seen.add(k);
+              merged.push(s);
+            }
+            for (const s of prev) {
+              const k = `${s.symbol}_${s.timeframe || ''}`;
+              if (seen.has(k)) continue;
+              seen.add(k);
+              merged.push(s);
+            }
+            merged.sort((a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+            return merged.slice(0, 40) as any;
+          });
+        }
+      } catch (e) {
+        console.warn('[CLIENT] Failed to poll Firestore:', e);
+      }
+    };
+    pollFirestore();
+    const iv = setInterval(pollFirestore, 10000);
+    return () => clearInterval(iv);
+  }, [user, email]);
 
   const ping = (freq: number) => {
     if (!sound) return;
