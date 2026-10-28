@@ -17,6 +17,7 @@ interface MobileHeaderProps {
   avatarUrl?: string | null;
   onProfileClick?: () => void;
   autoAnalysisRunning?: boolean;
+  onAutoAnalysisToggle?: () => void;
 }
 
 function isCatOpen(key: string, now: Date): boolean {
@@ -35,7 +36,7 @@ const CATS = [
 
 export function MobileHeader({
   title, lang, onLangChange, isDark, toggleTheme, clientCount, onClientsClick,
-  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning,
+  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning, onAutoAnalysisToggle,
 }: MobileHeaderProps) {
   const [logo, setLogo] = useState<string | null>(null);
   const [showLang, setShowLang] = useState(false);
@@ -80,12 +81,10 @@ export function MobileHeader({
             </div>
           )}
         </div>
-        {autoAnalysisRunning && (
-          <button className="mt5-icon-btn" style={{ width: 36, height: 36, position: 'relative' }} aria-label="Auto Analysis">
-            <Activity size={17} style={{ color: '#10B981', animation: 'pulse 1.5s infinite' }} />
-            <span style={{ position: 'absolute', top: 2, right: 2, width: 8, height: 8, borderRadius: '50%', background: '#10B981', animation: 'pulse 1.5s infinite' }} />
-          </button>
-        )}
+        <button className="mt5-icon-btn" style={{ width: 36, height: 36, position: 'relative' }} onClick={onAutoAnalysisToggle} aria-label="Auto Analysis">
+          <Activity size={17} style={{ color: autoAnalysisRunning ? '#10B981' : '#ef4444', animation: autoAnalysisRunning ? 'pulse 1.5s infinite' : 'none' }} />
+          <span style={{ position: 'absolute', top: 2, right: 2, width: 8, height: 8, borderRadius: '50%', background: autoAnalysisRunning ? '#10B981' : '#ef4444' }} />
+        </button>
         <button className="mt5-icon-btn" style={{ width: 36, height: 36 }} onClick={toggleTheme} aria-label="Theme">
           {isDark ? <Sun size={17} /> : <Moon size={17} />}
         </button>

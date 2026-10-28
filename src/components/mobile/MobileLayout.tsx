@@ -15,6 +15,7 @@ import { Language } from '../../lib/i18n';
 import { isDeveloperEmail, DEVELOPER_EMAILS } from '../../lib/clientIds';
 import { useMobileMode, mobileT } from '../../lib/mobileMode';
 import { MobileAnalysis } from './MobileAnalysis';
+import { readMobileAuto } from '../../services/mobileAnalysisEngine';
 import { MobileManualSheet } from './MobileManualSheet';
 import { MobileStore } from './MobileStore';
 import { MobileClientMonitor } from './MobileClientMonitor';
@@ -68,6 +69,24 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [dialog, setDialog] = useState<MobileQuote | null>(null);
   const [alert, setAlert] = useState<string | null>(null);
   const [auto, setAuto] = useState(() => isMobileAutoTradeOn());
+  const [autoAnalysisOn, setAutoAnalysisOn] = useState(() => readMobileAuto().isEnabled);
+  const toggleAutoAnalysis = useCallback(() => {
+    try {
+      const s = readMobileAuto();
+      const v = !s.isEnabled;
+      localStorage.setItem('auto_settings', JSON.stringify({ ...s, isEnabled: v }));
+      setAutoAnalysisOn(v);
+      window.dispatchEvent(new CustomEvent('mobile-radar-settings'));
+    } catch {}
+  }, []);
+  useEffect(() => {
+    const sync = () => { try { setAutoAnalysisOn(readMobileAuto().isEnabled); } catch {} };
+    sync();
+    const iv = setInterval(sync, 3000);
+    window.addEventListener('storage', sync);
+    window.addEventListener('mobile-radar-settings', sync);
+    return () => { clearInterval(iv); window.removeEventListener('storage', sync); window.removeEventListener('mobile-radar-settings', sync); };
+  }, []);
   const [sound, setSound] = useState(true);
   const [lang, setLang] = useState<Language>(() => {
     try {
@@ -462,7 +481,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         userEmail={user?.email || email || null}
         avatarUrl={customAvatar || user?.photoURL || null}
         onProfileClick={() => goTab('profile')}
-        autoAnalysisRunning={auto} />
+        autoAnalysisRunning={autoAnalysisOn}
+        onAutoAnalysisToggle={toggleAutoAnalysis} />
       {tab !== 'home' && (
         <button
           type="button"
