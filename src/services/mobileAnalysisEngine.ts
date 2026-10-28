@@ -284,14 +284,25 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
 
 let mRadarTimer: ReturnType<typeof setTimeout> | null = null;
 let mRadarOn = false;
+let mRadarProg: MobileProgress | null = null;
+let mRadarOnProg: ((p: MobileProgress) => void) | null = null;
+let mRadarOnDone: ((r: any) => void) | null = null;
 export function isMobileRadarOn(): boolean { return mRadarOn; }
+export function getMobileRadarProgress(): MobileProgress | null { return mRadarProg; }
 export function stopMobileRadar() { mRadarOn = false; if (mRadarTimer) { clearTimeout(mRadarTimer); mRadarTimer = null; } }
 export async function startMobileRadar(uid: string, email: string, onProg?: (p: MobileProgress) => void, onDone?: (r: any) => void) {
-  if (mRadarOn) return;
+  // Update callbacks even if already running
+  if (onProg) mRadarOnProg = onProg;
+  if (onDone) mRadarOnDone = onDone;
+  if (mRadarOn) {
+    // Already running - just update callbacks, don't restart
+    if (mRadarProg) mRadarOnProg?.(mRadarProg);
+    return;
+  }
   mRadarOn = true;
   const loop = async () => {
     if (!mRadarOn || !readMobileAuto().isEnabled) { mRadarOn = false; return; }
-    try { const r = await runMobileRadar(uid, email, onProg); onDone?.(r); } catch {}
+    try { const r = await runMobileRadar(uid, email, (p) => { mRadarProg = p; mRadarOnProg?.(p); }); mRadarOnDone?.(r); mRadarProg = null; } catch {}
     if (!mRadarOn || !readMobileAuto().isEnabled) { mRadarOn = false; return; }
     mRadarTimer = setTimeout(loop, (readMobileAuto().interval || 15) * 60000);
   };
