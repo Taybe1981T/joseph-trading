@@ -81,9 +81,9 @@ export function MobileHeader({
             </div>
           )}
         </div>
-        <button className="mt5-icon-btn" style={{ width: 36, height: 36, position: 'relative' }} onClick={onAutoAnalysisToggle} aria-label="Auto Analysis">
-          <Activity size={17} style={{ color: autoAnalysisRunning ? '#10B981' : '#ef4444', animation: autoAnalysisRunning ? 'pulse 1.5s infinite' : 'none' }} />
-          <span style={{ position: 'absolute', top: 2, right: 2, width: 8, height: 8, borderRadius: '50%', background: autoAnalysisRunning ? '#10B981' : '#ef4444' }} />
+        <button className="mt5-icon-btn" style={{ width: 72, height: 72, position: 'relative' }} onClick={onAutoAnalysisToggle} aria-label="Auto Analysis">
+          <Activity size={34} style={{ color: autoAnalysisRunning ? '#10B981' : '#ffffff', animation: autoAnalysisRunning ? 'pulse 1.5s infinite' : 'none' }} />
+          <span style={{ position: 'absolute', top: 4, right: 4, width: 16, height: 16, borderRadius: '50%', background: autoAnalysisRunning ? '#10B981' : '#ffffff' }} />
         </button>
         <button className="mt5-icon-btn" style={{ width: 36, height: 36 }} onClick={toggleTheme} aria-label="Theme">
           {isDark ? <Sun size={17} /> : <Moon size={17} />}

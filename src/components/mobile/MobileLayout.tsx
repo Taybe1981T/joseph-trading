@@ -315,6 +315,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       // Only update state when the data really changed (avoids needless re-renders every 5s).
       const nextFull = full.slice(0, 40);
       setFullSignals((prev) => {
+        if (nextFull.length === 0 && prev.length > 0) return prev;
         try { if (JSON.stringify(prev) === JSON.stringify(nextFull)) return prev; } catch {}
         return nextFull as AnalysisResult[];
       });
