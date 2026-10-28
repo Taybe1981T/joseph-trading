@@ -5,6 +5,7 @@ import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
 import { closeMobileTrade, updateMobileTradeLevels, detectMobileTradeCategory } from '../../services/mobileTradeBridge';
 import { subscribeQuoteBatch } from '../../services/paperTradingService';
+import { calcPnl } from '../../services/paperTradingService';
 import { slAmountUSD, usdToPrice } from '../../lib/positionMath';
 
 export interface MobilePosition {
@@ -371,7 +372,7 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
 
       {tab === 'open' && positions.map((p) => {
         const cur = live[p.symbol] ?? p.currentPrice;
-        const pnl = p.profit;
+        const pnl = calcPnl({ category: p.category || 'forex', symbol: p.symbol, side: p.type, qty: p.volume, entryPrice: p.openPrice }, cur);
         const dec = cur < 10 ? 4 : 2;
         const d = p.openedAt ? new Date(p.openedAt) : null;
         const dateStr = d ? `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '—';
