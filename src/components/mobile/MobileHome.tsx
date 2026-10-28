@@ -11,10 +11,12 @@ interface MobileHomeProps {
   onDetail: (r: AnalysisResult) => void;
   onTrade: (symbol: string) => void;
   onRemove: (symbol: string) => void;
+  onRemoveAll: () => void;
   autoTradeEnabled: boolean;
   onAutoTradeToggle: (enabled: boolean) => void;
   radarOn: boolean;
   radarLabel: string | null;
+  radarProgress: { current: string; total: number; index: number } | null;
 }
 
 const AR_CATS: Record<string, string> = {
@@ -25,8 +27,8 @@ const AR_CATS: Record<string, string> = {
 const CAT_ORDER = ['forex', 'crypto', 'stocks', 'metals', 'energy', 'indices', 'custom', 'other'];
 
 export function MobileHome({
-  fullSignals, lang, onDetail, onTrade, onRemove,
-  autoTradeEnabled, onAutoTradeToggle, radarOn, radarLabel,
+  fullSignals, lang, onDetail, onTrade, onRemove, onRemoveAll,
+  autoTradeEnabled, onAutoTradeToggle, radarOn, radarLabel, radarProgress,
 }: MobileHomeProps) {
   const { isDev, isClient, hasPlan } = useMobileMode();
   const isAr = lang === 'ar';
@@ -88,9 +90,26 @@ export function MobileHome({
         </div>
       )}
 
-      <div className="mt5-section-title">
-        <Zap size={16} /> {mobileT(lang, 'Top Signals (Top 3 per Category)', 'أفضل الإشارات (أفضل ٣ لكل فئة)')} ({fullSignals.length})
+      <div className="mt5-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span><Zap size={16} /> {mobileT(lang, 'Best current signal', 'أفضل إشارة حالية')}</span>
+        {fullSignals.length > 0 && (
+          <button className="mt5-btn mt5-btn-danger" style={{ padding: '4px 10px', fontSize: 11 }} onClick={onRemoveAll}>
+            {mobileT(lang, 'Clear all', 'حذف الكل')}
+          </button>
+        )}
       </div>
+
+      {radarProgress && radarOn && (
+        <div style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10, padding: '9px 14px', fontSize: 12, fontWeight: 700, color: '#00ff88', marginBottom: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <Zap size={14} /> {mobileT(lang, 'Analyzing...', 'جاري التحليل...')} {radarProgress.current}
+          </div>
+          <div style={{ height: 4, borderRadius: 2, background: '#2a2a2a', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: `${radarProgress.total > 0 ? Math.round((radarProgress.index / radarProgress.total) * 100) : 0}%`, background: '#10B981', transition: 'width 0.3s' }} />
+          </div>
+          <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>{radarProgress.index}/{radarProgress.total}</div>
+        </div>
+      )}
 
       {fullSignals.length === 0 && (
         <div className="mt5-empty-state">

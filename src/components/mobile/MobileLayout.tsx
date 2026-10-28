@@ -15,7 +15,7 @@ import { Language } from '../../lib/i18n';
 import { isDeveloperEmail, DEVELOPER_EMAILS } from '../../lib/clientIds';
 import { useMobileMode, mobileT } from '../../lib/mobileMode';
 import { MobileAnalysis } from './MobileAnalysis';
-import { readMobileAuto, isMobileRadarOn, startMobileRadar } from '../../services/mobileAnalysisEngine';
+import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar } from '../../services/mobileAnalysisEngine';
 import { MobileManualSheet } from './MobileManualSheet';
 import { MobileStore } from './MobileStore';
 import { MobileClientMonitor } from './MobileClientMonitor';
@@ -71,12 +71,24 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [alert, setAlert] = useState<string | null>(null);
   const [auto, setAuto] = useState(() => isMobileAutoTradeOn());
   const [autoAnalysisOn, setAutoAnalysisOn] = useState(() => isMobileRadarOn() || readMobileAuto().isEnabled);
+  const [radarProgress, setRadarProgress] = useState<{ current: string; total: number; index: number } | null>(null);
   const toggleAutoAnalysis = useCallback(() => {
     try {
       const s = readMobileAuto();
       const v = !s.isEnabled;
       localStorage.setItem('auto_settings', JSON.stringify({ ...s, isEnabled: v }));
       setAutoAnalysisOn(v);
+      if (v) {
+        setRadarProgress(null);
+        const uid = (user?.uid || 'anonymous');
+        const email = (user?.email || email || '');
+        startMobileRadar(uid, email, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index }), (r) => {
+          setRadarProgress(null);
+        });
+      } else {
+        stopMobileRadar();
+        setRadarProgress(null);
+      }
       window.dispatchEvent(new CustomEvent('mobile-radar-settings'));
     } catch {}
   }, []);
@@ -186,7 +198,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         if (s.isEnabled && !isMobileRadarOn()) {
           const uid = (user?.uid || 'anonymous');
           const emailVal = (user?.email || email || '');
-          startMobileRadar(uid, emailVal);
+          startMobileRadar(uid, emailVal, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index }), (r) => {
+            setRadarProgress(null);
+          });
         }
       } catch {}
     };
@@ -403,7 +417,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     loadAll();
     // Desktop parity: background TP/SL/trailing manager for ALL open trades.
     try { startMobilePositionManager(); } catch {}
-    const iv = setInterval(loadAll, 5000);
+    const iv = setInterval(loadAll, 3000);
     const h = () => { loadAll(); };
     const rs = () => { syncMobileAutoEngine(fullSignalsRef.current); };
     window.addEventListener('mobile-trades-changed', h);
@@ -599,7 +613,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         </button>
       )}
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
-        {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} />}
+        {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} onRemoveAll={() => setFullSignals([])} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} radarProgress={radarProgress} />}
         {tab === 'quotes' && isDev && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
