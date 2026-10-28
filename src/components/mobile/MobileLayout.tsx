@@ -79,22 +79,6 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       window.dispatchEvent(new CustomEvent('mobile-radar-settings'));
     } catch {}
   }, []);
-  // Auto-restart radar if enabled but not running (ensures analysis continues across tab navigation)
-  useEffect(() => {
-    const ensureRadar = () => {
-      try {
-        const s = readMobileAuto();
-        if (s.isEnabled && !isMobileRadarOn()) {
-          const uid = (user?.uid || 'anonymous');
-          const email = (user?.email || email || '');
-          startMobileRadar(uid, email);
-        }
-      } catch {}
-    };
-    ensureRadar();
-    const iv = setInterval(ensureRadar, 10000);
-    return () => clearInterval(iv);
-  }, [user, email]);
   useEffect(() => {
     const sync = () => { try { setAutoAnalysisOn(isMobileRadarOn() && readMobileAuto().isEnabled); } catch {} };
     sync();
@@ -192,6 +176,23 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     const t = setTimeout(() => setLoadingAuth(false), 3000);
     return () => { unsub(); clearTimeout(t); };
   }, []);
+
+  // Auto-restart radar if enabled but not running (ensures analysis continues across tab navigation)
+  useEffect(() => {
+    const ensureRadar = () => {
+      try {
+        const s = readMobileAuto();
+        if (s.isEnabled && !isMobileRadarOn()) {
+          const uid = (user?.uid || 'anonymous');
+          const emailVal = (user?.email || email || '');
+          startMobileRadar(uid, emailVal);
+        }
+      } catch {}
+    };
+    ensureRadar();
+    const iv = setInterval(ensureRadar, 10000);
+    return () => clearInterval(iv);
+  }, [user, email]);
 
   // Login / logout helpers
   const doLogin = async (emailHint?: string) => {
