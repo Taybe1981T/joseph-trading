@@ -64,19 +64,7 @@ export function MobileAnalysis({ lang }: Props) {
       localStorage.setItem('auto_settings', JSON.stringify({ ...s, isEnabled: v }));
     } catch {}
     setAutoOn(v);
-    if (v) {
-      setDoneMsg(null);
-      const { uid, email } = uidEmail();
-      startMobileRadar(uid, email, (p) => setProg(p), (r) => {
-        setProg(null);
-        setLastRun(new Date().toLocaleTimeString());
-        setDoneMsg(mobileT(lang, `Done: ${r.scanned} scanned, ${r.fresh} fresh`, `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد`));
-        setTimeout(() => setDoneMsg(null), 15000);
-      });
-    } else {
-      stopMobileRadar();
-      setProg(null);
-    }
+    window.dispatchEvent(new CustomEvent('mobile-radar-settings'));
   };
 
   const pct = prog && prog.total > 0 ? Math.round((prog.index / prog.total) * 100) : 0;
@@ -104,21 +92,7 @@ export function MobileAnalysis({ lang }: Props) {
         <div className="mt5-card-subtitle">
           {autoOn ? mobileT(lang, 'Radar active', 'الرادار نشط') : mobileT(lang, 'Radar off', 'الرادار متوقف')}
           {lastRun && autoOn && <span style={{ display: 'block', marginTop: 4 }}>{mobileT(lang, 'Last: ', 'آخر فحص: ')}{lastRun}</span>}
-          {doneMsg && <span style={{ display: 'block', marginTop: 4, color: '#00ff88' }}>{doneMsg}</span>}
         </div>
-        {prog && (
-          <div style={{ background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '10px 12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700, color: '#e0e0e0' }}>
-              <Loader2 size={14} style={{ animation: 'spin 1s linear infinite', color: '#00ff88' }} />
-              <span style={{ flex: 1 }}>{prog.current}{prog.exchange ? ' · ' + prog.exchange : ''}</span>
-              <span style={{ color: '#00ff88' }}>{pct}%</span>
-            </div>
-            <div style={{ height: 6, borderRadius: 3, background: '#2a2a2a', marginTop: 8, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: pct + '%', background: '#00ff88', transition: 'width 0.3s' }} />
-            </div>
-            <div style={{ fontSize: 11, color: '#888', marginTop: 6 }}>{prog.index}/{prog.total}{prog.failed > 0 ? ' · ' + prog.failed + (isAr ? ' فشل' : ' failed') : ''}</div>
-          </div>
-        )}
       </div>
 
       {showSettings && <MobileRadarSettings lang={lang} />}
