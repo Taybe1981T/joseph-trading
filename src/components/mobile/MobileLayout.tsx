@@ -15,7 +15,7 @@ import { Language } from '../../lib/i18n';
 import { isDeveloperEmail, DEVELOPER_EMAILS } from '../../lib/clientIds';
 import { useMobileMode, mobileT } from '../../lib/mobileMode';
 import { MobileAnalysis } from './MobileAnalysis';
-import { readMobileAuto } from '../../services/mobileAnalysisEngine';
+import { readMobileAuto, isMobileRadarOn, startMobileRadar } from '../../services/mobileAnalysisEngine';
 import { MobileManualSheet } from './MobileManualSheet';
 import { MobileStore } from './MobileStore';
 import { MobileClientMonitor } from './MobileClientMonitor';
@@ -69,7 +69,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [dialog, setDialog] = useState<MobileQuote | null>(null);
   const [alert, setAlert] = useState<string | null>(null);
   const [auto, setAuto] = useState(() => isMobileAutoTradeOn());
-  const [autoAnalysisOn, setAutoAnalysisOn] = useState(() => readMobileAuto().isEnabled);
+  const [autoAnalysisOn, setAutoAnalysisOn] = useState(() => isMobileRadarOn() || readMobileAuto().isEnabled);
   const toggleAutoAnalysis = useCallback(() => {
     try {
       const s = readMobileAuto();
@@ -79,8 +79,24 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       window.dispatchEvent(new CustomEvent('mobile-radar-settings'));
     } catch {}
   }, []);
+  // Auto-restart radar if enabled but not running (ensures analysis continues across tab navigation)
   useEffect(() => {
-    const sync = () => { try { setAutoAnalysisOn(readMobileAuto().isEnabled); } catch {} };
+    const ensureRadar = () => {
+      try {
+        const s = readMobileAuto();
+        if (s.isEnabled && !isMobileRadarOn()) {
+          const uid = (user?.uid || 'anonymous');
+          const email = (user?.email || email || '');
+          startMobileRadar(uid, email);
+        }
+      } catch {}
+    };
+    ensureRadar();
+    const iv = setInterval(ensureRadar, 10000);
+    return () => clearInterval(iv);
+  }, [user, email]);
+  useEffect(() => {
+    const sync = () => { try { setAutoAnalysisOn(isMobileRadarOn() && readMobileAuto().isEnabled); } catch {} };
     sync();
     const iv = setInterval(sync, 3000);
     window.addEventListener('storage', sync);
