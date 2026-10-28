@@ -13,6 +13,7 @@ import { MobileTradeDialog } from './MobileTradeDialog';
 import { MobileSignalDetail } from './MobileSignalDetail';
 import { Language } from '../../lib/i18n';
 import { isDeveloperEmail, DEVELOPER_EMAILS } from '../../lib/clientIds';
+import { installUiClickSound } from '../../lib/uiClickSound';
 import { useMobileMode, mobileT } from '../../lib/mobileMode';
 import { MobileAnalysis } from './MobileAnalysis';
 import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar } from '../../services/mobileAnalysisEngine';
@@ -68,10 +69,14 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     setTab('home');
   }, []);
   const [dialog, setDialog] = useState<MobileQuote | null>(null);
+  useEffect(() => {
+    const cleanup = installUiClickSound();
+    return cleanup;
+  }, []);
   const [alert, setAlert] = useState<string | null>(null);
   const [auto, setAuto] = useState(() => isMobileAutoTradeOn());
   const [autoAnalysisOn, setAutoAnalysisOn] = useState(() => isMobileRadarOn() || readMobileAuto().isEnabled);
-  const [radarProgress, setRadarProgress] = useState<{ current: string; total: number; index: number } | null>(null);
+  const [radarProgress, setRadarProgress] = useState<{ current: string; total: number; index: number; category?: string } | null>(null);
   const toggleAutoAnalysis = useCallback(() => {
     try {
       const s = readMobileAuto();
@@ -82,7 +87,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         setRadarProgress(null);
         const uid = (user?.uid || 'anonymous');
         const email = (user?.email || email || '');
-        startMobileRadar(uid, email, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index }), (r) => {
+        startMobileRadar(uid, email, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
           setRadarProgress(null);
         });
       } else {
@@ -198,7 +203,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         if (s.isEnabled && !isMobileRadarOn()) {
           const uid = (user?.uid || 'anonymous');
           const emailVal = (user?.email || email || '');
-          startMobileRadar(uid, emailVal, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index }), (r) => {
+          startMobileRadar(uid, emailVal, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
             setRadarProgress(null);
           });
         }

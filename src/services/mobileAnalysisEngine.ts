@@ -9,7 +9,7 @@ import { Language } from '../lib/i18n';
 import { initAudio, playStart, playCompletion, playCategoryChange } from '../lib/audioEngine';
 
 export interface MobileProgress {
-  current: string; total: number; index: number; failed: number; exchange?: string;
+  current: string; total: number; index: number; failed: number; exchange?: string; category?: string;
 }
 
 export function readMobileAuto(): AutoAnalysisSettings {
@@ -251,13 +251,13 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
     for (const sym of j.syms) {
       if (!readMobileAuto().isEnabled) break;
       done++;
-      onProg?.({ current: sym, total: grandTotal, index: done, failed, exchange: j.exKey ? exchangeLabel(j.exKey, lang) : undefined });
+      onProg?.({ current: sym, total: grandTotal, index: done, failed, exchange: j.exKey ? exchangeLabel(j.exKey, lang) : undefined, category: j.cat });
       try {
         await waitIfRateLimited();
         const b = await analyzeMarketBatch(
           [{ symbol: sym, type: detectMobileType(sym), timeframe: auto.timeframe || '1d', tradingStyle: auto.tradingStyle || TradingStyle.DAY_TRADING }],
           strategy, lang,
-          () => onProg?.({ current: sym, total: grandTotal, index: done, failed, exchange: j.exKey ? exchangeLabel(j.exKey, lang) : undefined })
+          () => onProg?.({ current: sym, total: grandTotal, index: done, failed, exchange: j.exKey ? exchangeLabel(j.exKey, lang) : undefined, category: j.cat })
         );
         if (b.results.length > 0) {
           for (const r of b.results) { r.userId = uid || 'anonymous'; scanned.push(r); }

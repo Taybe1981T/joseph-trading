@@ -16,7 +16,7 @@ interface MobileHomeProps {
   onAutoTradeToggle: (enabled: boolean) => void;
   radarOn: boolean;
   radarLabel: string | null;
-  radarProgress: { current: string; total: number; index: number } | null;
+  radarProgress: { current: string; total: number; index: number; category?: string } | null;
 }
 
 const AR_CATS: Record<string, string> = {
@@ -103,6 +103,7 @@ export function MobileHome({
         <div style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10, padding: '9px 14px', fontSize: 12, fontWeight: 700, color: '#00ff88', marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
             <Zap size={14} /> {mobileT(lang, 'Analyzing...', 'جاري التحليل...')} {radarProgress.current}
+            {radarProgress.category && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#888', fontWeight: 600 }}>{radarProgress.category}</span>}
           </div>
           <div style={{ height: 4, borderRadius: 2, background: '#2a2a2a', overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${radarProgress.total > 0 ? Math.round((radarProgress.index / radarProgress.total) * 100) : 0}%`, background: '#10B981', transition: 'width 0.3s' }} />
