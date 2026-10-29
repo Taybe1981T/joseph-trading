@@ -152,6 +152,7 @@ export function MobileHome({
           ))}
         </div>
       )}
+      {grouped.map(({ cat, list }) => (
         <div key={cat} style={{ marginBottom: 14 }}>
           <div className="mt5-section-title" style={{ fontSize: 13, padding: '4px 0', opacity: 0.9 }}>
             📁 {isAr ? (AR_CATS[cat] || cat) : cat}
@@ -172,6 +173,7 @@ export function MobileHome({
             />
           ))}
         </div>
+      ))}
     </div>
   );
 }
