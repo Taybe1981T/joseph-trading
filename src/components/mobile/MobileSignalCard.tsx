@@ -7,9 +7,12 @@ interface Props {
   res: AnalysisResult;
   lang: Language;
   isDev: boolean;
+  isClient: boolean;
   onDetail: (r: AnalysisResult) => void;
   onTrade: (symbol: string) => void;
   onRemove?: (symbol: string) => void;
+  onToggleFavorite?: (symbol: string) => void;
+  isFavorite?: boolean;
 }
 
 export function sigColor(signal: string): string {
@@ -39,7 +42,7 @@ export function fmtDate(ts: string, lang: Language): string {
   } catch { return ''; }
 }
 
-export function MobileSignalCard({ res, lang, isDev, onDetail, onTrade, onRemove }: Props) {
+export function MobileSignalCard({ res, lang, isDev, isClient, onDetail, onTrade, onRemove, onToggleFavorite, isFavorite }: Props) {
   const isAr = lang === 'ar';
   const color = sigColor(String(res.signal));
   const isJPY = res.symbol.includes('JPY');
@@ -56,6 +59,12 @@ export function MobileSignalCard({ res, lang, isDev, onDetail, onTrade, onRemove
         <button onClick={() => onRemove(res.symbol)}
           style={{ position: 'absolute', top: 4, left: 6, background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', padding: 4 }} aria-label="Delete">
           <Trash2 size={14} />
+        </button>
+      )}
+      {onToggleFavorite && (
+        <button onClick={() => onToggleFavorite(res.symbol)}
+          style={{ position: 'absolute', top: 4, right: strong ? 30 : 6, background: 'transparent', border: 'none', color: isFavorite ? '#F59E0B' : 'rgba(255,255,255,0.3)', cursor: 'pointer', padding: 4 }} aria-label="Favorite">
+          <Star size={14} fill={isFavorite ? '#F59E0B' : 'none'} color={isFavorite ? '#F59E0B' : 'rgba(255,255,255,0.3)'} />
         </button>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -75,6 +84,11 @@ export function MobileSignalCard({ res, lang, isDev, onDetail, onTrade, onRemove
           {String(res.signal).includes('sell') ? <TrendingDown size={14} /> : <TrendingUp size={14} />}
         </div>
       </div>
+      {isClient && (
+        <div style={{ fontSize: 11, color: '#aaa', padding: '4px 0', fontStyle: 'italic' }}>
+          {isAr ? `${res.symbol} — إشارة ${res.signal === 'strong_buy' || res.signal === 'buy' ? 'شراء' : 'بيع'} قوية (ثقة ${res.confidence}%) بناءً على تحليل فني متقدم` : `${res.symbol} — ${res.signal === 'strong_buy' || res.signal === 'buy' ? 'Buy' : 'Sell'} signal (confidence ${res.confidence}%) based on advanced technical analysis`}
+        </div>
+      )}
       {res.entryPrice ? (
         <div style={{ display: 'flex', gap: 10, fontSize: 12, color: '#aaa', fontWeight: 700 }}>
           <span>Entry <b style={{ color: '#fff' }}>{res.entryPrice}</b></span>
