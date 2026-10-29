@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Zap } from 'lucide-react';
 import { AnalysisResult } from '../../types';
 import { Language } from '../../lib/i18n';
@@ -32,6 +32,17 @@ export function MobileHome({
 }: MobileHomeProps) {
   const { isDev, isClient, hasPlan } = useMobileMode();
   const isAr = lang === 'ar';
+  const [favorites, setFavorites] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('mobile_favorites') || '[]'); } catch { return []; }
+  });
+
+  const toggleFavorite = (symbol: string) => {
+    setFavorites((prev) => {
+      const next = prev.includes(symbol) ? prev.filter((s) => s !== symbol) : [...prev, symbol];
+      try { localStorage.setItem('mobile_favorites', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
 
   // Group by category → Top 3 by confidence (same rule as desktop finalyze:top_signals).
   // FIX: stable fixed order + stable inner order so categories never flicker
@@ -120,7 +131,27 @@ export function MobileHome({
         </div>
       )}
 
-      {grouped.map(({ cat, list }) => (
+      {favorites.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div className="mt5-section-title" style={{ fontSize: 13, padding: '4px 0', opacity: 0.9 }}>
+            ⭐ {isAr ? 'المفضلة' : 'Favorites'} ({favorites.length})
+          </div>
+          {fullSignals.filter((s) => favorites.includes(s.symbol)).map((r) => (
+            <MobileSignalCard
+              key={'fav_' + r.symbol + '_' + (r.timeframe || '')}
+              res={r}
+              lang={lang}
+              isDev={isDev}
+              isClient={isClient}
+              onDetail={onDetail}
+              onTrade={onTrade}
+              onRemove={onRemove}
+              onToggleFavorite={toggleFavorite}
+              isFavorite={true}
+            />
+          ))}
+        </div>
+      )}
         <div key={cat} style={{ marginBottom: 14 }}>
           <div className="mt5-section-title" style={{ fontSize: 13, padding: '4px 0', opacity: 0.9 }}>
             📁 {isAr ? (AR_CATS[cat] || cat) : cat}
@@ -132,13 +163,15 @@ export function MobileHome({
               res={r}
               lang={lang}
               isDev={isDev}
+              isClient={isClient}
               onDetail={onDetail}
               onTrade={onTrade}
               onRemove={onRemove}
+              onToggleFavorite={toggleFavorite}
+              isFavorite={favorites.includes(r.symbol)}
             />
           ))}
         </div>
-      ))}
     </div>
   );
 }
