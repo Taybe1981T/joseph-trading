@@ -96,7 +96,7 @@ export function MobileSignalCard({ res, lang, isDev, isClient, onDetail, onTrade
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: 8 }}>
-        {res.detailedReasons && res.detailedReasons.length > 0 && !isClient && (
+        {res.detailedReasons && res.detailedReasons.length > 0 && (
           <button onClick={() => onDetail(res)}
             style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: 'none', background: '#F59E0B', color: '#000', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
             {isAr ? 'أسباب التحليل' : 'Reasons'} ({res.detailedReasons.length})

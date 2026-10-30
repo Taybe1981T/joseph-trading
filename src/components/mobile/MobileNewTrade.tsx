@@ -4,7 +4,7 @@ import type { MobileQuote } from './MobileQuotes';
 import { AnalysisResult } from '../../types';
 import { Language } from '../../lib/i18n';
 import { MobileLotCalc } from './MobileLotCalc';
-import { getMobileSymbolGroups } from '../../services/mobileAnalysisEngine';
+import { getMobileSymbolGroups, addMobileCustomSymbol, removeMobileCustomSymbol } from '../../services/mobileAnalysisEngine';
 import {
   isMobileAutoTradeOn,
   setMobileAutoTrade,
@@ -41,6 +41,11 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   const [volume, setVolume] = useState(0.01);
   const [busy, setBusy] = useState(false);
   const [autoTrade, setAutoTrade] = useState<boolean>(() => isMobileAutoTradeOn());
+  // Custom symbol management (add/delete) - available for both developer and client
+  const [newSymbol, setNewSymbol] = useState('');
+  const [customSymbols, setCustomSymbols] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]'); } catch { return []; }
+  });
 
   // Keep the selected symbol inside the chosen category (desktop parity: category → symbols).
   const catSymbols = useMemo(() => {
@@ -313,6 +318,57 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
             );
           })}
         </div>
+      </div>
+      {/* Add/Delete custom symbol for current category - available for both developer and client */}
+      <div className="mt5-card">
+        <div className="mt5-card-title">
+          {isAr ? 'إضافة/حذف رمز' : 'Add/Delete Symbol'}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <input
+            type="text"
+            value={newSymbol}
+            onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
+            placeholder={isAr ? 'أدخل الرمز (مثل: GOLD)' : 'Enter symbol (e.g., GOLD)'}
+            style={{ flex: 1, background: '#1a1a1a', border: '1px solid #333', color: '#fff', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (!newSymbol) return;
+              const next = addMobileCustomSymbol(newSymbol);
+              setCustomSymbols(next);
+              setNewSymbol('');
+              setSymbol(newSymbol);
+              setCategory(category); // refresh
+            }}
+            disabled={!newSymbol || customSymbols.includes(newSymbol) || catSymbols.includes(newSymbol)}
+            className="mt5-btn mt5-btn-primary"
+            style={{ padding: '8px 16px', fontSize: 12, fontWeight: 800 }}
+          >
+            {isAr ? 'إضافة' : 'Add'}
+          </button>
+        </div>
+        {customSymbols.length > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+            {customSymbols.map((s) => (
+              <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#1a1a1a', border: '1px solid #333', borderRadius: 8, padding: '4px 8px' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#fff' }}>{s}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    removeMobileCustomSymbol(s);
+                    setCustomSymbols((prev) => prev.filter((x) => x !== s));
+                    if (symbol === s) setSymbol(catSymbols[0] || '');
+                  }}
+                  style={{ background: 'transparent', border: 'none', color: '#ff5555', cursor: 'pointer', padding: 2 }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="mt5-card">
         <div className="mt5-card-title">
