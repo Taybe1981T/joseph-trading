@@ -66,9 +66,6 @@ export function MobileSettings({
             <option value="ar">العربية</option>
           </select>
         </div>
-        <button className="mt5-btn mt5-btn-secondary mt5-btn-block" onClick={onClearCache}>
-          <RefreshCw size={16} /> {isAr ? 'مسح الذاكرة' : 'Clear Cache'}
-        </button>
         {onDeveloperLogin && (
           <button className="mt5-btn mt5-btn-secondary mt5-btn-block" onClick={onDeveloperLogin} disabled={devLoginBusy}>
             {devLoginBusy ? <Loader2 size={16} className="spin" /> : <Shield size={16} />} {isAr ? 'تسجيل دخول المطور' : 'Developer Login'}

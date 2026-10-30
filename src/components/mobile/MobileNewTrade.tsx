@@ -46,6 +46,12 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   const [customSymbols, setCustomSymbols] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]'); } catch { return []; }
   });
+  // Filter symbols from selected category based on typed input
+  const filteredSymbols = useMemo(() => {
+    if (!newSymbol) return [];
+    const q = newSymbol.toUpperCase();
+    return catSymbols.filter(s => s.toUpperCase().includes(q)).slice(0, 10);
+  }, [catSymbols, newSymbol]);
 
   // Keep the selected symbol inside the chosen category (desktop parity: category → symbols).
   const catSymbols = useMemo(() => {
@@ -324,31 +330,47 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
         <div className="mt5-card-title">
           {isAr ? 'إضافة/حذف رمز' : 'Add/Delete Symbol'}
         </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+        <div style={{ position: 'relative', marginTop: 8 }}>
           <input
             type="text"
             value={newSymbol}
             onChange={(e) => setNewSymbol(e.target.value.toUpperCase())}
-            placeholder={isAr ? 'أدخل الرمز (مثل: GOLD)' : 'Enter symbol (e.g., GOLD)'}
+            placeholder={isAr ? 'اكتب الرمز (مثل: GOLD, EURUSD)' : 'Type symbol (e.g., GOLD, EURUSD)'}
             style={{ flex: 1, background: '#1a1a1a', border: '1px solid #333', color: '#fff', borderRadius: 8, padding: '8px 12px', fontSize: 13 }}
           />
-          <button
-            type="button"
-            onClick={() => {
-              if (!newSymbol) return;
-              const next = addMobileCustomSymbol(newSymbol);
-              setCustomSymbols(next);
-              setNewSymbol('');
-              setSymbol(newSymbol);
-              setCategory(category); // refresh
-            }}
-            disabled={!newSymbol || customSymbols.includes(newSymbol) || catSymbols.includes(newSymbol)}
-            className="mt5-btn mt5-btn-primary"
-            style={{ padding: '8px 16px', fontSize: 12, fontWeight: 800 }}
-          >
-            {isAr ? 'إضافة' : 'Add'}
-          </button>
+          {filteredSymbols.length > 0 && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#1a1a1a', border: '1px solid #333', borderTop: 'none', borderRadius: '0 0 8px 8px', zIndex: 10, maxHeight: 200, overflowY: 'auto' }}>
+              {filteredSymbols.map((s) => (
+                <div
+                  key={s}
+                  onClick={() => {
+                    setSymbol(s);
+                    setNewSymbol(s);
+                  }}
+                  style={{ padding: '6px 12px', fontSize: 13, color: '#fff', cursor: 'pointer', borderBottom: '1px solid #2a2a2a' }}
+                >
+                  {s}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (!newSymbol) return;
+            const next = addMobileCustomSymbol(newSymbol);
+            setCustomSymbols(next);
+            setNewSymbol('');
+            setSymbol(newSymbol);
+            setCategory(category); // refresh
+          }}
+          disabled={!newSymbol || customSymbols.includes(newSymbol) || catSymbols.includes(newSymbol)}
+          className="mt5-btn mt5-btn-primary"
+          style={{ padding: '8px 16px', fontSize: 12, fontWeight: 800, marginTop: 8 }}
+        >
+          {isAr ? 'إضافة' : 'Add'}
+        </button>
         {customSymbols.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
             {customSymbols.map((s) => (
