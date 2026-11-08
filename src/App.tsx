@@ -45,7 +45,7 @@ import StoreSettingsPage from './components/StoreSettingsPage';
 import KeyPoolPanel from './components/KeyPoolPanel';
 import { StoreBot, fetchStoreBots } from './services/storeService';
 import { PaymentSession, getLastEmail } from './services/paymentSession';
-import { ensureClientIdentity, silentClientLogin } from './services/clientIdentity';
+import { ensureClientIdentity, silentClientLogin, readClientCredentials } from './services/clientIdentity';
 
 /**
  * True when THIS client has a key of their own saved under their email(s).
@@ -2002,12 +2002,13 @@ const isDeveloperSession = () => {
                             email.includes('dev');
 
         if (isDeveloper) {
-          // Keep developer session active forever
+          // Keep the developer session active forever — but do NOT return here:
+          // the Firebase listener below must still be registered so a live
+          // account can refresh the state after a login or a reload.
           setUser(savedUser);
           setHasApiKey(true);
           persistNeedsApiKey(null);
           setLoading(false);
-          return;
         } else {
           // Regular client session expires after 3 days (3 * 24 * 60 * 60 * 1000 ms)
           const elapsed = Date.now() - savedTimestamp;
@@ -2026,7 +2027,6 @@ const isDeveloperSession = () => {
             }
             persistNeedsApiKey(null);
             setLoading(false);
-            return;
           } else {
             // Session expired! Clear custom keys
             localStorage.removeItem('finalyze_auth_user');
@@ -2046,20 +2046,32 @@ const isDeveloperSession = () => {
       // trivially forgeable, an idToken is not). The developer's own cached
       // session is still respected so the tools keep working.
       const cachedRaw = localStorage.getItem('finalyze_auth_user');
+      let cachedEmail = '';
       if (cachedRaw) {
-        let cachedEmail = '';
         try { cachedEmail = String(JSON.parse(cachedRaw)?.email || '').toLowerCase().trim(); } catch {}
-        const liveEmail = (u?.email || '').toLowerCase().trim();
-        const cachedIsDev = DEVELOPER_EMAILS.includes(cachedEmail) || cachedEmail.includes('dev');
-        const stale = !!liveEmail && liveEmail !== cachedEmail && !cachedIsDev;
-        if (!stale) {
-          setLoading(false);
-          return;
-        }
+      }
+      const liveEmail = (u?.email || '').toLowerCase().trim();
+
+      // No usable live identity: either signed out, or an anonymous session
+      // was started by the verification flow. Never let an anonymous session
+      // erase a cached client; with no cache at all this is a guest.
+      if (!liveEmail) {
+        if (cachedEmail) { setLoading(false); return; }
+        setUser(null);
+        setHasApiKey(false);
+        setLoading(false);
+        return;
+      }
+
+      // A live Firebase identity ALWAYS wins over the localStorage copy. The
+      // global listener in main.tsx writes the cache before this one runs, so
+      // returning early on a cache match (the old behaviour) left `user` null
+      // and the app stuck on the guest screen after a successful login.
+      if (cachedEmail && cachedEmail !== liveEmail) {
         localStorage.removeItem('finalyze_auth_user');
         localStorage.removeItem('finalyze_auth_timestamp');
       }
-      
+
       if (u) {
         setUser(u);
         const email = u.email || '';
@@ -2126,37 +2138,50 @@ const isDeveloperSession = () => {
   // puts the visitor back to a normal free session instead of a broken one.
   useEffect(() => {
     if (loading) return;
-    let savedEmail = '';
-    try {
-      const saved = JSON.parse(localStorage.getItem('finalyze_auth_user') || 'null');
-      savedEmail = String(saved?.email || '').toLowerCase().trim();
-    } catch {}
+    let cancelled = false;
+    (async () => {
+      // Firebase restores its own session asynchronously. Waiting for it first
+      // prevents creating a second (email/password) identity for a visitor who
+      // is already signed in with Google, which used to fail with
+      // "email-already-in-use" and then log them out.
+      try { await auth.authStateReady(); } catch {}
+      if (cancelled) return;
 
-    const authEmail = (auth.currentUser?.email || '').toLowerCase().trim();
+      let savedEmail = '';
+      try {
+        const saved = JSON.parse(localStorage.getItem('finalyze_auth_user') || 'null');
+        savedEmail = String(saved?.email || '').toLowerCase().trim();
+      } catch {}
 
-    if (savedEmail) {
-      if (DEVELOPER_EMAILS.includes(savedEmail)) return;
-      if (authEmail === savedEmail) return;
-      (async () => {
+      const authEmail = (auth.currentUser?.email || '').toLowerCase().trim();
+
+      if (savedEmail) {
+        if (DEVELOPER_EMAILS.includes(savedEmail)) return;
+        if (authEmail === savedEmail) return;
+        // A live account is already signed in — never replace it silently.
+        if (authEmail) return;
+        // Only repair an identity this browser can actually open (a purchase
+        // stored a password). A Google-only cache is restored by the Firebase
+        // listener, not by creating an email/password account.
+        const creds = readClientCredentials();
+        if (!creds || creds.email !== savedEmail) return;
         const ok = await ensureClientIdentity(savedEmail);
-        const nowAuthed = (auth.currentUser?.email || '').toLowerCase().trim();
-        if (!ok && !nowAuthed) {
-          localStorage.removeItem('finalyze_auth_user');
-          localStorage.removeItem('finalyze_auth_timestamp');
-          setUser(null);
+        if (!ok && !cancelled) {
+          // Do NOT clear the session on a transient failure: the listener above
+          // will pick up a real Firebase session when it restores. Clearing it
+          // here was what left the visitor stuck as a guest.
           setLoading(false);
         }
-      })().catch(() => {});
-      return;
-    }
+        return;
+      }
 
-    if (user) return;
-    (async () => {
+      if (user) return;
       const ok = await silentClientLogin();
-      if (ok) return;
+      if (ok || cancelled) return;
       const paid = getLastEmail();
-      if (paid) await ensureClientIdentity(paid);
+      if (paid) await ensureClientIdentity(paid).catch(() => {});
     })().catch(() => {});
+    return () => { cancelled = true; };
   }, [loading, user]);
 
   // Load clients from localStorage on mount (always, regardless of auth state)
@@ -2642,8 +2667,12 @@ const started = planGrants
   };
 
   const handleLogout = async () => {
-    signOut(auth).catch(() => {});
+    // Await sign-out BEFORE navigating: firing it without waiting let the
+    // Firebase session survive the reload, so the next login inherited the
+    // previous account.
+    try { await signOut(auth); } catch {}
     localStorage.removeItem('finalyze_auth_user');
+    localStorage.removeItem('finalyze_user');
     localStorage.removeItem('finalyze_auth_timestamp');
     localStorage.removeItem('finalyze_verify_link');
     localStorage.removeItem('finalyze_geo');

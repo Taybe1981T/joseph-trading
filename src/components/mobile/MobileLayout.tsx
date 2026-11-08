@@ -33,7 +33,7 @@ import {
   startMobilePositionManager,
 } from '../../services/mobileTradeBridge';
 import { auth, db } from '../../lib/firebase';
-import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 
 interface MobileSignal {
@@ -157,6 +157,50 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // Firebase auth state
   const [user, setUser] = useState<any>(null);
   const [loadingAuth, setLoadingAuth] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  // Turn a Firebase auth error into something the user can actually act on.
+  // Before this, every failure was only written to the console, so a blocked
+  // popup looked exactly like "the app stayed on the guest screen".
+  const loginErrorText = (e: any, isAr: boolean) => {
+    const code = String(e?.code || e?.message || '');
+    if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+      return isAr ? 'أُغلقت نافذة الدخول قبل إكماله. أعد المحاولة.' : 'The sign-in window closed before finishing. Try again.';
+    }
+    if (code === 'auth/popup-blocked') {
+      return isAr ? 'المتصفح منع النافذة المنبثقة. جرّب مرة أخرى.' : 'The browser blocked the sign-in popup. Try again.';
+    }
+    if (code === 'auth/unauthorized-domain') {
+      return isAr
+        ? `النطاق (${window.location.hostname}) غير مصرّح به في Firebase.`
+        : `This domain (${window.location.hostname}) is not authorised in Firebase.`;
+    }
+    if (code === 'auth/operation-not-supported-in-this-environment' || code === 'auth/web-storage-unsupported') {
+      return isAr
+        ? 'المتصفح يمنع تسجيل الدخول (وضع التصفح الخفي أو متصفح داخل تطبيق). افتح الموقع في Chrome أو Safari.'
+        : 'This browser blocks sign-in (private mode or an in-app browser). Open the site in Chrome or Safari.';
+    }
+    if (code === 'no_email') {
+      return isAr ? 'لم يتم الحصول على بريد الحساب. أعد المحاولة.' : 'No account email was returned. Try again.';
+    }
+    return code || (isAr ? 'تعذر تسجيل الدخول. أعد المحاولة.' : 'Sign-in failed. Try again.');
+  };
+
+  // A popup cannot always be used on mobile. When signInWithPopup is blocked
+  // we switch to a full-page redirect; this completes the sign-in on return.
+  useEffect(() => {
+    let cancelled = false;
+    getRedirectResult(auth)
+      .then((result) => {
+        if (cancelled || !result?.user?.email) return;
+        setUser(result.user);
+        setEmail(result.user.email.toLowerCase().trim());
+      })
+      .catch((e) => {
+        if (!cancelled) setLoginError(loginErrorText(e, lang === 'ar'));
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const check = () => {
@@ -184,9 +228,16 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     const unsub = onAuthStateChanged(auth, (u) => {
       setUser(u);
       if (u?.email) {
+        const em = u.email.toLowerCase().trim();
+        // Reflect the live identity immediately. Waiting for the 5-second
+        // localStorage poll made a successful login look like it did nothing.
+        setEmail(em);
+        const devEmail = (localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0] || '').toLowerCase();
+        setIsDev(!!em && (em === devEmail || isDeveloperEmail(em) || em.includes('dev')));
         try {
-          localStorage.setItem('finalyze_user', JSON.stringify({ email: u.email.toLowerCase().trim(), uid: u.uid }));
-          localStorage.setItem('finalyze_auth_user', JSON.stringify({ email: u.email.toLowerCase().trim(), uid: u.uid }));
+          localStorage.setItem('finalyze_user', JSON.stringify({ email: em, uid: u.uid }));
+          localStorage.setItem('finalyze_auth_user', JSON.stringify({ email: em, uid: u.uid }));
+          localStorage.setItem('finalyze_auth_timestamp', Date.now().toString());
         } catch {}
       }
       setLoadingAuth(false);
@@ -217,23 +268,54 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // Login / logout helpers
   const doLogin = async (emailHint?: string) => {
     setLoadingAuth(true);
+    setLoginError(null);
     try {
       const provider = new GoogleAuthProvider();
       if (emailHint) {
         provider.setCustomParameters({ login_hint: emailHint });
       }
-      const result = await signInWithPopup(auth, provider);
-      if (result?.user?.email) {
-        const em = result.user.email.toLowerCase().trim();
-        setSavedAccounts(prev => {
-          if (prev.includes(em)) return prev;
-          const next = [...prev, em];
-          try { localStorage.setItem('finalyze_saved_accounts', JSON.stringify(next)); } catch {}
-          return next;
-        });
+      let result;
+      try {
+        result = await signInWithPopup(auth, provider);
+      } catch (popupError: any) {
+        const code = String(popupError?.code || '');
+        // Popups are routinely blocked on phones and in-app browsers. Fall back
+        // to a redirect sign-in instead of silently staying a guest.
+        if (
+          code === 'auth/popup-blocked' ||
+          code === 'auth/operation-not-supported-in-this-environment' ||
+          code === 'auth/cancelled-popup-request'
+        ) {
+          await signInWithRedirect(auth, provider);
+          return;
+        }
+        throw popupError;
       }
-    } catch (e) {
+      const u = result?.user;
+      const em = (u?.email || '').toLowerCase().trim();
+      if (!u || !em) throw new Error('no_email');
+
+      // Make the signed-in account visible RIGHT NOW (the auth listener also
+      // fires, but this removes any dependency on listener timing).
+      setUser(u);
+      setEmail(em);
+      const devEmail = (localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0] || '').toLowerCase();
+      setIsDev(em === devEmail || isDeveloperEmail(em) || em.includes('dev'));
+      try {
+        localStorage.setItem('finalyze_user', JSON.stringify({ email: em, uid: u.uid }));
+        localStorage.setItem('finalyze_auth_user', JSON.stringify({ email: em, uid: u.uid }));
+        localStorage.setItem('finalyze_auth_timestamp', Date.now().toString());
+      } catch {}
+
+      setSavedAccounts(prev => {
+        if (prev.includes(em)) return prev;
+        const next = [...prev, em];
+        try { localStorage.setItem('finalyze_saved_accounts', JSON.stringify(next)); } catch {}
+        return next;
+      });
+    } catch (e: any) {
       console.error(e);
+      setLoginError(loginErrorText(e, lang === 'ar'));
     } finally {
       setLoadingAuth(false);
     }
@@ -639,6 +721,11 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#1a1a1a', borderRadius: 16, padding: 24, width: '90%', maxWidth: 400, color: '#fff' }}>
             <h3 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>{lang === 'ar' ? 'تسجيل الدخول' : 'Login'}</h3>
+            {loginError && (
+              <div style={{ marginBottom: 12, padding: '8px 10px', borderRadius: 8, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', fontSize: 12, lineHeight: 1.5 }}>
+                {loginError}
+              </div>
+            )}
             {savedAccounts.length > 0 && (
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 12, color: '#888', marginBottom: 8 }}>{lang === 'ar' ? 'الحسابات المحفوظة:' : 'Saved accounts:'}</div>
@@ -649,9 +736,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
                 ))}
               </div>
             )}
-            <button onClick={() => { doLogin(); setShowLoginModal(false); }} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '12px 16px', background: '#4285F4', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', justifyContent: 'center' }}>
+            <button onClick={() => { setLoginError(null); doLogin(); setShowLoginModal(false); }} disabled={loadingAuth} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '12px 16px', background: '#4285F4', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', justifyContent: 'center', opacity: loadingAuth ? 0.6 : 1 }}>
               <img src="https://upload.wikimedia.org/wikipedia/commons/c/c1/Google_%22G%22_logo.svg" width="18" height="18" alt="Google" />
-              {lang === 'ar' ? 'تسجيل الدخول بحساب Google' : 'Sign in with Google'}
+              {loadingAuth ? (lang === 'ar' ? 'جارٍ تسجيل الدخول…' : 'Signing in…') : (lang === 'ar' ? 'تسجيل الدخول بحساب Google' : 'Sign in with Google')}
             </button>
             <button onClick={() => setShowLoginModal(false)} style={{ marginTop: 12, width: '100%', padding: '8px', background: 'transparent', border: 'none', color: '#888', fontSize: 12, cursor: 'pointer' }}>
               {lang === 'ar' ? 'إلغاء' : 'Cancel'}
