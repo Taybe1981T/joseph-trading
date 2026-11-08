@@ -69,22 +69,47 @@ app.get("/api/ads-txt", async (_req, res) => {
 });
 
 // API Route: Send verification email
+// The app password is read from the environment only. It used to have a
+// hardcoded fallback, which leaked a working Gmail app password in the public
+// repository (and let anyone send mail from this address).
+const mailUser = process.env.EMAIL_USER || 'taybemohamed10@gmail.com';
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: 'taybemohamed10@gmail.com',
-    pass: process.env.EMAIL_APP_PASSWORD || 'chxq jkcg wcia isgi',
+    user: mailUser,
+    pass: process.env.EMAIL_APP_PASSWORD || '',
   },
 });
 
 app.post("/api/send-verification", async (req, res) => {
   try {
+    // Developer-only: this endpoint sends an email from the owner's Gmail to an
+    // arbitrary recipient with an arbitrary link, so leaving it open made it a
+    // ready-made phishing relay.
+    const dev = await requireDeveloper(req, res);
+    if (!dev) return;
+
     const { email, verifyLink } = req.body;
     if (!email || !verifyLink) {
       return res.status(400).json({ error: "email and verifyLink required" });
     }
+    if (!process.env.EMAIL_APP_PASSWORD) {
+      return res.status(503).json({ error: 'email_not_configured' });
+    }
+    // Never mail a link that points somewhere else.
+    try {
+      const link = new URL(String(verifyLink));
+      const allowed = [process.env.APP_URL, 'https://joseph-trading.vercel.app', 'http://localhost:5173']
+        .filter(Boolean)
+        .map((u) => new URL(String(u)).hostname);
+      if (!allowed.includes(link.hostname)) {
+        return res.status(400).json({ error: 'invalid verifyLink' });
+      }
+    } catch {
+      return res.status(400).json({ error: 'invalid verifyLink' });
+    }
     await transporter.sendMail({
-      from: '"Finalyze AI" <taybemohamed10@gmail.com>',
+      from: `"Finalyze AI" <${mailUser}>`,
       to: email,
       subject: '✅ تأكيد حسابك في Finalyze AI',
       html: `
@@ -1140,6 +1165,12 @@ const GITHUB_REPO = 'Taybe1981T/joseph-trading';
 const GITHUB_ACTIONS_URL = `https://github.com/${GITHUB_REPO}/actions/new`;
 
 app.post("/api/factory-reset", async (req, res) => {
+  // Developer-only. Without this guard anyone on the internet could force-push
+  // main back to the stable commit (destroying every newer change) whenever a
+  // GitHub PAT is configured.
+  const dev = await requireDeveloper(req, res);
+  if (!dev) return;
+
   const errors: string[] = [];
   const deployHookUrl = process.env.VERCEL_DEPLOY_HOOK_URL;
 
@@ -1196,6 +1227,9 @@ app.post("/api/factory-reset", async (req, res) => {
 
 // API Route: Save Current Version as Stable
 app.post("/api/save-stable", async (req, res) => {
+  // Developer-only: this moves the stable tag / rewrites the rollback pointer.
+  const dev = await requireDeveloper(req, res);
+  if (!dev) return;
   try {
     const githubToken = process.env.GITHUB_PAT || (req.body?.pat as string);
     if (!githubToken) {
@@ -1307,7 +1341,7 @@ app.post("/api/ai-analysis", async (req, res) => {
     const caller = await verifyCallerToken(callerToken(req));
     if (!caller) return res.status(401).json({ error: 'sign_in_required' });
 
-    if (!isDeveloperAddress(caller.email)) {
+    if (!isDeveloperAddress(caller.email) || !caller.emailVerified) {
       const plan = await runningPlanFor(caller.email);
       if (!plan) return res.status(403).json({ error: 'no_plan' });
     }
@@ -1344,7 +1378,10 @@ function requireDeveloper(req: any, res: any): Promise<string | null> {
   return verifyCallerToken(callerToken(req))
     .then((caller) => {
       if (!caller) { res.status(401).json({ ok: false, error: 'sign_in_required' }); return null; }
-      if (!isDeveloperAddress(caller.email)) { res.status(403).json({ ok: false, error: 'developer_only' }); return null; }
+      if (!isDeveloperAddress(caller.email) || !caller.emailVerified) {
+        res.status(403).json({ ok: false, error: 'developer_only' });
+        return null;
+      }
       return caller.email;
     })
     .catch(() => { res.status(401).json({ ok: false, error: 'sign_in_required' }); return null; });
@@ -1816,7 +1853,7 @@ app.post("/api/briefing", async (req, res) => {
     // and open, so nothing here can be used to burn a developer key.
     let brief: any = null;
     const caller = await verifyCallerToken(callerToken(req));
-    if (caller && (isDeveloperAddress(caller.email) || (await runningPlanFor(caller.email)))) {
+    if (caller && ((isDeveloperAddress(caller.email) && caller.emailVerified) || (await runningPlanFor(caller.email)))) {
       const text = await poolCompletion(buildBriefingPrompt(prices, news, todayStr));
       if (text) {
         try { brief = JSON.parse(text); } catch { brief = null; }
@@ -1990,7 +2027,7 @@ async function markPoolFailure(entry: PoolEntry, errorText: string): Promise<voi
 // Verifies a Firebase ID token for real (signature + expiry are checked by
 // Google) and returns the account it belongs to. Nothing in this server trusts
 // an email from a request body.
-async function verifyCallerToken(idToken: string): Promise<{ email: string; uid: string; rawEmail: string } | null> {
+async function verifyCallerToken(idToken: string): Promise<{ email: string; uid: string; rawEmail: string; emailVerified: boolean } | null> {
   const token = String(idToken || '').trim();
   if (!token) return null;
   try {
@@ -2005,7 +2042,11 @@ async function verifyCallerToken(idToken: string): Promise<{ email: string; uid:
     const rawEmail = String((user && user.email) || '').trim();
     const email = rawEmail.toLowerCase();
     if (!email) return null;
-    return { email, uid: String((user && user.localId) || ''), rawEmail };
+    // Google/Microsoft sign-ins are verified. An unverified email/password
+    // account can be created for ANY address, so it must never be trusted for
+    // developer-only actions (that would let a stranger impersonate the owner).
+    const emailVerified = user?.emailVerified !== false;
+    return { email, uid: String((user && user.localId) || ''), rawEmail, emailVerified };
   } catch {
     return null;
   }
@@ -2519,6 +2560,23 @@ async function checkBinanceMail(): Promise<Json> {
   return summary;
 }
 
+// Shared guard for maintenance/debug endpoints. If CRON_SECRET is configured it
+// is the credential; otherwise only a verified developer session is accepted.
+async function isTrustedServiceCall(req: any, res: any): Promise<boolean> {
+  const secret = process.env.CRON_SECRET;
+  if (secret) {
+    const auth = String(req.headers.authorization || '');
+    const token = String((req.query && req.query.token) || '');
+    if (auth === `Bearer ${secret}` || token === secret) return true;
+    res.status(401).json({ error: 'unauthorized' });
+    return false;
+  }
+  const dev = await requireDeveloper(req, res);
+  return !!dev;
+}
+
+let lastBinanceMailRun = 0;
+
 const binanceMailHandler = async (req: any, res: any) => {
   const secret = process.env.CRON_SECRET;
   if (secret) {
@@ -2528,6 +2586,13 @@ const binanceMailHandler = async (req: any, res: any) => {
       return res.status(401).json({ error: 'unauthorized' });
     }
   }
+  // Throttle: even without CRON_SECRET (legacy cron URL) a flood cannot hammer
+  // the Gmail inbox. A real cron only needs one run every few minutes.
+  const now = Date.now();
+  if (now - lastBinanceMailRun < 60000) {
+    return res.json({ ok: true, skipped: true, reason: 'throttled' });
+  }
+  lastBinanceMailRun = now;
   try {
     const result = await checkBinanceMail();
     return res.status(result.ok ? 200 : 500).json(result);
@@ -2540,14 +2605,7 @@ app.get("/api/check-binance-mail", binanceMailHandler);
 app.post("/api/check-binance-mail", binanceMailHandler);
 
 const paymentLookupHandler = async (req: any, res: any) => {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = String(req.headers.authorization || '');
-    const token = String((req.query && req.query.token) || '');
-    if (auth !== `Bearer ${secret}` && token !== secret) {
-      return res.status(401).json({ error: 'unauthorized' });
-    }
-  }
+  if (!(await isTrustedServiceCall(req, res))) return;
   try {
     const email = String((req.query && req.query.email) || '').toLowerCase().trim();
     if (!email) return res.status(400).json({ ok: false, error: 'missing email' });
@@ -2576,15 +2634,11 @@ const listWithStatus = async (collectionName: string): Promise<{ items: Json[]; 
   return { items: (data.documents || []).map((d: any) => ({ id: docIdFromName(d.name), ...Object.fromEntries(Object.entries(d.fields || {}).map(([k, v]) => [k, fromFsValue(v)])) })), status: 200 };
 };
 
+// Full dump of every payment request, grant, session and client. This is a
+// maintenance/debug endpoint the browser never calls, so it is now closed:
+// CRON_SECRET if configured, otherwise a verified developer session only.
 const paymentDumpHandler = async (req: any, res: any) => {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = String(req.headers.authorization || '');
-    const token = String((req.query && req.query.token) || '');
-    if (auth !== `Bearer ${secret}` && token !== secret) {
-      return res.status(401).json({ error: 'unauthorized' });
-    }
-  }
+  if (!(await isTrustedServiceCall(req, res))) return;
   try {
     const [requests, grants, sessions, clientInfo] = await Promise.all([
       listWithStatus('payment_requests'),
@@ -2726,6 +2780,10 @@ app.post("/api/payment-request/create", async (req: any, res: any) => {
     };
     const id = `req_${requestNo}`;
     await fsSet('payment_requests', id, payload);
+    // Auto-register the buyer as a client with the payment email (idempotent —
+    // upsertClientRecord never raises an existing row's plan, so a paid plan
+    // can only ever come from developer approval, never from this step).
+    try { await upsertClientRecord(email, { autoRegistered: true, status: 'pending', plan: 'free', planExpiry: null }, { create: true }); } catch {}
     const product = kind === 'bot' ? (b.botName || 'Bot') : (b.planLabel || 'Plan');
     await fsAdd('dev_notifications', {
       type: 'request',

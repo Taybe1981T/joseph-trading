@@ -290,6 +290,16 @@ export async function checkUserGrant(
 ): Promise<PaymentGrant | null> {
   const e = (email || '').toLowerCase().trim();
   if (!e) return null;
+  // A grant only counts for the account that is actually signed in with the
+  // payment email. A guest (or a different account) can never inherit a plan
+  // or a paid product just by knowing the address — this is what closes the
+  // "free plan bypass" where a public grant doc was trusted by anyone.
+  try {
+    const current = (auth.currentUser?.email || '').toLowerCase().trim();
+    if (!current || current !== e) return null;
+  } catch {
+    return null;
+  }
 
   // 1. Check open collections in Firestore (shared_settings & shared_status) — 100% permission-safe in every browser
   try {

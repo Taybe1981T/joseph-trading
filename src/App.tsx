@@ -207,18 +207,35 @@ export default function App() {
   const [showRadarComplete, setShowRadarComplete] = useState(false);
   const [previewDevice, setPreviewDevice] = useState<'phone' | 'tablet' | null>(null);
   const prevRadarRunningRef = useRef(false);
-  const [activeSubscription, setActiveSubscription] = useState<{ label: string; amount: number; expiryDate: string; requestNo?: number; durationDays?: number; firstReleasedAt?: string; planUnit?: string; planUnits?: number } | null>(() => {
+  const [activeSubscription, setActiveSubscription] = useState<{ label: string; amount: number; expiryDate: string; requestNo?: number; durationDays?: number; firstReleasedAt?: string; planUnit?: string; planUnits?: number; email?: string } | null>(null);
+  // A paid plan belongs to ONE account. It is only restored when the signed-in
+  // user's email matches the email stored with it; a guest or a different
+  // account never inherits someone else's plan from localStorage.
+  useEffect(() => {
+    if (!user?.email) {
+      setActiveSubscription(null);
+      try { localStorage.removeItem('active_subscription'); } catch {}
+      return;
+    }
     try {
       const saved = localStorage.getItem('active_subscription');
-      if (!saved) return null;
+      if (!saved) { setActiveSubscription(null); return; }
       const sub = JSON.parse(saved);
-      if (new Date(sub.expiryDate) < new Date()) {
-        localStorage.removeItem('active_subscription');
-        return null;
+      const subEmail = String(sub?.email || '').toLowerCase().trim();
+      if (subEmail && subEmail !== user.email.toLowerCase().trim()) {
+        setActiveSubscription(null);
+        return;
       }
-      return sub;
-    } catch { return null; }
-  });
+      if (sub?.expiryDate && new Date(sub.expiryDate) < new Date()) {
+        localStorage.removeItem('active_subscription');
+        setActiveSubscription(null);
+        return;
+      }
+      setActiveSubscription({ ...sub, email: user.email.toLowerCase().trim() });
+    } catch {
+      setActiveSubscription(null);
+    }
+  }, [user?.email]);
 
   // When an active subscribed plan reaches its expiry, close the paid features
   // automatically and return to the free plan
@@ -2621,7 +2638,7 @@ const started = planGrants
           const merged = prevEnd > thisEnd && prev
             ? { ...subs, expiryDate: prev.expiryDate, label: prev.label || subs.label, firstReleasedAt: subs.firstReleasedAt || prev.firstReleasedAt }
             : subs;
-          try { localStorage.setItem('active_subscription', JSON.stringify(merged)); } catch {}
+          try { localStorage.setItem('active_subscription', JSON.stringify({ ...merged, email: (user?.email || '').toLowerCase().trim() })); } catch {}
           if (!freeModeOverride()) setPaidMode(true);
           return merged;
         });
@@ -2987,7 +3004,7 @@ const started = planGrants
                     planUnit: plan.planUnit,
                     planUnits: plan.planUnits,
                   };
-                  localStorage.setItem('active_subscription', JSON.stringify(sub));
+                  localStorage.setItem('active_subscription', JSON.stringify({ ...sub, email: (user?.email || '').toLowerCase().trim() }));
                   setActiveSubscription(sub);
                   // A new payment reopens paid mode immediately.
                   setPaidMode(true);

@@ -111,6 +111,13 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
 
   const handleProductAction = (bot: StoreBot) => {
     setDownloadMsg(null);
+    // No product (free or paid) may be obtained unless the visitor is signed in
+    // with a registered account. A guest stays on the free plan only.
+    if (!userEmail) {
+      setDownloadMsg({ botId: bot.id || '', text: isAr ? '⚠ سجّل دخولك أولاً لتحميل/شراء أي منتج' : '⚠ Sign in first to download or buy any product' });
+      setTimeout(() => setDownloadMsg(null), 3000);
+      return;
+    }
     if (isFree(bot)) {
       downloadBot(bot);
       setDownloadMsg({ botId: bot.id || '', text: isAr ? '✓ جاري تحميل الملف المجاني' : '✓ Downloading the free file' });
@@ -121,6 +128,11 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
   };
 
   const handleGrantedDownload = (bot: StoreBot) => {
+    if (!userEmail) {
+      setDownloadMsg({ botId: bot.id || '', text: isAr ? '⚠ سجّل دخولك أولاً لتحميل أي منتج' : '⚠ Sign in first to download any product' });
+      setTimeout(() => setDownloadMsg(null), 3000);
+      return;
+    }
     setDownloadMsg(null);
     downloadBot(bot);
     consumeBotDownload(bot.id || '');
@@ -307,7 +319,14 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
                 </div>
               )}
               <button
-                onClick={() => onBuyPlan?.(plan)}
+                onClick={() => {
+                  if (!userEmail) {
+                    setDownloadMsg({ botId: '', text: isAr ? '⚠ سجّل دخولك أولاً لشراء أي خطة' : '⚠ Sign in first to buy any plan' });
+                    setTimeout(() => setDownloadMsg(null), 3000);
+                    return;
+                  }
+                  onBuyPlan?.(plan);
+                }}
                 className="mt-auto w-full py-4 rounded-2xl font-black text-sm uppercase tracking-widest transition-all shadow-lg bg-gradient-to-r from-amber-500 to-[#F59E0B] text-black hover:opacity-90 active:scale-95"
               >
                 {isAr ? `اشتراك $${Number(toWesternDigits(plan.priceUsd)).toFixed(2)}` : `Subscribe $${Number(toWesternDigits(plan.priceUsd)).toFixed(2)}`}
