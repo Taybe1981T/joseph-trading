@@ -1670,6 +1670,10 @@ app.post("/api/verify-payment", async (req, res) => {
     if (!address || !chain) {
       return res.status(400).json({ error: "address and chain required" });
     }
+    // Prevent path/query injection into the BlockCypher URL.
+    if (!/^[a-zA-Z0-9]+$/.test(String(address).trim())) {
+      return res.status(400).json({ error: "invalid address" });
+    }
 
     // BTC / LTC / ETH — sum incoming txrefs in last 6h via BlockCypher
     const chainPath = ONSITE_CHAIN_MAP[chain];
@@ -1722,6 +1726,13 @@ app.post("/api/verify-tx", async (req, res) => {
     const { chain, txid, address } = req.body as { chain?: string; txid?: string; address?: string };
     if (!chain || !txid || !address) {
       return res.status(400).json({ error: "chain, txid and address required" });
+    }
+    // tx hashes are hex/alphanumeric; reject anything that could alter the URL path.
+    if (!/^[a-zA-Z0-9]+$/.test(String(txid).trim())) {
+      return res.status(400).json({ error: "invalid txid" });
+    }
+    if (!/^[a-zA-Z0-9]+$/.test(String(address).trim())) {
+      return res.status(400).json({ error: "invalid address" });
     }
     const chainPath = ONSITE_CHAIN_MAP[chain];
     if (!chainPath) {
