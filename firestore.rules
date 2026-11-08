@@ -292,6 +292,16 @@ service cloud.firestore {
       allow delete: if isDeveloper();
     }
 
+    // Processed transaction hashes (replay protection for /api/verify-tx).
+    // Immutable once recorded: a hash can be claimed only once, so a buyer
+    // cannot reuse an old payment proof for a new purchase.
+    match /processed_txs/{txid} {
+      allow get: if true;
+      allow create: if request.resource.data.txid is string
+        && request.resource.data.address is string;
+      allow update, delete: if false;
+    }
+
     // Everything not matched above stays closed.
     match /{document=**} {
       allow read, write: if false;

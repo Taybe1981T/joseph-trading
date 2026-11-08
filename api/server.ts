@@ -26,6 +26,24 @@ app.use(express.urlencoded({ extended: true }));
 // accept the open collections and reject the private ones.
 const fsAuthStore = new AsyncLocalStorage<string | null>();
 
+// ── Lightweight per-IP rate limiter (in-memory, per-instance) ────────────────
+// Protects the public verification/email endpoints from abuse without adding any
+// external dependency or latency to the happy path.
+const _rateBuckets = new Map<string, { count: number; resetAt: number }>();
+function rateLimit(req: any, res: any, key: string, max: number, windowMs: number): boolean {
+  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  const bucketKey = `${key}:${ip}`;
+  const now = Date.now();
+  let b = _rateBuckets.get(bucketKey);
+  if (!b || now > b.resetAt) { b = { count: 0, resetAt: now + windowMs }; _rateBuckets.set(bucketKey, b); }
+  b.count++;
+  if (b.count > max) {
+    res.status(429).json({ error: 'too_many_requests' });
+    return false;
+  }
+  return true;
+}
+
 app.use((req, _res, next) => {
   const raw = req.headers.authorization;
   const value = typeof raw === "string" ? raw.trim() : "";
@@ -34,8 +52,8 @@ app.use((req, _res, next) => {
 });
 
 // API Route: Health check
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", version: "4.0-Institutional", node: process.version });
+app.get("/api/health", (_req, res) => {
+  res.json({ status: "ok", version: "4.0-Institutional" });
 });
 
 // API Route: Dynamic /ads.txt for The Moneytizer (served via vercel rewrite from /ads.txt)
@@ -82,6 +100,7 @@ const transporter = nodemailer.createTransport({
 });
 
 app.post("/api/send-verification", async (req, res) => {
+  if (!rateLimit(req, res, 'send-verification', 10, 60000)) return;
   try {
     // Developer-only: this endpoint sends an email from the owner's Gmail to an
     // arbitrary recipient with an arbitrary link, so leaving it open made it a
@@ -143,19 +162,20 @@ app.post("/api/register-client-with-key", async (req, res) => {
     if (!email || !uid) {
       return res.status(400).json({ error: "email and uid required" });
     }
-
-    // Store client registration with timestamp
-    const clientData = {
-      email: email.toLowerCase().trim(),
-      uid,
-      status: 'active',
-      plan: 'free',
-      planExpiry: null,
-      registeredAt: new Date().toISOString(),
-      apiKeyType: apiKeyType || 'gemini',
-    };
-
-    console.log("Registering client:", clientData);
+    const e = String(email).toLowerCase().trim();
+    if (!e.includes('@')) return res.status(400).json({ error: "invalid email" });
+    // Persist the client row (idempotent — never raises an existing row's plan).
+    try {
+      await upsertClientRecord(e, {
+        uid: String(uid),
+        status: 'active',
+        plan: 'free',
+        planExpiry: null,
+        apiKeyType: apiKeyType || 'gemini',
+        registeredAt: Date.now(),
+      }, { create: true });
+    } catch {}
+    const clientData = { email: e, uid, status: 'active', plan: 'free', planExpiry: null, apiKeyType: apiKeyType || 'gemini' };
     res.json({ success: true, message: "Client registered successfully", client: clientData });
   } catch (error: any) {
     console.error("Client registration error:", error);
@@ -1665,6 +1685,7 @@ async function callGoogle(apiKey: string, prompt: string, timeoutMs = 5000) {
 // API Route: Server-side on-chain payment verification
 // Called by the frontend to avoid browser CORS / rate-limit issues.
 app.post("/api/verify-payment", async (req, res) => {
+  if (!rateLimit(req, res, 'verify-payment', 30, 60000)) return;
   try {
     const { address, chain } = req.body as { address?: string; chain?: string };
     if (!address || !chain) {
@@ -1722,6 +1743,7 @@ app.post("/api/verify-payment", async (req, res) => {
 // paid at least the expected amount to the payment address. Works even when
 // address-history APIs are down, as long as a single-tx lookup succeeds.
 app.post("/api/verify-tx", async (req, res) => {
+  if (!rateLimit(req, res, 'verify-tx', 30, 60000)) return;
   try {
     const { chain, txid, address } = req.body as { chain?: string; txid?: string; address?: string };
     if (!chain || !txid || !address) {
@@ -1754,7 +1776,32 @@ app.post("/api/verify-tx", async (req, res) => {
         paid += out.value;
       }
     }
-    return res.json({ amount: paid / divisor, confirmations: tx.confirmations || 0 });
+    const amount = paid / divisor;
+    // Replay protection: a tx hash can only be claimed once. If it was already
+    // recorded for a DIFFERENT address/amount, refuse — otherwise a buyer could
+    // reuse an old hash for a new purchase.
+    try {
+      const existing = await fsGet('processed_txs', String(txid).trim());
+      if (existing) {
+        const prevAddr = String(existing.address || '').toLowerCase().trim();
+        const prevAmt = Number(existing.amount || 0);
+        if (prevAddr && prevAddr !== target) {
+          return res.json({ amount: 0, confirmations: tx.confirmations || 0, error: 'tx_already_used' });
+        }
+        if (prevAmt > 0 && amount > prevAmt + 0.0000001) {
+          return res.json({ amount: 0, confirmations: tx.confirmations || 0, error: 'tx_already_used' });
+        }
+      } else if (amount > 0) {
+        await fsSet('processed_txs', String(txid).trim(), {
+          txid: String(txid).trim(),
+          address: target,
+          amount,
+          confirmations: tx.confirmations || 0,
+          recordedAt: Date.now(),
+        });
+      }
+    } catch {}
+    return res.json({ amount, confirmations: tx.confirmations || 0 });
   } catch (e: any) {
     return res.status(500).json({ error: e.message || "TX verification failed" });
   }
@@ -2761,6 +2808,31 @@ app.post("/api/payment-request/create", async (req: any, res: any) => {
     if (!email || !isFinite(amount) || amount <= 0) {
       return res.status(400).json({ ok: false, error: 'missing buyerEmail / amountUsd' });
     }
+    // Server-side price validation: the client-supplied amount must match the
+    // catalog price (within 1%), so a buyer cannot claim a $100 product for
+    // $0.01 by tampering with the request body.
+    try {
+      let expectedUsd: number | null = null;
+      if (kind === 'bot' && b.botId) {
+        const bot = await fsGet('store_bots', String(b.botId));
+        if (bot && typeof bot.price === 'number') expectedUsd = Number(bot.price) / 100;
+      } else if (kind === 'plan') {
+        const plans = await fsList('store_plans');
+        const label = String(b.planLabel || '').toLowerCase().trim();
+        const match = plans.find((p: any) => {
+          const la = String(p.labelAr || '').toLowerCase().trim();
+          const le = String(p.labelEn || '').toLowerCase().trim();
+          const key = String(p.key || '').toLowerCase().trim();
+          return (label && (la === label || le === label || key === label));
+        });
+        if (match && typeof (match as any).priceUsd === 'number') expectedUsd = Number((match as any).priceUsd);
+      }
+      if (expectedUsd != null && expectedUsd > 0) {
+        if (Math.abs(amount - expectedUsd) / expectedUsd > 0.01) {
+          return res.status(400).json({ ok: false, error: 'amount_mismatch', expected: expectedUsd });
+        }
+      }
+    } catch {}
     const counter = await fsGet('shared_settings', 'payment_counter');
     const last = Number(counter?.last) || 1000;
     const requestNo = last + 1;
