@@ -3,11 +3,6 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ── Identity helpers ────────────────────────────────────────────────────
-    // Every private collection below is keyed off the SIGNED-IN Firebase account
-    // (request.auth), never off a value the caller can put in the body. An
-    // unauthenticated request (the server polling with the public API key) is
-    // therefore a separate, explicitly-listed case — it is never treated as a
-    // client and can never reach another client's data.
     function isSignedIn() {
       return request.auth != null;
     }
@@ -18,21 +13,23 @@ service cloud.firestore {
         : '';
     }
 
-    // The developer (you). Full read access to client records, and the only
-    // identity allowed to decide a purchase or hand out a plan grant.
+    // Developer identity: the email must be on the list AND must not be
+    // explicitly unverified. `!= false` (instead of `== true`) keeps Microsoft
+    // tokens that omit the claim working, while still blocking a self-created
+    // unverified email/password account from claiming a developer address.
     function isDeveloper() {
-      return authEmail() in [
-        'albertaparks1t@gmail.com',
-        'bachasalman69@gmail.com',
-        'taybekraa@gmail.com',
-        'kraakraa109@gmail.com'
-      ];
+      return isSignedIn()
+        && request.auth.token.email != null
+        && request.auth.token.email_verified != false
+        && authEmail() in [
+          'albertaparks1t@gmail.com',
+          'bachasalman69@gmail.com',
+          'taybekraa@gmail.com',
+          'kraakraa109@gmail.com'
+        ];
     }
 
     // ── Per-client private data ─────────────────────────────────────────────
-    // A client only ever reaches rows carrying THEIR OWN email. `get` is limited
-    // to that single row and `list` to the developer, so no client can page
-    // through the customer list.
     match /clients/{clientId} {
       function isOwnerClientEmail() {
         return isSignedIn() && resource.data.email is string
@@ -42,10 +39,6 @@ service cloud.firestore {
         return isSignedIn() && request.resource.data.email is string
           && request.resource.data.email.lower() == authEmail();
       }
-      // A client registers and maintains their OWN row, but can never raise
-      // their own entitlement: plan/planExpiry may only be written as free/null
-      // or left exactly as they are. Only the developer raises them, which is
-      // what makes the crown in Client Monitor trustworthy.
       function ownerMayCreateOwn() {
         return writesOwnClientEmail()
           && (!('plan' in request.resource.data)
@@ -65,9 +58,6 @@ service cloud.firestore {
                   && request.resource.data.planExpiry == resource.data.planExpiry));
       }
       allow get: if isDeveloper() || isOwnerClientEmail();
-      // A list rule must be provable from the query alone, so it compares the
-      // stored field to the session's email directly (values are stored
-      // lowercased, the caller always passes a lowercased value too).
       allow list: if isDeveloper() || (isSignedIn() && resource.data.email == authEmail());
       allow create: if isDeveloper() || ownerMayCreateOwn();
       allow update: if isDeveloper() || ownerMayUpdateOwn();
@@ -79,14 +69,6 @@ service cloud.firestore {
       allow get, list: if isDeveloper() || (isSignedIn() && request.auth.uid == userId);
       allow create: if isSignedIn() && request.auth.uid == userId;
       allow update, delete: if isDeveloper() || (isSignedIn() && request.auth.uid == userId);
-    }
-
-    // Developer-side kill-switches surfaced to clients (mirrors config only).
-    // Clients READ `freeAllowed`; the developer is the only writer (via the
-    // Client Monitor toggle). The doc is created/overwritten by the dev only.
-    match /config/{docId} {
-      allow get, list: if true;  // public read — clients need freeAllowed
-      allow create, update, delete: if isDeveloper();
     }
 
     // Payment sessions hold amounts and provider session ids — owner only.
@@ -124,22 +106,12 @@ service cloud.firestore {
       allow update, delete: if isDeveloper();
     }
 
-    // ── Plan grants: the single most sensitive collection ───────────────────
-    // A grant is what unlocks a paid plan, so it must be IMPOSSIBLE for a client
-    // (or any visitor) to create one — that would be a free plan for anyone.
-    // Only the developer creates a grant, from their own signed-in session.
-    // A client may read their own grant, and may only touch the timing/status of
-    // a grant that already exists for them (start the clock, cancel the plan).
+    // ── Plan grants: developer-created only ─────────────────────────────────
     match /payment_grants/{grantId} {
       allow get: if true;
       allow list: if isDeveloper()
         || (isSignedIn() && resource.data.email == authEmail());
       allow create: if isDeveloper();
-      // The owner may only operate on a grant that is already theirs: start the
-      // clock once, consume it, or give it up. Identity fields are locked, the
-      // release-time expiryDate can never be created or moved by the owner, and
-      // the start instant must be a real Timestamp within 5 minutes of SERVER
-      // time — so the owner can never hand themselves a longer plan.
       allow update: if isDeveloper()
         || (isSignedIn()
             && resource.data.email is string
@@ -160,9 +132,6 @@ service cloud.firestore {
                     || (request.resource.data.activatedAt is timestamp
                         && request.resource.data.activatedAt <= request.time
                         && request.time - duration.value(5, 'm') <= request.resource.data.activatedAt)))
-            // Approval facts are the developer's: the owner may never move the
-            // approval instant (the plan clock is derived from it), the request
-            // number, or the plan label.
             && (!('createdAt' in resource.data)
                 || request.resource.data.createdAt == resource.data.createdAt)
             && (!('requestNo' in resource.data)
@@ -172,49 +141,35 @@ service cloud.firestore {
       allow delete: if isDeveloper();
     }
 
-    // Payment requests: a client submits their own and reads only their own.
-    // Creation stays open because the server's payment poller submits detected
-    // transfers without a session; a forged row still needs YOUR approval before
-    // any plan is granted, so it cannot be used to unlock anything.
+    // Payment requests: the server creates them without a session, so create
+    // stays open. Only the developer can decide (update/delete of others).
     match /payment_requests/{requestId} {
       allow get: if true;
       allow list: if isDeveloper()
         || (isSignedIn() && resource.data.buyerEmail is string
             && resource.data.buyerEmail.lower() == authEmail());
       allow create: if request.resource.data.buyerEmail is string;
-      // Approval facts (status/decidedBy/decidedAt/amount) are developer-only.
-      // A client clears their OWN request row from their transaction list at any
-      // time — that is a DELETE, never an update — and never a grant.
       allow update: if isDeveloper();
       allow delete: if isDeveloper()
         || (isSignedIn() && resource.data.buyerEmail is string
             && resource.data.buyerEmail.lower() == authEmail());
     }
 
-    // Developer notifications — only you read them. The payment poller still
-    // writes them without a session, so writes stay open.
+    // Developer notifications — only the developer reads them. The server's
+    // payment endpoints still write them without a session, so writes stay open
+    // (worst case is notification spam, never money or plans).
     match /dev_notifications/{notifId} {
       allow read: if isDeveloper();
       allow write: if true;
     }
 
-    // ── Shared AI key pool (the keys paying clients run analysis on) ─────────
-    // The key VALUE is never stored here in plain text: the server encrypts it
-    // with AES-256-GCM (AI_POOL_SECRET, a server-only env var) before writing it,
-    // and decrypts it only in memory for the upstream call. So even a full dump
-    // of this collection yields ciphertext that is useless outside the server.
-    //
-    // Read is open to any signed-in account on purpose: the analysis endpoint
-    // runs as the CALLER (it replays their ID token onto Firestore so the rules
-    // above stay authoritative), and it has to fetch the pool on their behalf.
-    // Write stays developer-only — nobody but you can add, disable or delete a
-    // key, and no client can ever read back what they are running on.
+    // ── Shared AI key pool — ciphertext only, developer-written ─────────────
     match /shared_ai_keys/{keyId} {
       allow read: if isSignedIn();
       allow create, update, delete: if isDeveloper();
     }
 
-    // ── Virtual trading: already per-uid, kept as is ────────────────────────
+    // ── Virtual trading: per-uid ────────────────────────────────────────────
     match /paper_accounts/{userId} {
       allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
@@ -225,47 +180,117 @@ service cloud.firestore {
       allow update, delete: if isSignedIn() && resource.data.uid == request.auth.uid;
     }
 
-    // ── Public, non-personal data (unchanged) ───────────────────────────────
-    // None of these carry a client's identity: shared analysis output, market
-    // status, public store catalogue, the public suggestion board, counters.
-    match /shared_results/{docId} { allow read, write: if true; }
-    // ── Copy-trading mirror events: developer broadcasts auto opens/closes,
-    // clients poll them and execute locally in their OWN accounts. Same open
-    // model as shared_results — public read, write allowed so the developer
-    // device can publish (rules above already scope private trade data away).
-    match /shared_trades/{docId} { allow read, write: if true; }
-    match /shared_alerts/{docId} { allow read, write: if true; }
-    match /shared_status/{docId} { allow read, write: if true; }
-    match /shared_settings/{docId} { allow read, write: if true; }
-    // Subscription plans: the catalogue is public (the store shows it to every
-    // client, in whichever language the site is in) but ONLY the developer may
-    // create, edit, activate or delete a plan. Without a match here these
-    // documents fell into the catch-all below and every save was refused.
-    match /store_plans/{planId} { allow read: if true; allow write: if isDeveloper(); }
-    // Store bots: public catalogue, developer-only write — a bot carries its
-    // price, so nobody but the developer may add, edit or remove one.
-    match /store_bots/{botId} { allow read: if true; allow write: if isDeveloper(); }
-    match /config/{docId} { allow read, write: if true; }
-    // The public suggestion board. Anyone may post or remove a suggestion (the
-    // developer clears the board from the same UI), but VOTES are settled by the
-    // server-only path in paymentRequests.ts and can no longer be rewritten by
-    // hand from a browser.
+    // ═══════════════════════════════════════════════════════════════════════
+    // PUBLIC DATA — READ IS PUBLIC, WRITE IS DEVELOPER-ONLY
+    // ═══════════════════════════════════════════════════════════════════════
+    // These collections are polled by every client, so reads must stay open.
+    // Writes were `if true`, which let any visitor inject fake signals, fake
+    // alerts, fake grants and even rewrite the payment wallet addresses.
+
+    // Kill-switches and site config (ads code, mirror flag).
+    // Public read, developer write. This is what closes the stored-XSS hole:
+    // AdsManager injects `config/site_ads` with innerHTML, so a world-writable
+    // config meant every visitor could inject script into every other visitor.
+    match /config/{docId} {
+      allow get, list: if true;
+      allow create, update, delete: if isDeveloper();
+    }
+
+    // Signals broadcast to clients.
+    match /shared_results/{docId} {
+      allow get, list: if true;
+      allow write: if isDeveloper();
+    }
+
+    // Auto-trade / alert settings broadcast to clients.
+    match /shared_alerts/{docId} {
+      allow get, list: if true;
+      allow write: if isDeveloper();
+    }
+
+    // Grant/status mirror that clients poll. This one is critical: the client
+    // reads `shared_status/grant_*` and trusts it as an active plan, so an open
+    // write was a free-plan bypass for anyone.
+    match /shared_status/{docId} {
+      allow get, list: if true;
+      allow write: if isDeveloper();
+    }
+
+    // ── Copy-trading broadcast channel ──────────────────────────────────────
+    // Clients may READ trade events and execute them; only the developer may
+    // publish. An open write here would let anyone command every client's
+    // account to open/close trades. NOTE: this collection was missing from the
+    // deployed rules entirely, so the mirror was silently failing.
+    match /shared_trades/{docId} {
+      allow get, list: if true;
+      allow write: if isDeveloper();
+    }
+
+    // Mobile radar shared signals (same model: read public, write developer).
+    match /shared_signals/{docId} {
+      allow get, list: if true;
+      allow write: if isDeveloper();
+    }
+
+    // ── shared_settings: mixed public / developer / server docs ─────────────
+    // Clients `getDoc` individual documents (freemium, prices, payments,
+    // grant_*, ...), but nobody except the developer may LIST the collection:
+    // a list would dump every grant, hidden-transaction id and wallet address.
     //
-    // This collection also stores shared analysis output and site requests, so
-    // the delete rule is narrowed to `_type == 'suggestion'`: deleting a
-    // suggestion may never reach an analysis or a site-request document.
+    // Writes are developer-only, with two narrow server-flow exceptions:
+    //   1. payment_counter — bumped by /api/payment-request/create, which runs
+    //      with the BUYER's token, not the developer's.
+    //   2. binance_mail_state — written by the Gmail/Binance poller, which runs
+    //      without a Firebase session. Abuse is limited to skipping an email;
+    //      it can never touch money or plans.
+    // Everything else (payments, prices, grant_*, freemium, clientLogin,
+    // dev_hidden_*, removed_default_plans, request_*) is developer-only.
+    match /shared_settings/{docId} {
+      allow get: if true;
+      allow list: if isDeveloper();
+      allow write: if isDeveloper()
+        || docId == 'payment_counter'
+        || docId == 'binance_mail_state';
+    }
+
+    // Public store catalogue — developer-only write.
+    match /store_plans/{planId} { allow read: if true; allow write: if isDeveloper(); }
+    match /store_bots/{botId} { allow read: if true; allow write: if isDeveloper(); }
+
+    // Public suggestion board + shared analysis output.
+    // `create` stays open (mobile analysis and suggestions write here) and the
+    // owner may delete their own suggestion; the developer may do anything.
     match /analysisResults/{resultId} {
       allow read: if true;
       allow create: if true;
       allow update: if isDeveloper()
         || (isSignedIn() && resource.data._type == 'suggestion'
             && resource.data.votes == request.resource.data.votes);
-      allow delete: if resource.data._type == 'suggestion';
+      allow delete: if isDeveloper()
+        || (isSignedIn()
+            && resource.data._type == 'suggestion'
+            && resource.data.ownerEmail is string
+            && resource.data.ownerEmail.lower() == authEmail());
     }
     match /suggestions/{suggestionId} { allow read, write: if true; }
-    match /analytics_counters/{docId} { allow read, write: if true; }
-    match /analytics_views/{docId} { allow read, write: if true; }
-    match /analytics_clicks/{docId} { allow read, write: if true; }
+
+    // Analytics counters are written by every visitor's browser; keep writes
+    // open but restrict deletes so a visitor cannot wipe the stats.
+    match /analytics_counters/{docId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isDeveloper();
+    }
+    match /analytics_views/{docId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isDeveloper();
+    }
+    match /analytics_clicks/{docId} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isDeveloper();
+    }
 
     // Everything not matched above stays closed.
     match /{document=**} {

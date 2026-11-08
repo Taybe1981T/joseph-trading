@@ -1,0 +1,44 @@
+name: Deploy Firestore rules
+
+# Deploys firestore.rules to Firebase automatically on every push that touches
+# the rules (Vercel only deploys the app; it does NOT deploy Firestore rules).
+#
+# One-time setup — add this repository secret:
+#   FIREBASE_SERVICE_ACCOUNT = the JSON of a Firebase service account with the
+#   "Firebase Rules Admin" role (Firebase Console -> Project settings ->
+#   Service accounts -> Generate new private key).
+#
+# Until the secret exists this job will fail; until then deploy the rules once
+# from the Firebase Console (Firestore Database -> Rules) or with:
+#   firebase deploy --only firestore:rules
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firestore.rules'
+      - 'firebase.json'
+      - '.firebaserc'
+      - '.github/workflows/firebase-rules.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firestore-rules-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy Firestore rules
+        uses: w9jds/firebase-action@master
+        with:
+          args: deploy --only firestore:rules --project trading-made-easy-e8450
+        env:
+          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
