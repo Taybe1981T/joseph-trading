@@ -246,6 +246,18 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     return () => { unsub(); clearTimeout(t); };
   }, []);
 
+  // Keep the mobile avatar/logo in sync with the account that is signed in.
+  // They are stored per-email, so switching accounts must not keep the previous
+  // account's photo on screen.
+  useEffect(() => {
+    const em = (user?.email || email || '').toLowerCase().trim();
+    if (!em) { setCustomAvatar(null); setCustomLogo(null); return; }
+    try {
+      setCustomAvatar(localStorage.getItem('finalyze_custom_avatar_' + em) || null);
+      setCustomLogo(localStorage.getItem('finalyze_custom_logo_' + em) || null);
+    } catch {}
+  }, [user?.email, email]);
+
   // Auto-restart radar if enabled but not running (ensures analysis continues across tab navigation)
   useEffect(() => {
     const ensureRadar = () => {
@@ -326,19 +338,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       await signOut(auth);
     } catch {}
     try {
-      const u = localStorage.getItem('finalyze_user') || localStorage.getItem('finalyze_auth_user');
-      const parsed = u ? JSON.parse(u) : null;
-      const email = parsed?.email || '';
       localStorage.removeItem('finalyze_user');
       localStorage.removeItem('finalyze_auth_user');
       localStorage.removeItem('finalyze_dev_email');
-      if (email) {
-        localStorage.removeItem('finalyze_custom_avatar_' + email);
-        localStorage.removeItem('finalyze_custom_logo_' + email);
-      }
-      // Also remove global keys for backward compatibility
-      localStorage.removeItem('finalyze_custom_avatar');
-      localStorage.removeItem('finalyze_custom_logo');
+      // Per-account assets (finalyze_custom_avatar_<email>) are intentionally
+      // NOT deleted: signing out must not erase the owner's picture. They are
+      // scoped by email, so another account can never read them.
     } catch {}
     setUser(null);
     setEmail('');

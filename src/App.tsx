@@ -70,6 +70,7 @@ import './styles/mobile_pt1.css';
 import './styles/mobile_pt2.css';
 import { clientScopeKey, writeClientOwnKey, readClientOwnKey, clearClientOwnKey, rememberBuyerEmail, clientEmailsFor, readClientOwnKeyForEmails, applyRuntimeAnalysisKey, replaceClientOwnKey, forgetClientOwnKey, purgeOwnKeyForEmail, detectKeyProvider, setCurrentUserEmail, currentUserEmail } from './lib/clientScope';
 import { isGoogleOrMicrosoftEmail, AuthProviderId } from './lib/authPolicy';
+import { readProfileAsset } from './lib/profileAssets';
 
 
 export type PageType = 'main' | 'settings' | 'apiKey' | 'plans' | 'radar' | 'paymentSettings' | 'clientMonitor' | 'profile' | 'about' | 'suggestions' | 'ads' | 'siteStats' | 'trade' | 'manualAnalysis' | 'manualResults' | 'store' | 'storeSettings' | 'transactions' | 'prices' | 'myPlan';
@@ -2816,7 +2817,7 @@ const started = planGrants
             freemiumDisabled={freemiumDisabled}
             onPreview={isDeveloperSession() ? (device) => setPreviewDevice(device) : undefined}
             user={user}
-            customAvatar={localStorage.getItem('finalyze_custom_avatar')}
+            customAvatar={readProfileAsset('avatar', user?.email || '', isDeveloperSession())}
             onLogin={handleLogin}
             onLogout={handleLogout}
             planClient={isPlanClient}

@@ -4,6 +4,7 @@ import { Camera, Upload, Trash2, Image, ArrowLeft, Save, Check, RefreshCw, XCirc
 import { Language } from '../lib/i18n';
 import { BASE_URL } from '../lib/firebase';
 import { loadAllSessions, cancelSession, PaymentSession } from '../services/paymentSession';
+import { readProfileAsset, writeProfileAsset, profileEmail } from '../lib/profileAssets';
 
 interface ProfilePageProps {
   user: User | null;
@@ -37,21 +38,26 @@ export default function ProfilePage({ user, lang, onBack, onAvatarChange, onLogo
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
+  // Profile assets belong to ONE account. Kept in a variable so every read and
+  // write below uses the same identity (and so a client can never inherit the
+  // developer's photo from the old global key).
+  const ownerEmail = profileEmail(user?.email || autoEmail || '');
+
   const loadHistory = () => {
     loadAllSessions(autoEmail).then((list) => { setTxs(list); setTxsLoaded(true); });
   };
 
   useEffect(() => {
-    const savedAvatar = localStorage.getItem('finalyze_custom_avatar');
+    const savedAvatar = readProfileAsset('avatar', ownerEmail, isDeveloper);
     const savedLogo = localStorage.getItem('finalyze_custom_logo');
-    const savedName = localStorage.getItem('finalyze_custom_name');
+    const savedName = readProfileAsset('name', ownerEmail, isDeveloper);
     if (savedAvatar) setAvatar(savedAvatar);
     if (savedLogo) setLogo(savedLogo);
     if (savedName) setDisplayName(savedName);
     else if (user?.displayName) setDisplayName(user.displayName);
     else if (user?.email) setDisplayName(user.email.split('@')[0]);
     if (autoEmail) loadHistory();
-  }, [user, autoEmail]);
+  }, [user, autoEmail, ownerEmail, isDeveloper]);
 
   const handleCancelHistory = async (id: string) => {
     await cancelSession(id);
@@ -81,13 +87,11 @@ export default function ProfilePage({ user, lang, onBack, onAvatarChange, onLogo
   };
 
   const handleSave = () => {
-    if (avatar) localStorage.setItem('finalyze_custom_avatar', avatar);
-    else localStorage.removeItem('finalyze_custom_avatar');
+    writeProfileAsset('avatar', ownerEmail, avatar);
+    writeProfileAsset('name', ownerEmail, displayName || null);
 
     if (logo) localStorage.setItem('finalyze_custom_logo', logo);
     else localStorage.removeItem('finalyze_custom_logo');
-
-    localStorage.setItem('finalyze_custom_name', displayName);
 
     onAvatarChange?.(avatar);
     onLogoChange?.(logo);
@@ -98,7 +102,7 @@ export default function ProfilePage({ user, lang, onBack, onAvatarChange, onLogo
 
   const handleRemoveAvatar = () => {
     setAvatar(null);
-    localStorage.removeItem('finalyze_custom_avatar');
+    writeProfileAsset('avatar', ownerEmail, null);
     onAvatarChange?.(null);
   };
 

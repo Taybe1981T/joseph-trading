@@ -7,6 +7,7 @@ import { initAudio } from '../lib/audioEngine';
 import { BASE_URL } from '../lib/firebase';
 import { SYMBOL_CATEGORIES, ALL_SYMBOLS_DB } from '../constants';
 import { fetchUrgentNews } from '../services/urgentNews';
+import { readProfileAsset } from '../lib/profileAssets';
 
 const cn = (...classes: any[]) => classes.filter(Boolean).join(' ');
 
@@ -208,15 +209,16 @@ export default function Header({
   const [langMenuPos, setLangMenuPos] = useState<{top: number; left: number} | null>(null);
 
   useEffect(() => {
-    setCustomAvatar(localStorage.getItem('finalyze_custom_avatar'));
-    setCustomLogo(localStorage.getItem('finalyze_custom_logo'));
-    const handleStorage = () => {
-      setCustomAvatar(localStorage.getItem('finalyze_custom_avatar'));
+    // The profile photo is per-account. Reading the old global key here made
+    // the developer's picture appear on every client that used this browser.
+    const sync = () => {
+      setCustomAvatar(readProfileAsset('avatar', user?.email || '', isDeveloper));
       setCustomLogo(localStorage.getItem('finalyze_custom_logo'));
     };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, []);
+    sync();
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, [user?.email, isDeveloper]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
