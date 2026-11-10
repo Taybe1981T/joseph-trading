@@ -87,10 +87,12 @@ app.get("/api/ads-txt", async (_req, res) => {
 });
 
 // API Route: Send verification email
-// The app password is read from the environment only. It used to have a
-// hardcoded fallback, which leaked a working Gmail app password in the public
-// repository (and let anyone send mail from this address).
-const mailUser = process.env.EMAIL_USER || 'taybemohamed10@gmail.com';
+// Both the mailbox and its app password come from the environment only. They
+// used to have hardcoded fallbacks, which leaked a working Gmail app password
+// in the public repository (and let anyone send mail from this address). With
+// no EMAIL_USER / EMAIL_APP_PASSWORD configured the endpoint simply reports
+// email_not_configured instead of failing halfway through a send.
+const mailUser = process.env.EMAIL_USER || '';
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -112,7 +114,7 @@ app.post("/api/send-verification", async (req, res) => {
     if (!email || !verifyLink) {
       return res.status(400).json({ error: "email and verifyLink required" });
     }
-    if (!process.env.EMAIL_APP_PASSWORD) {
+    if (!process.env.EMAIL_APP_PASSWORD || !mailUser) {
       return res.status(503).json({ error: 'email_not_configured' });
     }
     // Never mail a link that points somewhere else.
