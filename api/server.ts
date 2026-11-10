@@ -1972,7 +1972,13 @@ const DEVELOPER_EMAIL_LIST = [
 ];
 
 function poolMasterKey(): Buffer {
-  const raw = String(process.env.AI_POOL_SECRET || 'finalyze_master_ai_pool_secret_2026_default_key').trim();
+  // Fail closed: no hardcoded fallback. A public default secret would make the
+  // ciphertext in shared_ai_keys decryptable by anyone who can read the repo,
+  // which is exactly the "clients using my keys" hole this pool must avoid.
+  // When the variable is missing the pool simply resolves to no keys instead of
+  // silently sealing new keys with a known secret.
+  const raw = String(process.env.AI_POOL_SECRET || '').trim();
+  if (!raw) throw new Error('AI_POOL_SECRET is not configured');
   return createHash('sha256').update(raw, 'utf8').digest();
 }
 
