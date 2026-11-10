@@ -208,8 +208,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         const raw = localStorage.getItem('finalyze_user');
         const em = raw ? String(JSON.parse(raw)?.email || '').toLowerCase().trim() : '';
         setEmail(em);
-        const devEmail = (localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0] || '').toLowerCase();
-        setIsDev(!!em && (em === devEmail || isDeveloperEmail(em) || em.includes('dev')));
+        setIsDev(isDeveloperEmail(em));
       } catch { setIsDev(false); }
       try {
         const raw = localStorage.getItem('finalyze_clients');
@@ -232,8 +231,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         // Reflect the live identity immediately. Waiting for the 5-second
         // localStorage poll made a successful login look like it did nothing.
         setEmail(em);
-        const devEmail = (localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0] || '').toLowerCase();
-        setIsDev(!!em && (em === devEmail || isDeveloperEmail(em) || em.includes('dev')));
+        setIsDev(isDeveloperEmail(em));
         try {
           localStorage.setItem('finalyze_user', JSON.stringify({ email: em, uid: u.uid }));
           localStorage.setItem('finalyze_auth_user', JSON.stringify({ email: em, uid: u.uid }));
@@ -311,8 +309,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       // fires, but this removes any dependency on listener timing).
       setUser(u);
       setEmail(em);
-      const devEmail = (localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0] || '').toLowerCase();
-      setIsDev(em === devEmail || isDeveloperEmail(em) || em.includes('dev'));
+      setIsDev(isDeveloperEmail(em));
       try {
         localStorage.setItem('finalyze_user', JSON.stringify({ email: em, uid: u.uid }));
         localStorage.setItem('finalyze_auth_user', JSON.stringify({ email: em, uid: u.uid }));
@@ -523,7 +520,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // CLIENT: Poll radar status from developer (same as desktop) - only when not developer
   useEffect(() => {
     const userEmail = (user?.email || email || '').toLowerCase().trim();
-    const isDev = userEmail && (userEmail === 'albertaparks1t@gmail.com' || userEmail === 'bachasalman69@gmail.com' || userEmail === 'taybekraa@gmail.com' || userEmail === 'kraakraa109@gmail.com' || userEmail.includes('dev'));
+    const isDev = isDeveloperEmail(userEmail);
     if (isDev) return;
 
     const checkRadarStatus = async () => {
@@ -559,7 +556,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // CLIENT: Poll Firestore for shared signals from desktop (same as desktop client logic)
   useEffect(() => {
     const userEmail = (user?.email || email || '').toLowerCase().trim();
-    const isDev = userEmail && (userEmail === 'albertaparks1t@gmail.com' || userEmail === 'bachasalman69@gmail.com' || userEmail === 'taybekraa@gmail.com' || userEmail === 'kraakraa109@gmail.com' || userEmail.includes('dev'));
+    const isDev = isDeveloperEmail(userEmail);
     if (isDev) return;
 
     const pollFirestore = async () => {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider, OAuthProvider, signOut, signInAnonymously } from 'firebase/auth';
+import { onAuthStateChanged, User, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, OAuthProvider, signOut, signInAnonymously } from 'firebase/auth';
 import { auth, db } from './lib/firebase';
 import { doc, getDoc, collection, addDoc, getDocs, updateDoc, deleteDoc, serverTimestamp, where, setDoc, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
@@ -30,6 +30,7 @@ import { resolveConflicts } from './services/portfolioRiskService';
 import ApiKeyModal from './components/ApiKeyModal';
 import SubscriptionModal from './components/SubscriptionModal';
 import PaymentModal from './components/PaymentModal';
+import AuthModal from './components/AuthModal';
 import { getUnreadDevNotificationCount, getUnreadSiteRequestCount, fetchUserGrants, fetchUserGrantsForEmails, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from './services/paymentRequests';
 import ProfilePage from './components/ProfilePage';
 import TransactionsPage from './components/TransactionsPage';
@@ -71,6 +72,7 @@ import './styles/mobile_pt2.css';
 import { clientScopeKey, writeClientOwnKey, readClientOwnKey, clearClientOwnKey, rememberBuyerEmail, clientEmailsFor, readClientOwnKeyForEmails, applyRuntimeAnalysisKey, replaceClientOwnKey, forgetClientOwnKey, purgeOwnKeyForEmail, detectKeyProvider, setCurrentUserEmail, currentUserEmail } from './lib/clientScope';
 import { isGoogleOrMicrosoftEmail, AuthProviderId } from './lib/authPolicy';
 import { readProfileAsset } from './lib/profileAssets';
+import { rememberSavedEmail } from './lib/savedAccounts';
 
 
 export type PageType = 'main' | 'settings' | 'apiKey' | 'plans' | 'radar' | 'paymentSettings' | 'clientMonitor' | 'profile' | 'about' | 'suggestions' | 'ads' | 'siteStats' | 'trade' | 'manualAnalysis' | 'manualResults' | 'store' | 'storeSettings' | 'transactions' | 'prices' | 'myPlan';
@@ -131,6 +133,16 @@ export default function App() {
   }, []);
   const [freemiumDisabled, setFreemiumDisabled] = useState(() => localStorage.getItem('finalyze_freemium_disabled') === 'true');
   const [clientLoginRequired, setClientLoginRequired] = useState(() => localStorage.getItem('finalyze_client_login_required') === 'true');
+  // Guest sign-in surface: opened from the header, the sidebar, or the store's
+  // purchase gate. One modal lists saved emails + Google sign-in.
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authModalNotice, setAuthModalNotice] = useState<string | null>(null);
+  const openAuthModal = (notice?: string | null) => {
+    setLoginError(null);
+    setAuthModalNotice(notice || null);
+    setAuthModalOpen(true);
+  };
+  const closeAuthModal = () => setAuthModalOpen(false);
   const [needsApiKey, setNeedsApiKeyState] = useState<string | null>(() => {
     try { return localStorage.getItem('finalyze_needs_api_key'); } catch { return null; }
   });
@@ -2014,10 +2026,7 @@ const isDeveloperSession = () => {
         const email = savedUser.email || '';
 
         // Check if the user is a developer:
-        const activeDevEmail = localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0];
-        const isDeveloper = email === activeDevEmail ||
-                            isDeveloperEmail(email) ||
-                            email.includes('dev');
+        const isDeveloper = isDeveloperEmail(email);
 
         if (isDeveloper) {
           // Keep the developer session active forever — but do NOT return here:
@@ -2071,10 +2080,14 @@ const isDeveloperSession = () => {
       const liveEmail = (u?.email || '').toLowerCase().trim();
 
       // No usable live identity: either signed out, or an anonymous session
-      // was started by the verification flow. Never let an anonymous session
-      // erase a cached client; with no cache at all this is a guest.
+      // was started by the verification flow. Either way this is a guest — a
+      // leftover localStorage copy must never keep a signed-out visitor looking
+      // signed in, which is what made sign-in impossible after a logout.
       if (!liveEmail) {
-        if (cachedEmail) { setLoading(false); return; }
+        if (cachedEmail) {
+          localStorage.removeItem('finalyze_auth_user');
+          localStorage.removeItem('finalyze_auth_timestamp');
+        }
         setUser(null);
         setHasApiKey(false);
         setLoading(false);
@@ -2093,8 +2106,7 @@ const isDeveloperSession = () => {
       if (u) {
         setUser(u);
         const email = u.email || '';
-        const activeDevEmail = localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0];
-        const isDeveloper = email === activeDevEmail || isDeveloperEmail(email) || email.includes('dev');
+        const isDeveloper = isDeveloperEmail(email);
 
         // Fetch clients list for developer session
         if (isDeveloper) {
@@ -2144,6 +2156,33 @@ const isDeveloperSession = () => {
       setLoading(false);
     });
     return () => unsubscribe();
+  }, []);
+
+  // Complete a sign-in that came back from a full-page redirect (the fallback
+  // used when the browser blocks the popup). Without this, the redirect returns
+  // to the site and the visitor stays a guest forever.
+  useEffect(() => {
+    let cancelled = false;
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (cancelled) return;
+        const email = result?.user?.email || '';
+        if (!email) return;
+        rememberSavedEmail(email);
+        await processGoogleUser(email, result.user.displayName || undefined, result.user.photoURL || undefined);
+        setAuthModalOpen(false);
+        setAuthModalNotice(null);
+      })
+      .catch((e: any) => {
+        console.error('[AUTH] redirect result failed:', e);
+        if (cancelled) return;
+        if (e?.code === 'auth/unauthorized-domain') {
+          setLoginError(`حصر المنطقة (${window.location.hostname}) غير مصغّر على Firebase.`);
+        } else if (e?.code && e.code !== 'auth/no-auth-event') {
+          setLoginError(`تعذّر تسجيل الدخول: ${e.code}`);
+        }
+      });
+    return () => { cancelled = true; };
   }, []);
 
   // ── Automatic customer sign-in ───────────────────────────────────────────
@@ -2321,93 +2360,108 @@ const isDeveloperSession = () => {
   }, [loading]);
 
   const processGoogleUser = async (email: string, displayName?: string, photoURL?: string) => {
-    // Developer emails ΓåÆ sign in directly
-    if (isDeveloperEmail(email) || email.includes('dev')) {
-      localStorage.setItem('finalyze_auth_user', JSON.stringify({ uid: 'dev_' + email.replace(/[^a-zA-Z0-9]/g, ''), email, displayName: 'Developer', emailVerified: true }));
+    const normalizedEmail = (email || '').toLowerCase().trim();
+    if (!normalizedEmail) return;
+
+    // Developer accounts sign in directly (the developer allowlist only).
+    if (isDeveloperEmail(normalizedEmail)) {
+      const devUser = {
+        uid: 'dev_' + normalizedEmail.replace(/[^a-zA-Z0-9]/g, ''),
+        email: normalizedEmail,
+        displayName: 'Developer',
+        emailVerified: true,
+      };
+      localStorage.setItem('finalyze_auth_user', JSON.stringify(devUser));
       localStorage.setItem('finalyze_auth_timestamp', Date.now().toString());
-      setUser({ uid: 'dev_' + email.replace(/[^a-zA-Z0-9]/g, ''), email, displayName: 'Developer', emailVerified: true } as User);
+      setUser(devUser as User);
       setHasApiKey(true);
       persistNeedsApiKey(null);
       fetchClients();
       return;
     }
 
+    // Read this client's OWN record by its deterministic id — a client is not
+    // allowed to run a collection query, and must never see another row. A
+    // missing document is denied by the rules, so a failure here must NEVER
+    // abort the sign-in; it only means "no record yet".
+    let existing: Record<string, any> | null = null;
     try {
-      // Site sign-in is unrestricted: direct Google login, exactly as before.
-      // The Google/Microsoft restriction applies ONLY to buying a paid plan.
-      // Read this client's OWN record by its deterministic id — a client is not
-      // allowed to run a collection query, and must never see another row.
-      const existingSnap = await getDoc(doc(db, 'clients', clientDocId(email)));
-      const existing = existingSnap.exists() ? existingSnap.data() : null;
-      // Bind this Google/Microsoft login to the payment email if it differs, so
-      // the plan, its key and My Plan resolve to the same identity from now on.
-      rememberBuyerEmail(email, email);
+      const existingSnap = await getDoc(doc(db, 'clients', clientDocId(normalizedEmail)));
+      existing = existingSnap.exists() ? (existingSnap.data() as Record<string, any>) : null;
+    } catch (e) {
+      console.warn('[AUTH] client record lookup skipped:', e);
+    }
 
-      if (existing?.groqApiKey && !hasAnyStoredKey()) {
-        // Restore THIS client's own key, scoped to their email. Writing it into
-        // the shared slots would hand one customer's key to the next.
-        writeClientOwnKey(existing.groqApiKey, email);
+    if (isBannedEmail(normalizedEmail) || existing?.status === 'banned') {
+      setLoginError(lang === 'ar' ? 'حسابك محظور. لا يمكنك تسجيل الدخول.' : 'This account is banned. You cannot log in.');
+      setUser(null);
+      setHasApiKey(false);
+      localStorage.removeItem('finalyze_auth_user');
+      localStorage.removeItem('finalyze_auth_timestamp');
+      try { await signOut(auth); } catch {}
+      return;
+    }
+
+    // Set the session FIRST: whatever happens with the Firestore row below, the
+    // visitor is signed in and never dropped back to the guest screen.
+    const sessionUser = {
+      uid: normalizedEmail,
+      email: normalizedEmail,
+      displayName: displayName || 'Client',
+      photoURL: photoURL || '',
+      emailVerified: true,
+    };
+    localStorage.setItem('finalyze_auth_user', JSON.stringify(sessionUser));
+    localStorage.setItem('finalyze_auth_timestamp', Date.now().toString());
+    setUser(sessionUser as User);
+    setHasApiKey(hasAnyStoredKey());
+    persistNeedsApiKey(null);
+
+    // Bind this login to the payment email so the plan and its key resolve to
+    // the same identity from now on.
+    rememberBuyerEmail(normalizedEmail, normalizedEmail);
+
+    if (existing?.groqApiKey && !hasAnyStoredKey()) {
+      // Restore THIS client's own key, scoped to their email. Writing it into
+      // the shared slots would hand one customer's key to the next.
+      writeClientOwnKey(existing.groqApiKey, normalizedEmail);
+    }
+
+    const clientEmails: any[] = JSON.parse(localStorage.getItem('finalyze_client_emails') || '[]');
+    if (!clientEmails.some((c: any) => (c?.email || '').toLowerCase() === normalizedEmail)) {
+      clientEmails.push({ email: normalizedEmail, registeredAt: new Date().toISOString(), uid: normalizedEmail });
+      localStorage.setItem('finalyze_client_emails', JSON.stringify(clientEmails));
+    }
+
+    try {
+      // Deterministic id + get, never a collection query: a client may only
+      // touch their own record. plan/planExpiry are NOT written on login —
+      // only the developer (or a payment) sets them, so signing in can never
+      // wipe a running plan.
+      const cid = clientDocId(normalizedEmail);
+      if (existing) {
+        await setDoc(doc(db, 'clients', cid), { status: 'verified' }, { merge: true });
+      } else {
+        await setDoc(doc(db, 'clients', cid), {
+          email: normalizedEmail, status: 'verified', plan: 'free', planExpiry: null,
+          registeredAt: serverTimestamp(), rank: 0,
+        }, { merge: true });
       }
+    } catch (e) { console.warn('Firestore save on login failed:', e); }
 
-      if (isBannedEmail(email) || existing?.status === 'banned') {
-        setLoginError(lang === 'ar' ? '\u062d\u0635\u0631 \u0627\u0644\u062d\u0633\u0627\u0628 \u0645\u062d\u0638\u0648\u0638. \u0644\u0627 \u064a\u0645\u0643\u0646\u0643 \u062a\u0633\u062c\u064a\u0644 \u0627\u0644\u062f\u062e\u0648\u0644.' : 'This account is banned. You cannot log in.');
-        setRedirecting(false);
-        return;
-      }
-
-      // Set session via localStorage FIRST
-      localStorage.setItem('finalyze_auth_user', JSON.stringify({ uid: email, email, displayName: displayName || 'Client', photoURL: photoURL || '', emailVerified: true }));
-      localStorage.setItem('finalyze_auth_timestamp', Date.now().toString());
-
-      // Set user in state
-      setUser({ uid: email, email, displayName: displayName || 'Client', photoURL: photoURL || '', emailVerified: true } as User);
-      setHasApiKey(hasAnyStoredKey());
-      persistNeedsApiKey(null);
-
-      const clientEmails: any[] = JSON.parse(localStorage.getItem('finalyze_client_emails') || '[]');
-      if (!clientEmails.some((c: any) => c.email === email)) {
-        clientEmails.push({ email, registeredAt: new Date().toISOString(), uid: email });
-        localStorage.setItem('finalyze_client_emails', JSON.stringify(clientEmails));
-      }
-
-      try {
-        // Deterministic id + get, never a collection query: a client may only
-        // touch their own record. plan/planExpiry are NOT written on login —
-        // only the developer (or a payment) sets them, so signing in can never
-        // wipe a running plan.
-        const cid = clientDocId(email);
-        const existing = await getDoc(doc(db, 'clients', cid));
-        if (existing.exists()) {
-          await setDoc(doc(db, 'clients', cid), { status: 'verified' }, { merge: true });
-        } else {
-          await setDoc(doc(db, 'clients', cid), {
-            email, status: 'verified', plan: 'free', planExpiry: null,
-            registeredAt: serverTimestamp(), rank: 0,
-          });
-        }
-      } catch (e) { console.warn('Firestore save on login failed:', e); }
-
-      const localClients: any[] = JSON.parse(localStorage.getItem('finalyze_clients') || '[]');
-      if (!localClients.some((c: any) => c.email?.toLowerCase() === email.toLowerCase())) {
-        localClients.push({
-          id: 'local_' + Date.now(),
-          email,
-          status: 'verified',
-          plan: 'free',
-          planExpiry: null,
-          registeredAt: new Date().toISOString(),
-          rank: 0,
-        });
-        localStorage.setItem('finalyze_clients', JSON.stringify(localClients));
-        fetchClients();
-      }
-    } catch (innerErr) {
-      console.error('Non-critical error during client setup:', innerErr);
-      localStorage.setItem('finalyze_auth_user', JSON.stringify({ uid: email, email, displayName: displayName || 'Client', photoURL: photoURL || '', emailVerified: true }));
-      localStorage.setItem('finalyze_auth_timestamp', Date.now().toString());
-      setUser({ uid: email, email, displayName: displayName || 'Client', photoURL: photoURL || '', emailVerified: true } as User);
-      setHasApiKey(hasAnyStoredKey());
-      persistNeedsApiKey(null);
+    const localClients: any[] = JSON.parse(localStorage.getItem('finalyze_clients') || '[]');
+    if (!localClients.some((c: any) => (c?.email || '').toLowerCase() === normalizedEmail)) {
+      localClients.push({
+        id: 'local_' + Date.now(),
+        email: normalizedEmail,
+        status: 'verified',
+        plan: 'free',
+        planExpiry: null,
+        registeredAt: new Date().toISOString(),
+        rank: 0,
+      });
+      localStorage.setItem('finalyze_clients', JSON.stringify(localClients));
+      fetchClients();
     }
   };
 
@@ -2649,35 +2703,64 @@ const started = planGrants
     return () => { stopped = true; clearInterval(interval); };
   }, [user?.email]);
 
-  const handleLogin = async (which: AuthProviderId = 'google') => {
-    setActivePage('main');
-    setPaymentPlan(null);
-    setAnalysisResults(null);
+  const handleLogin = async (which: AuthProviderId = 'google', emailHint?: string) => {
+    // This is also wired straight to onClick in a couple of places, so a stray
+    // click event must never be mistaken for a provider id.
+    const providerId: AuthProviderId = which === 'microsoft' ? 'microsoft' : 'google';
     setIsSidebarOpen(false);
     setLoginError(null);
     setManualAuthUrl(null);
     setRedirecting(true);
-    setRedirectingProvider(which);
+    setRedirectingProvider(providerId);
     try {
-      const provider = which === 'microsoft' ? new OAuthProvider('microsoft.com') : new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, provider);
+      const provider = providerId === 'microsoft' ? new OAuthProvider('microsoft.com') : new GoogleAuthProvider();
+      const params: Record<string, string> = { prompt: 'select_account' };
+      if (emailHint) params.login_hint = emailHint;
+      provider.setCustomParameters(params);
+
+      let result;
+      try {
+        result = await signInWithPopup(auth, provider);
+      } catch (popupError: any) {
+        const code = String(popupError?.code || '');
+        // Popups are blocked in some browsers and in-app webviews. Falling back
+        // to a full-page redirect is what prevents a silent "still a guest".
+        if (
+          code === 'auth/popup-blocked' ||
+          code === 'auth/operation-not-supported-in-this-environment' ||
+          code === 'auth/cancelled-popup-request' ||
+          code === 'auth/web-storage-unsupported'
+        ) {
+          await signInWithRedirect(auth, provider);
+          return;
+        }
+        throw popupError;
+      }
+
       const email = result?.user?.email || result?.user?.providerData?.[0]?.email || '';
       if (!email) { throw new Error('no_email'); }
+      rememberSavedEmail(email);
       // Site sign-in is direct and unrestricted. The Google/Microsoft rule is
       // enforced only when a paid plan is purchased (see PaymentModal).
       await processGoogleUser(email, result.user.displayName || undefined, result.user.photoURL || undefined);
+      setAuthModalOpen(false);
+      setAuthModalNotice(null);
     } catch (error: any) {
       console.error("=== OAuth sign-in ERROR ===", error);
       if (error.code === 'auth/popup-closed-by-user') {
         setLoginError('\u0644\u0642\u062f \u0623\u063a\u0644\u0642\u062a \u0646\u0627\u0641\u0630\u0629 \u062a\u0633\u062c\u064a\u0644 \u0627\u0644\u062f\u062e\u0648\u0644. \u062a\u0639\u064a\u062f \u0644\u0644\u0645\u062d\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.');
       } else if (error.code === 'auth/unauthorized-domain') {
         setLoginError(`\u062d\u0635\u0631 \u0627\u0644\u0645\u0646\u0637\u0642\u0629 (${window.location.hostname}) \u063a\u064a\u0631 \u0645\u0635\u063a\u0651\u064a\u0631 \u0639\u0644\u0649 Firebase.`);
+      } else if (error.code === 'auth/popup-blocked' || error.code === 'auth/blocked-by-popup-blocker') {
+        setLoginError('المتصفح منع نافذة تسجيل الدخول. اسمح بالنوافذ المنبثقة أو أعد المحاولة.');
       } else if (error.message === 'no_email') {
         setLoginError('\u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u062d\u0635\u0648\u0644 \u0639\u0644\u0649 \u0627\u0644\u0628\u0631\u064a\u062f \u0627\u0644\u0625\u0644\u0643\u062a\u0631\u0648\u0646\u064a \u0627\u0644\u0645\u0631\u0636\u064a \u0628\u0647. \u062a\u0639\u062f \u0627\u0644\u0645\u062d\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.');
       } else {
-        setLoginError(`Sign-in error: ${error.code || error.message}`);
+        setLoginError(`تعذّر تسجيل الدخول: ${error.code || error.message}`);
       }
+      // Never leave the visitor staring at a button that "does nothing": if the
+      // sign-in surface is not on screen, open it so the error is visible.
+      if (!clientLoginRequired) setAuthModalOpen(true);
     } finally {
       setRedirecting(false);
       setRedirectingProvider(null);
@@ -2685,10 +2768,9 @@ const started = planGrants
   };
 
   const handleLogout = async () => {
-    // Await sign-out BEFORE navigating: firing it without waiting let the
-    // Firebase session survive the reload, so the next login inherited the
-    // previous account.
-    try { await signOut(auth); } catch {}
+    // Clear the cached identity BEFORE signing out. If the cache is left behind,
+    // the next page load restores it and the visitor appears signed in again —
+    // or, worse, gets stuck as a guest who can never sign in.
     localStorage.removeItem('finalyze_auth_user');
     localStorage.removeItem('finalyze_user');
     localStorage.removeItem('finalyze_auth_timestamp');
@@ -2701,8 +2783,16 @@ const started = planGrants
     localStorage.removeItem('top_signals_persistent');
     localStorage.removeItem('finalyze_client_alerts');
     localStorage.removeItem('active_subscription');
+    // Await sign-out BEFORE navigating: firing it without waiting let the
+    // Firebase session survive the reload, so the next login inherited the
+    // previous account.
+    try { await signOut(auth); } catch {}
     sessionStorage.clear();
-    window.location.href = '/';
+    setUser(null);
+    setHasApiKey(false);
+    setAuthModalOpen(false);
+    // BASE_URL keeps the reload correct on sub-path deploys.
+    window.location.replace((import.meta as any).env?.BASE_URL || '/');
   };
 
   const t = translations[lang];
@@ -2780,11 +2870,19 @@ const started = planGrants
         )}
       </AnimatePresence>
 
-      {/* CLIENT PLAN: no gate and no key. The developer's approval releases the
-          plan immediately and analysis runs on the shared key pool. */}
+      {/* One Google-only sign-in surface for guests (header, sidebar, store). */}
+      <AuthModal
+        open={authModalOpen}
+        lang={lang}
+        onClose={closeAuthModal}
+        onLogin={handleLogin}
+        loginError={loginError}
+        redirecting={redirecting}
+        notice={authModalNotice}
+      />
 
       <Header 
-        user={user} onLogin={handleLogin} onLogout={handleLogout} 
+        user={user} onLogin={() => openAuthModal()} onLogout={handleLogout} 
         isDark={isDark} toggleTheme={() => setIsDark(!isDark)}
         lang={lang} onLangChange={setLang}
         showBack={!!analysisResults} onBack={() => { setAnalysisResults(null); setAnalysisError(null); goBack(); }}
@@ -2835,7 +2933,7 @@ const started = planGrants
             onPreview={isDeveloperSession() ? (device) => setPreviewDevice(device) : undefined}
             user={user}
             customAvatar={readProfileAsset('avatar', user?.email || '', isDeveloperSession())}
-            onLogin={handleLogin}
+            onLogin={() => openAuthModal()}
             onLogout={handleLogout}
             planClient={isPlanClient}
             onStartClientAutoAnalysis={() => {
@@ -2925,7 +3023,16 @@ const started = planGrants
                 key={user?.uid || 'no-session'}
                 isOpen={true}
                 onClose={goBack}
-                onSelectPlan={(amount, label, durationDays) => { navigateTo('plans'); setPaymentPlan({ amount, label, durationDays }); }}
+                onSelectPlan={(amount, label, durationDays) => {
+                  if (!user?.email) {
+                    openAuthModal(isAr
+                      ? 'للحصول على خطة أو منتج، يرجى تسجيل في الموقع أو تسجيل الدخول إذا كان لديك حساب سابق.'
+                      : 'To get a plan or a product, please sign up on the site or sign in if you already have an account.');
+                    return;
+                  }
+                  navigateTo('plans');
+                  setPaymentPlan({ amount, label, durationDays });
+                }}
                 asPage
               />
             )}
@@ -3185,6 +3292,17 @@ const started = planGrants
                 onCustomerUseFree={() => setPaidMode(false)}
                 onCustomerUsePaid={() => { setPaidMode(true); }}
                 onCustomerDeletePlan={() => { deleteClientPlan(); }}
+                onRequireAuth={(kind) =>
+                  openAuthModal(
+                    kind === 'plan'
+                      ? (isAr
+                        ? 'للحصول على خطة أو منتج، يرجى تسجيل في الموقع أو تسجيل الدخول إذا كان لديك حساب سابق.'
+                        : 'To get a plan or a product, please sign up on the site or sign in if you already have an account.')
+                      : (isAr
+                        ? 'للحصول على منتج أو خطة، يرجى تسجيل في الموقع أو تسجيل الدخول إذا كان لديك حساب سابق.'
+                        : 'To get a product or a plan, please sign up on the site or sign in if you already have an account.'),
+                  )
+                }
               />
             )}
 

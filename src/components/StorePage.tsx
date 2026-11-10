@@ -21,6 +21,8 @@ interface StorePageProps {
   onCustomerUseFree?: () => void;
   onCustomerUsePaid?: () => void;
   onCustomerDeletePlan?: () => void;
+  /** A guest tried to buy/download: open the sign-in / sign-up modal. */
+  onRequireAuth?: (kind: 'plan' | 'product') => void;
 }
 
 const MAX_DESC_LEN = 55;
@@ -48,7 +50,7 @@ function catLabel(isAr: boolean, key: StoreCategory): string {
   return isAr ? (c?.labelAr || '') : (c?.labelEn || '');
 }
 
-export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, userName, userEmail, customerPlan, planKeyEntered = false, paidMode = true, onCustomerEnterKey, onCustomerUseFree, onCustomerUsePaid, onCustomerDeletePlan }: StorePageProps) {
+export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, userName, userEmail, customerPlan, planKeyEntered = false, paidMode = true, onCustomerEnterKey, onCustomerUseFree, onCustomerUsePaid, onCustomerDeletePlan, onRequireAuth }: StorePageProps) {
   const isAr = lang === 'ar';
   const [bots, setBots] = useState<StoreBot[]>([]);
   const [plans, setPlans] = useState<StorePlan[]>([]);
@@ -66,6 +68,10 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
   const [reqDone, setReqDone] = useState(false);
   const [reqErr, setReqErr] = useState('');
   const [confirmDeletePlan, setConfirmDeletePlan] = useState(false);
+  // Guest gate: a visitor with no registered account may browse the store, but
+  // buying/downloading anything opens this clear prompt instead of a 3-second
+  // toast that was easy to miss.
+  const [authGate, setAuthGate] = useState<'plan' | 'product' | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNowTick(Date.now()), 1000);
@@ -114,8 +120,7 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
     // No product (free or paid) may be obtained unless the visitor is signed in
     // with a registered account. A guest stays on the free plan only.
     if (!userEmail) {
-      setDownloadMsg({ botId: bot.id || '', text: isAr ? '⚠ سجّل دخولك أولاً لتحميل/شراء أي منتج' : '⚠ Sign in first to download or buy any product' });
-      setTimeout(() => setDownloadMsg(null), 3000);
+      setAuthGate('product');
       return;
     }
     if (isFree(bot)) {
@@ -129,8 +134,7 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
 
   const handleGrantedDownload = (bot: StoreBot) => {
     if (!userEmail) {
-      setDownloadMsg({ botId: bot.id || '', text: isAr ? '⚠ سجّل دخولك أولاً لتحميل أي منتج' : '⚠ Sign in first to download any product' });
-      setTimeout(() => setDownloadMsg(null), 3000);
+      setAuthGate('product');
       return;
     }
     setDownloadMsg(null);
@@ -145,6 +149,44 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
     if (activeType) { setActiveType(null); return; }
     if (activeCat) { setActiveCat(null); return; }
   };
+
+  // The guest gate. Bold, explicit, and one tap away from the Google sign-in
+  // modal — this is what a visitor sees when they try to buy or download.
+  const authGateModal = authGate ? (
+    <div className="fixed inset-0 z-[130] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-gray-900 border-2 border-amber-400/50 rounded-3xl shadow-2xl p-6" dir={isAr ? 'rtl' : 'ltr'}>
+        <div className="flex flex-col items-center text-center">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-400/40 flex items-center justify-center mb-4">
+            {authGate === 'plan' ? <Crown size={26} className="text-amber-400" /> : <Package size={26} className="text-amber-400" />}
+          </div>
+          <h3 className="text-lg font-black text-white leading-snug">
+            {isAr ? 'خطوة واحدة قبل المتابعة' : 'One step before you continue'}
+          </h3>
+          <p className="text-sm font-black text-amber-200 mt-3 leading-relaxed">
+            {isAr
+              ? 'للحصول على خطة أو منتج، يرجى تسجيل في الموقع أو تسجيل الدخول إذا كان لديك حساب سابق.'
+              : 'To get a plan or a product, please sign up on the site or sign in if you already have an account.'}
+          </p>
+          <button
+            onClick={() => {
+              const kind = authGate;
+              setAuthGate(null);
+              onRequireAuth?.(kind);
+            }}
+            className="mt-6 w-full py-4 rounded-2xl bg-gradient-to-r from-amber-400 to-[#F59E0B] text-black font-black text-base uppercase tracking-wide shadow-lg hover:opacity-90 active:scale-[0.99] transition-all"
+          >
+            {isAr ? 'سجّل أو سجّل دخول' : 'Sign up or sign in'}
+          </button>
+          <button
+            onClick={() => setAuthGate(null)}
+            className="mt-2 w-full py-3 rounded-2xl bg-white/5 border border-white/10 text-slate-300 font-black text-xs uppercase tracking-wider hover:bg-white/10 transition-all"
+          >
+            {isAr ? 'لاحقاً' : 'Later'}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   const activePlans = plans.filter((p) => p.active);
 
@@ -321,8 +363,7 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
               <button
                 onClick={() => {
                   if (!userEmail) {
-                    setDownloadMsg({ botId: '', text: isAr ? '⚠ سجّل دخولك أولاً لشراء أي خطة' : '⚠ Sign in first to buy any plan' });
-                    setTimeout(() => setDownloadMsg(null), 3000);
+                    setAuthGate('plan');
                     return;
                   }
                   onBuyPlan?.(plan);
@@ -607,7 +648,7 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
     </div>
   );
 
-  if (showRequest) return <div className="w-full px-2 pb-10">{requestPage}</div>;
+  if (showRequest) return <div className="w-full px-2 pb-10">{requestPage}{authGateModal}</div>;
 
   const categoryPage = () => {
     const types = typesForCategory(activeCat as StoreCategory);
@@ -823,6 +864,7 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
           </p>
         </div>
       )}
+      {authGateModal}
     </div>
   );
 }

@@ -1265,9 +1265,7 @@ function getCurrentUserEmail(): string {
 }
 
 function isDevEmail(email: string): boolean {
-  if (!email) return false;
-  const activeDevEmail = localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0];
-  return email === activeDevEmail || isDeveloperEmail(email) || email.includes('dev');
+  return isDeveloperEmail(email);
 }
 
 export function AdSlot({ position, lang }: { position: Ad['position']; lang: Language }) {

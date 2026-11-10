@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react';
-import { isDeveloperEmail, DEVELOPER_EMAILS } from './clientIds';
+import { isDeveloperEmail } from './clientIds';
 import { Language } from './i18n';
 
 export type MobileMode = 'developer' | 'client' | 'unknown';
 
 /**
  * Desktop parity (App.tsx processGoogleUser + isDeveloperSession):
- * - developer = email is in DEVELOPER_EMAILS, OR equals the stored dev email,
- *   OR contains 'dev'. Everyone else is a CLIENT.
+ * - developer = email is one of the developer accounts in DEVELOPER_EMAILS.
+ *   Everyone else is a CLIENT.
  * - unknown = no signed-in email at all (client home shows, login required
  *   only for dev-only sections).
  */
@@ -18,8 +18,7 @@ export function detectMobileMode(): { mode: MobileMode; email: string; uid: stri
     const email = String(o.email || '').toLowerCase().trim();
     const uid = String(o.uid || 'anonymous');
     if (!email) return { mode: 'unknown', email: '', uid };
-    const devEmail = (localStorage.getItem('finalyze_dev_email') || DEVELOPER_EMAILS[0] || '').toLowerCase();
-    const dev = email === devEmail || isDeveloperEmail(email) || email.includes('dev');
+    const dev = isDeveloperEmail(email);
     return { mode: dev ? 'developer' : 'client', email, uid };
   } catch {
     return { mode: 'unknown', email: '', uid: 'anonymous' };
