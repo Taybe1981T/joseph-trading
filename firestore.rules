@@ -76,9 +76,12 @@ service cloud.firestore {
       allow get: if isDeveloper()
         || (isSignedIn() && resource.data.buyerEmail is string
             && resource.data.buyerEmail.lower() == authEmail());
+      // `list` compares the raw field (not .lower()) so the client's
+      // where('buyerEmail','==',email) query stays provable. Every writer
+      // stores the address already lowercased.
       allow list: if isDeveloper()
         || (isSignedIn() && resource.data.buyerEmail is string
-            && resource.data.buyerEmail.lower() == authEmail());
+            && resource.data.buyerEmail == authEmail());
       allow create: if isDeveloper()
         || (isSignedIn() && request.resource.data.buyerEmail is string
             && request.resource.data.buyerEmail.lower() == authEmail());
@@ -145,9 +148,11 @@ service cloud.firestore {
     // stays open. Only the developer can decide (update/delete of others).
     match /payment_requests/{requestId} {
       allow get: if true;
+      // Raw equality for `list` so the Transactions page query
+      // where('buyerEmail','==',email) is provable (writers store lowercase).
       allow list: if isDeveloper()
         || (isSignedIn() && resource.data.buyerEmail is string
-            && resource.data.buyerEmail.lower() == authEmail());
+            && resource.data.buyerEmail == authEmail());
       allow create: if request.resource.data.buyerEmail is string;
       allow update: if isDeveloper();
       allow delete: if isDeveloper()
