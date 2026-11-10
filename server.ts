@@ -31,7 +31,7 @@ async function startServer() {
 
   // API Route: Health check
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", version: "4.0-Institutional", node: process.version });
+    res.json({ status: "ok", version: "4.0-Institutional" });
   });
 
   const distPath = path.resolve(process.cwd(), "dist");

@@ -24,8 +24,8 @@ app.get("/api/health", (req, res) => {
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: 'taybemohamed10@gmail.com',
-    pass: process.env.EMAIL_APP_PASSWORD || 'chxq jkcg wcia isgi',
+    user: process.env.EMAIL_USER || 'taybemohamed10@gmail.com',
+    pass: process.env.EMAIL_APP_PASSWORD || '',
   },
 });
 
