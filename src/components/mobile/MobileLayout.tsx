@@ -1108,7 +1108,19 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} />}
         {children}
       </div>
-      <MobileBottomNav activeTab={tab} onTabChange={goTab} isDeveloper={isDev} hasPlan={canUseAnalysis} lang={lang} />
+      <MobileBottomNav
+        activeTab={tab}
+        onTabChange={(t) => {
+          // The reasons screen is a full-page overlay on a phone. Choosing any
+          // other tab must close it, otherwise the overlay stays on top and the
+          // client cannot move between sections.
+          setDetail(null);
+          goTab(t);
+        }}
+        isDeveloper={isDev}
+        hasPlan={canUseAnalysis}
+        lang={lang}
+      />
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
       {detail && (isDev
         ? <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />

@@ -11,30 +11,10 @@ import { createSession, updateSession, completeSession, cancelSession, getCached
 import { rememberBuyerEmail } from '../lib/clientScope';
 import { ensureClientIdentity } from '../services/clientIdentity';
 import { isGoogleOrMicrosoftEmail } from '../lib/authPolicy';
+import { loadPaymentWaitHours, readCachedWaitHours, savePaymentWaitHours } from '../services/paymentWait';
 
 const DEFAULT_PRICES = { weekly: 2, monthly: 6, yearly: 60 };
 const SUBSCRIPTION_STORAGE_KEY = 'subscription_prices';
-// The wait period is set in HOURS (a payment review is never a "30 minutes"
-// problem). The old minutes value is migrated once so nobody loses their setting.
-const TIMER_STORAGE_KEY = 'payment_timer_hours';
-const LEGACY_TIMER_KEY = 'payment_timer_minutes';
-
-function loadTimerHours(): number {
-  try {
-    const saved = localStorage.getItem(TIMER_STORAGE_KEY);
-    const hours = saved ? parseInt(saved) : NaN;
-    if (Number.isFinite(hours) && hours > 0) return hours;
-    const legacy = localStorage.getItem(LEGACY_TIMER_KEY);
-    const mins = legacy ? parseInt(legacy) : NaN;
-    if (Number.isFinite(mins) && mins > 0) {
-      const migrated = Math.max(1, Math.round(mins / 60));
-      localStorage.setItem(TIMER_STORAGE_KEY, String(migrated));
-      localStorage.removeItem(LEGACY_TIMER_KEY);
-      return migrated;
-    }
-  } catch {}
-  return 1;
-}
 
 interface PaymentModalProps {
   isOpen: boolean;
@@ -71,26 +51,32 @@ export default function PaymentModal({ isOpen, onClose, planLabel, amount, asPag
   const [copiedAmountId, setCopiedAmountId] = useState<string | null>(null);
   const [prices, setPrices] = useState<Record<string, { usd: number }>>({});
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
-  const [timerHours, setTimerHours] = useState(loadTimerHours);
+  const [timerHours, setTimerHours] = useState(readCachedWaitHours);
   const timerMinutes = timerHours * 60;
   const [timerSeconds, setTimerSeconds] = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [editTimerHours, setEditTimerHours] = useState(timerHours);
-  // The wait period is edited in Store Settings and stored once for the whole
-  // site. Read it again while the modal is open (and on the browser's storage
-  // event, which fires when the setting is saved in another tab) so the value
-  // shown here is never a stale copy from mount time.
+  // The wait period is edited in Store Settings and stored ONCE for the whole
+  // site (shared_settings/payment_timer). The shared value is loaded every time
+  // the modal opens, so desktop and phone always show the same number, and the
+  // browser's storage event keeps other open tabs in sync.
   useEffect(() => {
     if (!isOpen) return;
-    const sync = () => {
-      const h = loadTimerHours();
+    let cancelled = false;
+    const apply = (h: number) => {
+      if (cancelled) return;
       setTimerHours((prev) => (prev === h ? prev : h));
       setEditTimerHours((prev) => (prev === h ? prev : h));
     };
-    sync();
-    window.addEventListener('storage', sync);
-    return () => window.removeEventListener('storage', sync);
+    const syncLocal = () => apply(readCachedWaitHours());
+    syncLocal();
+    void loadPaymentWaitHours().then(apply).catch(() => {});
+    window.addEventListener('storage', syncLocal);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('storage', syncLocal);
+    };
   }, [isOpen]);
   const [requestNo, setRequestNo] = useState<number | null>(null);
   const [requestStatus, setRequestStatus] = useState<'idle' | 'pending' | 'approved' | 'rejected'>('idle');
@@ -881,7 +867,7 @@ export default function PaymentModal({ isOpen, onClose, planLabel, amount, asPag
             />
             <span className="text-sm text-slate-400">{isAr ? 'ساعة' : 'hours'}</span>
             <button
-              onClick={() => { setTimerHours(editTimerHours); localStorage.setItem(TIMER_STORAGE_KEY, String(editTimerHours)); localStorage.removeItem(LEGACY_TIMER_KEY); }}
+              onClick={() => { setTimerHours(editTimerHours); void savePaymentWaitHours(editTimerHours).catch(() => {}); }}
               className="px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 transition-all text-xs font-black"
             >
               {isAr ? 'حفظ المهلة' : 'Save Timer'}

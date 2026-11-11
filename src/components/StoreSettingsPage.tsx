@@ -4,6 +4,7 @@ import { ArrowLeft, Plus, Trash2, Check, Upload, FileText, X, ImagePlus, Pencil,
 import { StoreBot, StoreCategory, STORE_CATEGORIES, typesForCategory, fetchStoreBots, addStoreBot, updateStoreBot, deleteStoreBot, formatFileSize, resizeImageToStandard } from '../services/storeService';
 import { loadPaymentSettings, savePaymentSettings, PaymentAddress, PAYMENT_METHODS } from '../services/paymentSettings';
 import { StorePlan, fallbackPlans, fetchPlans, addStorePlan, updateStorePlan, deleteStorePlan, planLabel, toWesternDigits, DURATION_OPTIONS, durationOptionFor, durationLabel, planNameForDuration, DEFAULT_FEATURES_EN, DEFAULT_FEATURES_AR } from '../services/storePlans';
+import { loadPaymentWaitHours, readCachedWaitHours, savePaymentWaitHours } from '../services/paymentWait';
 
 interface StoreSettingsPageProps {
   lang: 'ar' | 'en';
@@ -16,27 +17,6 @@ const MAX_FILE_BYTES = 300 * 1024;
 const MAX_DOC_BYTES = 900 * 1024;
 const DEFAULT_PRICES = { weekly: 2, monthly: 6, yearly: 60 };
 const SUBSCRIPTION_STORAGE_KEY = 'subscription_prices';
-// The wait period is set in HOURS; a value saved in minutes by an older build is
-// migrated once (30 min -> 1 h) so the setting is never lost.
-const TIMER_STORAGE_KEY = 'payment_timer_hours';
-const LEGACY_TIMER_KEY = 'payment_timer_minutes';
-
-function loadTimerHours(): number {
-  try {
-    const saved = localStorage.getItem(TIMER_STORAGE_KEY);
-    const hours = saved ? parseInt(toWesternDigits(saved)) : NaN;
-    if (Number.isFinite(hours) && hours > 0) return hours;
-    const legacy = localStorage.getItem(LEGACY_TIMER_KEY);
-    const mins = legacy ? parseInt(toWesternDigits(legacy)) : NaN;
-    if (Number.isFinite(mins) && mins > 0) {
-      const migrated = Math.max(1, Math.round(mins / 60));
-      localStorage.setItem(TIMER_STORAGE_KEY, String(migrated));
-      localStorage.removeItem(LEGACY_TIMER_KEY);
-      return migrated;
-    }
-  } catch {}
-  return 1;
-}
 
 export default function StoreSettingsPage({ lang, onBack, freemiumDisabled: externalFreemium, onFreemiumToggle }: StoreSettingsPageProps) {
   const isAr = lang === 'ar';
@@ -46,7 +26,7 @@ export default function StoreSettingsPage({ lang, onBack, freemiumDisabled: exte
     try { const s = localStorage.getItem(SUBSCRIPTION_STORAGE_KEY); return s ? JSON.parse(toWesternDigits(s)) : DEFAULT_PRICES; }
     catch { return DEFAULT_PRICES; }
   });
-  const [editTimer, setEditTimer] = useState(loadTimerHours);
+  const [editTimer, setEditTimer] = useState(readCachedWaitHours);
   const [bots, setBots] = useState<StoreBot[]>([]);
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('');
@@ -403,14 +383,31 @@ export default function StoreSettingsPage({ lang, onBack, freemiumDisabled: exte
     setTimeout(() => setSuccess(''), 3000);
   };
 
-  const saveTimer = () => {
+  const saveTimer = async () => {
     const hours = Math.max(1, Number(toWesternDigits(editTimer)) || 1);
     setEditTimer(hours);
-    localStorage.setItem(TIMER_STORAGE_KEY, String(hours));
-    localStorage.removeItem(LEGACY_TIMER_KEY);
-    setSuccess(isAr ? `✅ تم حفظ مدة المهلة: ${hours} ساعة` : `✅ Wait period saved: ${hours} hour${hours > 1 ? 's' : ''}`);
+    try {
+      const saved = await savePaymentWaitHours(hours);
+      setEditTimer(saved);
+      setSuccess(isAr ? `✅ تم حفظ مدة المهلة: ${saved} ساعة` : `✅ Wait period saved: ${saved} hour${saved > 1 ? 's' : ''}`);
+    } catch {
+      setError(isAr ? 'تعذّر حفظ المهلة — تأكد من تسجيل الدخول كمطوّر' : 'Could not save the wait period — sign in as the developer');
+      setTimeout(() => setError(''), 4000);
+      return;
+    }
     setTimeout(() => setSuccess(''), 3000);
   };
+
+  // The wait period is one shared setting for the whole site. Load the shared
+  // value when this developer screen opens (and seed it once if it never
+  // existed) so desktop and phone clients can never see a different number.
+  useEffect(() => {
+    let alive = true;
+    void loadPaymentWaitHours({ seedIfMissing: true })
+      .then((h) => { if (alive) setEditTimer(h); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   // The store is always selling: plans stay visible to clients and the paid
   // restrictions stay active. Any leftover "full access" flag from an earlier

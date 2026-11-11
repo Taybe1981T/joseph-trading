@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowLeft, TrendingUp, TrendingDown, Minus, ShieldCheck, ShieldAlert, ShieldX, CheckCircle, XCircle, AlertTriangle, BarChart3, Target, Zap, CandlestickChart, Clipboard, Check, Waves } from 'lucide-react';
+import { ArrowLeft, X, TrendingUp, TrendingDown, Minus, ShieldCheck, ShieldAlert, ShieldX, CheckCircle, XCircle, AlertTriangle, BarChart3, Target, Zap, CandlestickChart, Clipboard, Check, Waves } from 'lucide-react';
 import { AnalysisResult, SignalType } from '../types';
 import { Language } from '../lib/i18n';
 import LotSizeCalculator from './LotSizeCalculator';
@@ -199,6 +199,18 @@ export default function AnalysisDetailPage({ result, onBack, lang, isClient = fa
           >
             {copied ? <Check size={18} className="text-emerald-400" /> : <Clipboard size={18} className="text-white/70" />}
           </button>
+          )}
+          {/* Phone layout: an explicit, always-visible X so the client can leave
+              the reasons screen and reach the other bottom tabs. */}
+          {compact && (
+            <button
+              onClick={onBack}
+              className="p-2 rounded-xl bg-white/10 hover:bg-white/20 transition-all border border-white/10"
+              aria-label={isAr ? 'إغلاق' : 'Close'}
+              title={isAr ? 'إغلاق' : 'Close'}
+            >
+              <X size={20} className="text-white" />
+            </button>
           )}
         </div>
       </div>
