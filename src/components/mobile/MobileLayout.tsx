@@ -953,7 +953,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         avatarUrl={customAvatar || user?.photoURL || null}
         onProfileClick={() => goTab('profile')}
         autoAnalysisRunning={autoAnalysisOn}
-        onAutoAnalysisToggle={toggleAutoAnalysis} />
+        onAutoAnalysisToggle={canUseAnalysis ? toggleAutoAnalysis : undefined} />
       {tab !== 'home' && tab !== 'store' && (
         <button
           type="button"
@@ -962,6 +962,33 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         >
           <ArrowLeft size={15} /> {lang === 'ar' ? 'عودة' : 'Back'}
         </button>
+      )}
+      {/* Paid plan strip: the client's plan is visible on every section of the
+          app, with the same paid/free switch the desktop site has. */}
+      {tab !== 'store' && mobileSub && (
+        <div style={{ margin: '8px 14px 0', padding: '10px 12px', borderRadius: 12, background: planPaid ? 'rgba(16,185,129,0.12)' : 'rgba(148,163,184,0.12)', border: `1px solid ${planPaid ? 'rgba(16,185,129,0.4)' : 'rgba(148,163,184,0.35)'}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+            <span style={{ fontSize: 12, fontWeight: 900, color: planPaid ? '#10B981' : '#94A3B8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {planPaid ? (lang === 'ar' ? 'خطتك المدفوعة' : 'Your paid plan') : (lang === 'ar' ? 'الخطة المدفوعة متوقفة' : 'Paid plan paused')}
+              {': '}{mobileSub.label}
+            </span>
+            <span style={{ fontSize: 11, color: '#9CA3AF' }}>
+              {(() => {
+                const ms = new Date(mobileSub.expiryDate).getTime();
+                if (!isFinite(ms)) return lang === 'ar' ? 'بانتظار المفتاح' : 'Waiting for key';
+                const d = Math.max(0, Math.ceil((ms - Date.now()) / 86400000));
+                return lang === 'ar' ? `${d} يوم متبقٍ` : `${d} days left`;
+              })()}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => { if (planPaid) returnToFreePlan(); else activatePaidPlan(); }}
+            style={{ flexShrink: 0, padding: '8px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 900, color: '#fff', background: planPaid ? '#475569' : '#10B981' }}
+          >
+            {planPaid ? (lang === 'ar' ? 'رجوع للمجانية' : 'Back to Free') : (lang === 'ar' ? 'تفعيل المدفوعة' : 'Activate Paid')}
+          </button>
+        </div>
       )}
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
         {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} onRemoveAll={() => setFullSignals([])} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} radarProgress={radarProgress} />}
