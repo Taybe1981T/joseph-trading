@@ -2792,8 +2792,28 @@ app.get("/api/user-grants", async (req: any, res: any) => {
   try {
     const email = String((req.query && req.query.email) || '').toLowerCase().trim();
     if (!email) return res.status(400).json({ ok: false, error: 'missing email' });
-    const all = await fsList('payment_grants');
-    const userGrants = all.filter((g) => String(g.email || '').toLowerCase().trim() === email);
+    let userGrants: Json[] = [];
+    // 1. Authoritative collection. A plain list here is permission-denied unless
+    // the caller is the developer (the rule is per-document), so this can be
+    // empty for a normal client — that is NOT proof the client has no plan.
+    try {
+      const all = await fsList('payment_grants');
+      userGrants = all.filter((g) => String(g.email || '').toLowerCase().trim() === email);
+    } catch {}
+    // 2. Public grant mirror written by every approval (shared_status is
+    // world-readable). Without this a paying client read as FREE on any device
+    // that did not make the purchase, because step 1 is empty for them.
+    if (!userGrants.length) {
+      try {
+        const mirrors = await fsList('shared_status');
+        userGrants = mirrors.filter((d) => {
+          if (!String(d.id || '').startsWith('grant_')) return false;
+          if (String(d.email || '').toLowerCase().trim() !== email) return false;
+          const status = String(d.status || '');
+          return status === 'active' || status === '';
+        });
+      } catch {}
+    }
     return res.json({ ok: true, grants: userGrants });
   } catch (e: any) {
     return res.status(500).json({ ok: false, error: e.message });

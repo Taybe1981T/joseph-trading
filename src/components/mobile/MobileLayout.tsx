@@ -423,7 +423,17 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     };
     checkGrant();
     const iv = setInterval(checkGrant, 60000);
-    return () => { stopped = true; clearInterval(iv); };
+    // Coming back to the app (unlock / tab switch) is the moment a client
+    // expects their plan to be there — do not make them wait for the 60s tick.
+    const wake = () => { if (document.visibilityState === 'visible') void checkGrant(); };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('focus', wake);
+    return () => {
+      stopped = true;
+      clearInterval(iv);
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('focus', wake);
+    };
   }, [signedInEmail]);
 
   // Plan entitlements (desktop parity): a client in paid mode with a running

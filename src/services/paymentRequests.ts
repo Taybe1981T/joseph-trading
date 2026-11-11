@@ -377,12 +377,15 @@ export async function fetchUserGrants(email: string): Promise<PaymentGrant[]> {
   const e = (email || '').toLowerCase().trim();
   if (!e) return [];
 
-  // 1. Primary check via server endpoint
+  // 1. Primary check via server endpoint. An EMPTY answer is not the end of the
+  // story: the server cannot always list the private collection (the Firestore
+  // rule is per-document), so a paying client could read as free on any device
+  // that did not make the purchase. Fall through instead of returning [].
   try {
     const resp = await fetch(`/api/user-grants?email=${encodeURIComponent(e)}`);
     if (resp.ok) {
       const data = await resp.json();
-      if (data?.ok && Array.isArray(data.grants)) {
+      if (data?.ok && Array.isArray(data.grants) && data.grants.length) {
         return data.grants
           .map((d: any) => deriveGrantExpiry(d as PaymentGrant))
           .filter((g: PaymentGrant) => g.status === 'active' || !g.status);
@@ -390,13 +393,42 @@ export async function fetchUserGrants(email: string): Promise<PaymentGrant[]> {
     }
   } catch {}
 
-  // 2. Fallback check via direct Firestore Client SDK
+  // 2. Fallback check via direct Firestore Client SDK (owner-scoped)
   try {
     const snap = await getDocs(
       query(collection(db, GRANTS), where('email', '==', e))
     );
-    return snap.docs
+    const list = snap.docs
       .map((d) => deriveGrantExpiry({ id: d.id, ...(d.data() as any) } as PaymentGrant));
+    if (list.length) return list;
+  } catch {}
+
+  // 3. Public grant mirror. Every approval is copied to `shared_status`
+  // (world-readable), so the client's own plan is found here even when both
+  // authenticated reads above are denied. Only documents whose stored email is
+  // THIS client's are returned.
+  return fetchGrantsFromSharedMirror(e);
+}
+
+/**
+ * Grants mirrored to the public `shared_status` collection by the developer /
+ * approval flow, filtered to one account. Read-only and permission-safe, and
+ * the same source the desktop site already trusts for release status.
+ */
+export async function fetchGrantsFromSharedMirror(email: string): Promise<PaymentGrant[]> {
+  const e = (email || '').toLowerCase().trim();
+  if (!e) return [];
+  try {
+    const snap = await getDocs(
+      query(collection(db, 'shared_status'), where('email', '==', e))
+    );
+    const out: PaymentGrant[] = [];
+    snap.forEach((d) => {
+      if (!d.id.startsWith('grant_')) return;
+      const g = deriveGrantExpiry({ id: d.id, ...(d.data() as any) } as PaymentGrant);
+      if (g.status === 'active' || !g.status) out.push(g);
+    });
+    return out;
   } catch {
     return [];
   }
