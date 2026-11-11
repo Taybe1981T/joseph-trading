@@ -46,18 +46,21 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   const [customSymbols, setCustomSymbols] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]'); } catch { return []; }
   });
+  // Keep the selected symbol inside the chosen category (desktop parity: category → symbols).
+  // NOTE: declared BEFORE filteredSymbols — reading it earlier threw
+  // "Cannot access 'catSymbols' before initialization" and the whole Trading
+  // Platform screen crashed, so the section could not be opened at all.
+  const catSymbols = useMemo(() => {
+    const g = groups.find((x) => x.id === category);
+    return g ? g.symbols : [];
+  }, [groups, category]);
+
   // Filter symbols from selected category based on typed input
   const filteredSymbols = useMemo(() => {
     if (!newSymbol) return [];
     const q = newSymbol.toUpperCase();
     return catSymbols.filter(s => s.toUpperCase().includes(q)).slice(0, 10);
   }, [catSymbols, newSymbol]);
-
-  // Keep the selected symbol inside the chosen category (desktop parity: category → symbols).
-  const catSymbols = useMemo(() => {
-    const g = groups.find((x) => x.id === category);
-    return g ? g.symbols : [];
-  }, [groups, category]);
   useEffect(() => {
     if (catSymbols.length && !catSymbols.includes(symbol)) setSymbol(catSymbols[0]);
   }, [category, catSymbols]);

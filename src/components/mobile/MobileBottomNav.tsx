@@ -13,14 +13,15 @@ interface MobileBottomNavProps {
 export function MobileBottomNav({ activeTab, onTabChange, isDeveloper: isDev, lang }: MobileBottomNavProps) {
   const isAr = lang === 'ar';
   // Desktop parity (App.tsx DEV_ONLY_PAGES + effectivePage):
-  // - CLIENT sees ONLY: Home, Trade, Positions, Transactions, Settings.
-  // - DEVELOPER sees everything: + Auto AI + Manual + Store + Clients.
-  // Dev-only sections never render for clients (same guard as the site).
+  // - CLIENT sees: Home, Trade, Positions, Transactions, Store, Settings.
+  // - DEVELOPER sees everything: + Auto AI + Manual + Clients.
+  // The Store is for EVERYONE (a client buys plans/products there, exactly like
+  // on the desktop site); only the AI/dev tools stay developer-only.
   const items: { id: MobileTab; label: string; icon: React.ElementType; dev?: boolean }[] = [
     { id: 'home', label: isAr ? 'الرئيسية' : 'Home', icon: Home },
     ...(isDev ? [{ id: 'analysis' as MobileTab, label: isAr ? 'تحليل تلقائي' : 'Auto AI', icon: Zap, dev: true }] : []),
     ...(isDev ? [{ id: 'manual' as MobileTab, label: isAr ? 'تحليل يدوي' : 'Manual', icon: Hand, dev: true }] : []),
-    ...(isDev ? [{ id: 'store' as MobileTab, label: isAr ? 'المتجر' : 'Store', icon: Package, dev: true }] : []),
+    { id: 'store', label: isAr ? 'المتجر' : 'Store', icon: Package },
     { id: 'transactions', label: isAr ? 'معاملات' : 'Tx', icon: Receipt },
     { id: 'trade', label: isAr ? 'تداول' : 'Trade', icon: TrendingUp },
     { id: 'positions', label: isAr ? 'صفقات' : 'Positions', icon: Briefcase },

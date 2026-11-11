@@ -12,13 +12,13 @@ import { MobileProfile } from './MobileProfile';
 import { MobileTradeDialog } from './MobileTradeDialog';
 import { MobileSignalDetail } from './MobileSignalDetail';
 import { Language } from '../../lib/i18n';
-import { isDeveloperEmail, DEVELOPER_EMAILS } from '../../lib/clientIds';
+import { isDeveloperEmail, DEVELOPER_EMAILS, clientDocId } from '../../lib/clientIds';
+import { isGoogleOrMicrosoftEmail } from '../../lib/authPolicy';
 import { installUiClickSound } from '../../lib/uiClickSound';
-import { useMobileMode, mobileT } from '../../lib/mobileMode';
+import { useMobileMode, mobileT, detectMobileMode } from '../../lib/mobileMode';
 import { MobileAnalysis } from './MobileAnalysis';
 import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar } from '../../services/mobileAnalysisEngine';
 import { MobileManualSheet } from './MobileManualSheet';
-import { MobileStore } from './MobileStore';
 import { MobileClientMonitor } from './MobileClientMonitor';
 import TransactionsPage from '../TransactionsPage';
 import { useMobileSignalAlert } from './useMobileSignalAlert';
@@ -34,7 +34,12 @@ import {
 } from '../../services/mobileTradeBridge';
 import { auth, db } from '../../lib/firebase';
 import { signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
-import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import StorePage from '../StorePage';
+import PaymentModal from '../PaymentModal';
+import type { StoreBot } from '../../services/storeService';
+import { getLivePrices, calcPnl } from '../../services/paperTradingService';
+import { rememberBuyerEmail, setCurrentUserEmail } from '../../lib/clientScope';
 
 interface MobileSignal {
   symbol: string;
@@ -85,9 +90,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       setAutoAnalysisOn(v);
       if (v) {
         setRadarProgress(null);
-        const uid = (user?.uid || 'anonymous');
-        const email = (user?.email || email || '');
-        startMobileRadar(uid, email, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
+        // Read the signed-in identity from storage instead of the component's
+        // state: this callback has an empty dependency list, and the old code
+        // shadowed the `email` state with itself ("Cannot access 'email' before
+        // initialization"), which crashed the toggle on first use.
+        const info = detectMobileMode();
+        startMobileRadar(info.uid, info.email, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
           setRadarProgress(null);
         });
       } else {
@@ -124,6 +132,21 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [equity, setEquity] = useState(10000);
   const [selSym, setSelSym] = useState<string | null>(null);
   const [showStore, setShowStore] = useState(false);
+  // ── Store + payment (desktop parity) ───────────────────────────────────
+  // The mobile tab renders the SAME <StorePage> the desktop site uses, and a
+  // purchase is handed to the SAME <PaymentModal>, so every product, plan,
+  // price and payment method is identical on both. A client (not only a
+  // developer) can buy, exactly like on the site.
+  const [storePlan, setStorePlan] = useState<{ amount: number; label: string; durationDays: number; planUnit?: string; planUnits?: number } | null>(null);
+  const [storeBot, setStoreBot] = useState<StoreBot | null>(null);
+  const [mobileSub, setMobileSub] = useState<{ label: string; amount: number; expiryDate: string } | null>(() => {
+    try {
+      const o = JSON.parse(localStorage.getItem('active_subscription') || 'null');
+      return o && o.expiryDate
+        ? { label: String(o.label || ''), amount: Number(o.amount || 0), expiryDate: String(o.expiryDate) }
+        : null;
+    } catch { return null; }
+  });
   const [isDev, setIsDev] = useState(false);
   const [email, setEmail] = useState('');
   const [clientCount, setClientCount] = useState(0);
@@ -613,6 +636,62 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     loadAll();
   }, [loadAll]);
 
+  // A plan/product was chosen in the store: open the same PaymentModal the
+  // desktop site opens for the very same choice.
+  const startStorePayment = (
+    plan: { amount: number; label: string; durationDays: number; planUnit?: string; planUnits?: number } | null,
+    bot: StoreBot | null,
+  ) => {
+    setStorePlan(plan);
+    setStoreBot(bot);
+  };
+
+  // Same post-payment work as the desktop handler (App.tsx): the buyer is
+  // registered as a client under the payment email and the plan is stored
+  // locally with its real expiry, so My Plan / the plan gate agree everywhere.
+  const completeStorePayment = async (grantInfo?: { expiryDate?: string; requestNo?: number }) => {
+    const plan = storePlan;
+    const buyerEmail = (user?.email || email || '').toLowerCase().trim();
+    const serverExpiry = grantInfo?.expiryDate ? new Date(grantInfo.expiryDate) : null;
+    const fallbackDays = Number(plan?.durationDays) > 0 ? Number(plan.durationDays) : 30;
+    const expiry = serverExpiry ?? new Date(Date.now() + fallbackDays * 86400000);
+    if (buyerEmail) {
+      try { rememberBuyerEmail(buyerEmail, buyerEmail); } catch {}
+      try { setCurrentUserEmail(buyerEmail); } catch {}
+      try {
+        await setDoc(doc(db, 'clients', clientDocId(buyerEmail)), {
+          email: buyerEmail,
+          status: 'verified',
+          plan: 'paid',
+          planExpiry: expiry.toISOString(),
+          autoRegistered: true,
+          updatedAt: serverTimestamp(),
+          registeredAt: serverTimestamp(),
+          rank: 0,
+        }, { merge: true });
+      } catch (e) { console.warn('Auto client registration on payment failed:', e); }
+      try { localStorage.setItem('client_plan_active', '1'); } catch {}
+    }
+    const sub = {
+      label: plan?.label || '',
+      amount: plan?.amount || 0,
+      activatedAt: new Date().toISOString(),
+      firstReleasedAt: new Date().toISOString(),
+      expiryDate: expiry.toISOString(),
+      requestNo: grantInfo?.requestNo,
+      durationDays: plan?.durationDays,
+      planUnit: plan?.planUnit,
+      planUnits: plan?.planUnits,
+    };
+    try { localStorage.setItem('active_subscription', JSON.stringify({ ...sub, email: buyerEmail })); } catch {}
+    setMobileSub({ label: sub.label, amount: sub.amount, expiryDate: sub.expiryDate });
+    setStorePlan(null);
+    setStoreBot(null);
+    setAlert(lang === 'ar' ? 'تم تفعيل الخطة بنجاح ✓' : 'Plan activated successfully ✓');
+    setTimeout(() => setAlert(null), 5000);
+    goTab('store');
+  };
+
   const pickSymbol = (s: string) => {
     const q = quotes.find((x) => x.symbol === s);
     if (q) setDialog(q); else { setSelSym(s); goTab('trade'); }
@@ -673,7 +752,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         onProfileClick={() => goTab('profile')}
         autoAnalysisRunning={autoAnalysisOn}
         onAutoAnalysisToggle={toggleAutoAnalysis} />
-      {tab !== 'home' && (
+      {tab !== 'home' && tab !== 'store' && (
         <button
           type="button"
           onClick={goBack}
@@ -691,7 +770,52 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} />}
         {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} />}
-        {tab === 'store' && isDev && <MobileStore lang={lang} onClose={goHome} />}
+        {tab === 'store' && !storePlan && (
+          <StorePage
+            lang={lang}
+            onBack={goBack}
+            isDark={isDark}
+            userName={user?.displayName || ''}
+            userEmail={user?.email || email || ''}
+            onBuyBot={(bot) => startStorePayment({ amount: bot.price / 100, label: '', durationDays: 0 }, bot)}
+            onBuyPlan={(plan) => startStorePayment(
+              {
+                amount: plan.priceUsd,
+                label: (lang === 'ar' ? plan.labelAr : plan.labelEn) || plan.key,
+                durationDays: plan.durationDays,
+                planUnit: plan.planUnit,
+                planUnits: plan.planUnits,
+              },
+              null,
+            )}
+            customerPlan={mobileSub}
+            planKeyEntered={isDev || !!mobileSub && new Date(mobileSub.expiryDate).getTime() > Date.now()}
+            paidMode={true}
+            onRequireAuth={() => setShowLoginModal(true)}
+          />
+        )}
+        {tab === 'store' && storePlan && (
+          <PaymentModal
+            key={user?.uid || 'no-session'}
+            isOpen={true}
+            onClose={() => { setStorePlan(null); setStoreBot(null); goTab('store'); }}
+            planLabel={storePlan.label}
+            amount={storePlan.amount}
+            asPage
+            lang={lang}
+            botPurchase={storeBot}
+            sectionTab={storeBot ? 'bot' : 'plan'}
+            buyerEmail={isGoogleOrMicrosoftEmail(user?.email || email) ? (user?.email || email || '') : ''}
+            buyerName={user?.displayName || ''}
+            planDurationDays={storePlan.durationDays}
+            planUnit={storePlan.planUnit}
+            planUnits={storePlan.planUnits}
+            onBotPaid={() => { setStorePlan(null); setStoreBot(null); goTab('store'); }}
+            onGoToStore={() => { setStorePlan(null); setStoreBot(null); goTab('store'); }}
+            onGoToPlans={() => { setStorePlan(null); setStoreBot(null); goTab('store'); }}
+            onConfirm={completeStorePayment}
+          />
+        )}
         {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} />}
         {tab === 'profile' && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} isLoggedIn={!!(user?.email || email)} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} isFollowing={following} onFollowToggle={toggleFollowing} />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} />}

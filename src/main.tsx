@@ -30,8 +30,12 @@ function AppWrapper() {
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 768px)');
-    setIsMobile(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    // `?mobile=1` lets the phone layout be opened on a desktop browser (useful
+    // to check the mobile store/payment without a phone). Phones are detected
+    // by the media query exactly as before.
+    const forced = new URLSearchParams(window.location.search).get('mobile') === '1';
+    setIsMobile(mq.matches || forced);
+    const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches || forced);
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
