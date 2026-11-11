@@ -110,16 +110,30 @@ export function MobileHome({
         )}
       </div>
 
-      {radarProgress && isDev && (
+      {/* Live auto-analysis progress. Desktop parity: a paid-plan client sees
+          exactly what the developer sees — the running bar, the category being
+          scanned and the symbol under analysis right now. */}
+      {(isDev || hasPlan) && radarProgress && (
         <div style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10, padding: '9px 14px', fontSize: 12, fontWeight: 700, color: '#00ff88', marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <Zap size={14} /> {mobileT(lang, 'Analyzing...', 'جاري التحليل...')} {radarProgress.current}
-            {radarProgress.category && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#888', fontWeight: 600 }}>{radarProgress.category}</span>}
+            <Zap size={14} />
+            <span>{mobileT(lang, 'Auto analysis started', 'بدأ التحليل التلقائي')}</span>
+            {radarProgress.category && (
+              <span style={{ fontSize: 10, fontWeight: 800, color: '#10B981', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 6, padding: '1px 6px' }}>
+                {isAr ? (AR_CATS[radarProgress.category] || radarProgress.category) : radarProgress.category}
+              </span>
+            )}
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: '#888', fontWeight: 600 }}>
+              {radarProgress.index}/{radarProgress.total}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 11 }}>
+            <span style={{ color: '#888' }}>{mobileT(lang, 'Analyzing now', 'يُحلَّل الآن')}</span>
+            <span style={{ color: '#fff', fontWeight: 900 }}>{radarProgress.current}</span>
           </div>
           <div style={{ height: 4, borderRadius: 2, background: '#2a2a2a', overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${radarProgress.total > 0 ? Math.round((radarProgress.index / radarProgress.total) * 100) : 0}%`, background: '#10B981', transition: 'width 0.3s' }} />
           </div>
-          <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>{radarProgress.index}/{radarProgress.total}</div>
         </div>
       )}
 

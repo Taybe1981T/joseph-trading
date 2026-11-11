@@ -27,7 +27,7 @@ import {
 } from '../../lib/mobileMode';
 import { fetchUserGrants, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from '../../services/paymentRequests';
 import { MobileAnalysis } from './MobileAnalysis';
-import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar } from '../../services/mobileAnalysisEngine';
+import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar, getMobileRadarProgress } from '../../services/mobileAnalysisEngine';
 import { MobileManualSheet } from './MobileManualSheet';
 import { MobileClientMonitor } from './MobileClientMonitor';
 import TransactionsPage from '../TransactionsPage';
@@ -91,7 +91,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [alert, setAlert] = useState<string | null>(null);
   const [auto, setAuto] = useState(() => isMobileAutoTradeOn());
   const [autoAnalysisOn, setAutoAnalysisOn] = useState(() => isMobileRadarOn() || readMobileAuto().isEnabled);
-  const [radarProgress, setRadarProgress] = useState<{ current: string; total: number; index: number; category?: string } | null>(null);
+  // Seed from the engine so a radar that was already running (resumed after a
+  // tab switch / remount) still shows its progress bar immediately.
+  const [radarProgress, setRadarProgress] = useState<{ current: string; total: number; index: number; category?: string } | null>(() => {
+    const p = getMobileRadarProgress();
+    return p ? { current: p.current, total: p.total, index: p.index, category: p.category } : null;
+  });
   const toggleAutoAnalysis = useCallback(() => {
     try {
       const s = readMobileAuto();
@@ -116,7 +121,19 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     } catch {}
   }, []);
   useEffect(() => {
-    const sync = () => { try { setAutoAnalysisOn(isMobileRadarOn() && readMobileAuto().isEnabled); } catch {} };
+    const sync = () => {
+      try {
+        setAutoAnalysisOn(isMobileRadarOn() && readMobileAuto().isEnabled);
+        // Keep the bar in step with the engine (it may have been started by the
+        // auto-restart effect, not by this screen's toggle).
+        if (isMobileRadarOn()) {
+          const p = getMobileRadarProgress();
+          if (p) setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category });
+        } else {
+          setRadarProgress(null);
+        }
+      } catch {}
+    };
     sync();
     const iv = setInterval(sync, 3000);
     window.addEventListener('storage', sync);
@@ -455,20 +472,27 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   useEffect(() => {
     const ensureRadar = () => {
       try {
+        // Only a developer or a paid-plan client may run the analysis engine
+        // (same entitlement that shows the Auto/Manual tabs).
+        if (!isDev && !isPlanClient) return;
         const s = readMobileAuto();
-        if (s.isEnabled && !isMobileRadarOn()) {
-          const uid = (user?.uid || 'anonymous');
-          const emailVal = (user?.email || email || '');
-          startMobileRadar(uid, emailVal, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
-            setRadarProgress(null);
-          });
+        if (!s.isEnabled) return;
+        if (isMobileRadarOn()) {
+          const p = getMobileRadarProgress();
+          if (p) setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category });
+          return;
         }
+        const uid = (user?.uid || 'anonymous');
+        const emailVal = (user?.email || email || '');
+        startMobileRadar(uid, emailVal, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
+          setRadarProgress(null);
+        });
       } catch {}
     };
     ensureRadar();
     const iv = setInterval(ensureRadar, 10000);
     return () => clearInterval(iv);
-  }, [user, email]);
+  }, [user, email, isDev, isPlanClient]);
 
   // Login / logout helpers
   const doLogin = async (emailHint?: string) => {
@@ -550,8 +574,11 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const loadAll = useCallback(async () => {
     try {
       const merged: any[] = [];
-      // Auto radar signals (same as desktop AnalysisResults) - only for developers
-      if (isDev) {
+      // Auto radar signals (same as desktop AnalysisResults). Both the developer
+      // AND a paid-plan client run their own radar, so both must see the results
+      // it persisted — before this, a client's radar ran but its signals never
+      // reached the home feed (and therefore neither did the analysis reasons).
+      if (isDev || isPlanClient) {
         try {
           const raw = localStorage.getItem('top_signals_persistent');
           const auto = raw ? JSON.parse(raw) : [];
@@ -655,7 +682,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       } catch {}
       setPositions(mapped);
     } catch {}
-  }, [isDev]);
+  }, [isDev, isPlanClient]);
 
   // Live store sync: trades opened/closed (auto engine or this device) refresh instantly.
   // IMPORTANT: this effect must NOT depend on fullSignals. loadAll() calls
