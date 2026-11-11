@@ -59,6 +59,14 @@
   ],
   "rewrites": [
     {
+      "source": "/__/auth/(.*)",
+      "destination": "https://trading-made-easy-e8450.firebaseapp.com/__/auth/$1"
+    },
+    {
+      "source": "/__/firebase/(.*)",
+      "destination": "https://trading-made-easy-e8450.firebaseapp.com/__/firebase/$1"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/server.ts"
     },
