@@ -11,6 +11,7 @@ import { MobileSettings } from './MobileSettings';
 import { MobileProfile } from './MobileProfile';
 import { MobileTradeDialog } from './MobileTradeDialog';
 import { MobileSignalDetail } from './MobileSignalDetail';
+import AnalysisDetailPage from '../AnalysisDetailPage';
 import { Language } from '../../lib/i18n';
 import { isDeveloperEmail, DEVELOPER_EMAILS, clientDocId } from '../../lib/clientIds';
 import { isGoogleOrMicrosoftEmail } from '../../lib/authPolicy';
@@ -1093,7 +1094,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       </div>
       <MobileBottomNav activeTab={tab} onTabChange={goTab} isDeveloper={isDev} hasPlan={canUseAnalysis} lang={lang} />
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
-      {detail && <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />}
+      {detail && (isDev
+        ? <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />
+        : <AnalysisDetailPage result={detail} onBack={() => setDetail(null)} lang={lang} isClient compact />)}
       {showLoginModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#1a1a1a', borderRadius: 16, padding: 24, width: '90%', maxWidth: 400, color: '#fff' }}>

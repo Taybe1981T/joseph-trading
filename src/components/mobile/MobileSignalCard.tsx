@@ -84,7 +84,7 @@ export function MobileSignalCard({ res, lang, isDev, isClient, onDetail, onTrade
           {String(res.signal).includes('sell') ? <TrendingDown size={14} /> : <TrendingUp size={14} />}
         </div>
       </div>
-      {isClient && res.summary && (
+      {!isDev && res.summary && (
         <div style={{ fontSize: 11, color: '#c9c9c9', padding: '4px 0', lineHeight: 1.55, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, paddingLeft: 8, paddingRight: 8 }}>
           <div style={{ fontSize: 10, fontWeight: 800, color: '#F59E0B', marginBottom: 2 }}>
             {isAr ? 'لماذا هذا الرمز؟' : 'Why this symbol?'}
@@ -92,7 +92,7 @@ export function MobileSignalCard({ res, lang, isDev, isClient, onDetail, onTrade
           {res.summary}
         </div>
       )}
-      {isClient && !res.summary && (
+      {!isDev && !res.summary && (
         <div style={{ fontSize: 11, color: '#aaa', padding: '4px 0', fontStyle: 'italic' }}>
           {isAr ? `${res.symbol} — إشارة ${res.signal === 'strong_buy' || res.signal === 'buy' ? 'شراء' : 'بيع'} قوية (ثقة ${res.confidence}%) بناءً على تحليل فني متقدم` : `${res.symbol} — ${res.signal === 'strong_buy' || res.signal === 'buy' ? 'Buy' : 'Sell'} signal (confidence ${res.confidence}%) based on advanced technical analysis`}
         </div>
@@ -104,10 +104,11 @@ export function MobileSignalCard({ res, lang, isDev, isClient, onDetail, onTrade
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: 8 }}>
-        {res.detailedReasons && res.detailedReasons.length > 0 && (
+        {(!isDev || (res.detailedReasons && res.detailedReasons.length > 0)) && (
           <button onClick={() => onDetail(res)}
             style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: 'none', background: '#F59E0B', color: '#000', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
-            {isAr ? 'أسباب التحليل' : 'Reasons'} ({res.detailedReasons.length})
+            {isAr ? 'أسباب التحليل' : 'Analysis Reasons'}
+            {res.detailedReasons && res.detailedReasons.length > 0 ? ` (${res.detailedReasons.length})` : ''}
           </button>
         )}
         <button onClick={() => onTrade(res.symbol)}

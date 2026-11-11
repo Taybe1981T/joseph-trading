@@ -10,6 +10,12 @@ interface AnalysisDetailPageProps {
   onBack: () => void;
   lang: Language;
   isClient?: boolean;
+  /**
+   * Mobile embed: the page is opened from the phone layout, which has no desktop
+   * header above it. Drops the 320px header spacer and lifts the overlay above
+   * the mobile bottom navigation. Content and logic stay identical to desktop.
+   */
+  compact?: boolean;
 }
 
 function getSignalColor(signal: SignalType) {
@@ -77,7 +83,7 @@ function parseCandleInfo(value: string) {
   }).filter(Boolean);
 }
 
-export default function AnalysisDetailPage({ result, onBack, lang, isClient = false }: AnalysisDetailPageProps) {
+export default function AnalysisDetailPage({ result, onBack, lang, isClient = false, compact = false }: AnalysisDetailPageProps) {
   const [copied, setCopied] = useState(false);
   const isAr = lang === 'ar';
   const colors = getSignalColor(result.signal);
@@ -163,13 +169,13 @@ export default function AnalysisDetailPage({ result, onBack, lang, isClient = fa
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="fixed inset-0 z-50 overflow-y-auto bg-[#0a0f1a]"
+      className={compact ? 'fixed inset-0 z-[60] overflow-y-auto bg-[#0a0f1a]' : 'fixed inset-0 z-50 overflow-y-auto bg-[#0a0f1a]'}
     >
-      {/* Spacer for main header */}
-      <div className="h-[320px]" />
+      {/* Spacer for main header (desktop only — the phone layout has its own) */}
+      {!compact && <div className="h-[320px]" />}
       
       {/* Header */}
-      <div className="sticky top-0 z-40 bg-[#0a0f1a]/95 backdrop-blur-xl border-b border-white/5">
+      <div className="sticky top-0 z-40 bg-[#0a0f1a]/95 backdrop-blur-xl border-b border-white/5" style={compact ? { paddingTop: 'env(safe-area-inset-top)' } : undefined}>
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
           <button onClick={onBack} className="p-2 rounded-xl bg-[#F59E0B] hover:bg-[#d97706] transition-all">
             <ArrowLeft size={20} className="text-black" />
