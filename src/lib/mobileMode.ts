@@ -26,10 +26,15 @@ export function detectMobileMode(): { mode: MobileMode; email: string; uid: stri
 }
 
 export function hasClientPlan(): boolean {
+  // The real source of truth is the stored subscription: it carries an expiry,
+  // so an expired plan must not keep unlocking paid sections.
   try {
-    const raw = localStorage.getItem('finalyze_clients');
-    const arr = raw ? JSON.parse(raw) : [];
-    if (Array.isArray(arr) && arr.length > 0) return true;
+    const raw = localStorage.getItem('active_subscription');
+    const o = raw ? JSON.parse(raw) : null;
+    if (o && o.expiryDate) {
+      const ms = new Date(o.expiryDate).getTime();
+      if (isFinite(ms)) return ms > Date.now();
+    }
   } catch {}
   try {
     if (localStorage.getItem('client_plan_active') === '1') return true;
