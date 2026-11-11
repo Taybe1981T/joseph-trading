@@ -2798,20 +2798,40 @@ app.get("/api/user-grants", async (req: any, res: any) => {
     // empty for a normal client — that is NOT proof the client has no plan.
     try {
       const all = await fsList('payment_grants');
-      userGrants = all.filter((g) => String(g.email || '').toLowerCase().trim() === email);
+      userGrants = all.filter((g) => {
+        if (String(g.email || '').toLowerCase().trim() !== email) return false;
+        const status = String(g.status || '');
+        return status === 'active' || status === '';
+      });
     } catch {}
     // 2. Public grant mirror written by every approval (shared_status is
     // world-readable). Without this a paying client read as FREE on any device
     // that did not make the purchase, because step 1 is empty for them.
+    //
+    // The mirror is only a COPY, so it can outlive a cancellation. Each mirrored
+    // grant is checked against its authoritative `payment_grants/<id>` document
+    // (public get) and skipped when that document says revoked/consumed.
     if (!userGrants.length) {
       try {
         const mirrors = await fsList('shared_status');
-        userGrants = mirrors.filter((d) => {
+        const candidates = mirrors.filter((d) => {
           if (!String(d.id || '').startsWith('grant_')) return false;
           if (String(d.email || '').toLowerCase().trim() !== email) return false;
           const status = String(d.status || '');
           return status === 'active' || status === '';
         });
+        const checked = await Promise.all(candidates.map(async (d) => {
+          try {
+            const grantId = String(d.id || '').replace(/^grant_/, '');
+            const authoritative = await fsGet('payment_grants', grantId);
+            if (authoritative) {
+              const status = String(authoritative.status || '');
+              if (status && status !== 'active') return null;
+            }
+          } catch {}
+          return d;
+        }));
+        userGrants = checked.filter((g): g is Json => !!g);
       } catch {}
     }
     return res.json({ ok: true, grants: userGrants });

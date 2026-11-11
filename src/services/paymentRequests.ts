@@ -422,13 +422,27 @@ export async function fetchGrantsFromSharedMirror(email: string): Promise<Paymen
     const snap = await getDocs(
       query(collection(db, 'shared_status'), where('email', '==', e))
     );
-    const out: PaymentGrant[] = [];
+    const candidates: PaymentGrant[] = [];
     snap.forEach((d) => {
       if (!d.id.startsWith('grant_')) return;
       const g = deriveGrantExpiry({ id: d.id, ...(d.data() as any) } as PaymentGrant);
-      if (g.status === 'active' || !g.status) out.push(g);
+      if (g.status === 'active' || !g.status) candidates.push(g);
     });
-    return out;
+    // A mirror is only a COPY and can outlive a cancellation. The authoritative
+    // grant document is publicly readable by id, so a copy whose source says
+    // revoked/consumed is dropped — otherwise a deleted plan came back on the
+    // next background poll.
+    const checked = await Promise.all(candidates.map(async (g) => {
+      try {
+        const source = await getDoc(doc(db, GRANTS, String(g.id || '').replace(/^grant_/, '')));
+        if (source.exists()) {
+          const status = String((source.data() as any)?.status || '');
+          if (status && status !== 'active') return null;
+        }
+      } catch {}
+      return g;
+    }));
+    return checked.filter((g): g is PaymentGrant => !!g);
   } catch {
     return [];
   }
@@ -503,6 +517,19 @@ export async function hideTransactionFromDev(id: string): Promise<void> {
 export async function revokeClientPlanGrants(email: string): Promise<void> {
   const e = (email || '').toLowerCase().trim();
   if (!e) return;
+  // Server-side cancellation runs with the VERIFIED session: it revokes the
+  // grant documents and drops the crown from the client row in one place. This
+  // is the path that also cannot be confused with another account's email.
+  try {
+    await fetch('/api/plan-revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+      body: JSON.stringify({}),
+    });
+  } catch {}
+  // Owner-scoped fallback (and belt-and-braces): the rules let a client lower
+  // their OWN plan, so the same revocation is applied directly if the endpoint
+  // was unreachable.
   try {
     const snap = await getDocs(query(collection(db, GRANTS), where('email', '==', e)));
     for (const d of snap.docs) {
