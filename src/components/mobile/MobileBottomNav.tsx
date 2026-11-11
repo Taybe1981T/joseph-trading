@@ -36,8 +36,8 @@ export function MobileBottomNav({ activeTab, onTabChange, isDeveloper: isDev, ha
   const highlightNewTools = !isDev && hasPlan;
   const baseItems: NavItem[] = [
     { id: 'home', label: isAr ? 'الرئيسية' : 'Home', icon: Home },
-    ...(canAnalyze ? [{ id: 'analysis' as MobileTab, label: isAr ? 'تحليل تلقائي' : 'Auto AI', icon: Zap, highlight: highlightNewTools }] : []),
-    ...(canAnalyze ? [{ id: 'manual' as MobileTab, label: isAr ? 'تحليل يدوي' : 'Manual', icon: Hand, highlight: highlightNewTools }] : []),
+    ...(canAnalyze ? [{ id: 'analysis' as MobileTab, label: isAr ? 'تلقائي' : 'Auto AI', icon: Zap, highlight: highlightNewTools }] : []),
+    ...(canAnalyze ? [{ id: 'manual' as MobileTab, label: isAr ? 'يدوي' : 'Manual', icon: Hand, highlight: highlightNewTools }] : []),
     { id: 'transactions', label: isAr ? 'معاملات' : 'Tx', icon: Receipt },
     { id: 'trade', label: isAr ? 'تداول' : 'Trade', icon: TrendingUp },
     { id: 'positions', label: isAr ? 'صفقات' : 'Positions', icon: Briefcase },
