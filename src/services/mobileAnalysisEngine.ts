@@ -6,6 +6,7 @@ import { waitIfRateLimited } from './rateLimitTracker';
 import { collection, addDoc, serverTimestamp, doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Language } from '../lib/i18n';
+import { isDeveloperEmail } from '../lib/clientIds';
 import { initAudio, playStart, playCompletion, playCategoryChange } from '../lib/audioEngine';
 
 export interface MobileProgress {
@@ -195,6 +196,10 @@ export async function runMobileManual(symbols: string[], uid: string, onProgress
 }
 
 export async function publishMobileShared(topTen: AnalysisResult[], email: string) {
+  // Desktop parity: only the developer publishes the SHARED feed. A paid-plan
+  // client runs their own radar, but publishing here would overwrite the
+  // signals every free client sees.
+  if (!isDeveloperEmail(email)) return;
   try {
     await setDoc(doc(db, 'shared_signals', 'latest'), {
       updatedAt: serverTimestamp(), developerEmail: email || '',

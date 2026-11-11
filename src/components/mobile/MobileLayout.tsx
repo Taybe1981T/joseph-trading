@@ -15,7 +15,17 @@ import { Language } from '../../lib/i18n';
 import { isDeveloperEmail, DEVELOPER_EMAILS, clientDocId } from '../../lib/clientIds';
 import { isGoogleOrMicrosoftEmail } from '../../lib/authPolicy';
 import { installUiClickSound } from '../../lib/uiClickSound';
-import { useMobileMode, mobileT, detectMobileMode } from '../../lib/mobileMode';
+import {
+  detectMobileMode,
+  isMobilePlanClient,
+  mobilePaidMode,
+  setMobilePaidMode,
+  mobileFreeModeChosen,
+  setMobileFreeModeChosen,
+  readMobileSubscription,
+  mobileSubscriptionActive,
+} from '../../lib/mobileMode';
+import { fetchUserGrants, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from '../../services/paymentRequests';
 import { MobileAnalysis } from './MobileAnalysis';
 import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar } from '../../services/mobileAnalysisEngine';
 import { MobileManualSheet } from './MobileManualSheet';
@@ -147,8 +157,21 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         : null;
     } catch { return null; }
   });
+  // Paid mode / explicit free-mode choice — SAME per-account keys as the desktop
+  // site, so a client can move between paid and free on either device and the
+  // other side follows.
+  const [planPaid, setPlanPaid] = useState<boolean>(() => mobilePaidMode());
+  const [freeChosen, setFreeChosen] = useState<boolean>(() => mobileFreeModeChosen());
   const [isDev, setIsDev] = useState(false);
-  const [email, setEmail] = useState('');
+  // Initialise from storage (not '') so the plan-restore effect sees the real
+  // identity on the very first render instead of treating a returning client as
+  // a guest and wiping their stored plan.
+  const [email, setEmail] = useState<string>(() => {
+    try {
+      const raw = localStorage.getItem('finalyze_user');
+      return raw ? String(JSON.parse(raw)?.email || '').toLowerCase().trim() : '';
+    } catch { return ''; }
+  });
   const [clientCount, setClientCount] = useState(0);
   const [savedAccounts, setSavedAccounts] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('finalyze_saved_accounts') || '[]'); } catch { return []; }
@@ -291,6 +314,130 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       setCustomLogo(localStorage.getItem('finalyze_custom_logo_' + em) || null);
     } catch {}
   }, [user?.email, email]);
+
+  // ── Paid plan on the phone (desktop parity) ─────────────────────────────
+  // A plan belongs to ONE account: it is restored only when the signed-in email
+  // matches the email stored with it, it is dropped on logout, and it disappears
+  // the moment its expiry passes. This is the exact logic App.tsx uses.
+  const signedInEmail = (user?.email || email || '').toLowerCase().trim();
+  useEffect(() => {
+    setPlanPaid(mobilePaidMode(signedInEmail));
+    setFreeChosen(mobileFreeModeChosen(signedInEmail));
+    if (!signedInEmail) {
+      setMobileSub(null);
+      try { localStorage.removeItem('active_subscription'); } catch {}
+      return;
+    }
+    try {
+      const raw = localStorage.getItem('active_subscription');
+      if (!raw) { setMobileSub(null); return; }
+      const sub = JSON.parse(raw);
+      const subEmail = String(sub?.email || '').toLowerCase().trim();
+      if (subEmail && subEmail !== signedInEmail) { setMobileSub(null); return; }
+      if (sub?.expiryDate && new Date(sub.expiryDate).getTime() <= Date.now()) {
+        localStorage.removeItem('active_subscription');
+        setMobileSub(null);
+        return;
+      }
+      setMobileSub({
+        label: String(sub.label || ''),
+        amount: Number(sub.amount || 0),
+        expiryDate: String(sub.expiryDate || ''),
+      });
+    } catch { setMobileSub(null); }
+  }, [signedInEmail]);
+
+  // Plan reached its expiry while the app is open → back to free, like the site.
+  useEffect(() => {
+    const iv = setInterval(() => {
+      const sub = readMobileSubscription();
+      if (!sub?.expiryDate) return;
+      const ms = new Date(sub.expiryDate).getTime();
+      if (!isFinite(ms) || ms > Date.now()) return;
+      try { localStorage.removeItem('active_subscription'); } catch {}
+      setMobileSub(null);
+      setPlanPaid(false);
+      setFreeChosen(true);
+      setMobilePaidMode(signedInEmail, false);
+      setMobileFreeModeChosen(signedInEmail, true);
+    }, 30000);
+    return () => clearInterval(iv);
+  }, [signedInEmail]);
+
+  // Pick up a plan the developer approved on ANOTHER device (bought on the
+  // desktop site, opened later on the phone). The grants endpoint is the source
+  // of truth, so the same paid plan appears on both without re-buying it.
+  useEffect(() => {
+    if (!signedInEmail || isDeveloperEmail(signedInEmail)) return;
+    let stopped = false;
+    const checkGrant = async () => {
+      try {
+        const grants = await fetchUserGrants(signedInEmail);
+        if (stopped) return;
+        const planGrants = grants.filter((g) => g.kind === 'plan' && g.status === 'active');
+        if (!planGrants.length) return;
+        const started = planGrants
+          .filter((g) => g.expiryDate && !isNaN(new Date(g.expiryDate).getTime()) && new Date(g.expiryDate).getTime() > Date.now())
+          .sort((a, b) => new Date(b.expiryDate!).getTime() - new Date(a.expiryDate!).getTime());
+        const pendingKey = planGrants.filter((g) => !g.expiryDate || isNaN(new Date(g.expiryDate).getTime()));
+        const best = started[0] || pendingKey[0];
+        if (!best) return;
+        // Renewals stack: first release = earliest start, visible end = latest.
+        const starts = planGrants
+          .map((g) => grantTimeMillis(g.activatedAt || g.releasedAt))
+          .filter((n) => isFinite(n) && n > 0);
+        const firstReleaseIso = starts.length
+          ? new Date(Math.min(...starts)).toISOString()
+          : (best.createdAt ? new Date(grantTimeMillis(best.createdAt) || Date.now()).toISOString() : new Date().toISOString());
+        const next = {
+          label: best.planLabel || 'Plan',
+          amount: Number(best.amountUsd || 0),
+          activatedAt: firstReleaseIso,
+          firstReleasedAt: firstReleaseIso,
+          expiryDate: best.expiryDate || '',
+          requestNo: best.requestNo,
+          durationDays: best.durationDays,
+          planUnit: best.planUnit,
+          planUnits: best.planUnits,
+          email: signedInEmail,
+        };
+        let prev: any = null;
+        try { prev = JSON.parse(localStorage.getItem('active_subscription') || 'null'); } catch {}
+        const prevEnd = prev?.expiryDate ? new Date(prev.expiryDate).getTime() : 0;
+        const thisEnd = next.expiryDate ? new Date(next.expiryDate).getTime() : 0;
+        // Never keep a date the server no longer reports (an expired plan must go),
+        // but never shorten a renewal that is still valid.
+        if (!thisEnd) return;
+        const merged = prevEnd > thisEnd && prev
+          ? { ...next, expiryDate: prev.expiryDate, label: prev.label || next.label }
+          : next;
+        try { localStorage.setItem('active_subscription', JSON.stringify(merged)); } catch {}
+        setMobileSub({ label: merged.label, amount: merged.amount, expiryDate: merged.expiryDate });
+        if (!mobileFreeModeChosen(signedInEmail)) {
+          setPlanPaid(true);
+          setMobilePaidMode(signedInEmail, true);
+        }
+      } catch {}
+    };
+    checkGrant();
+    const iv = setInterval(checkGrant, 60000);
+    return () => { stopped = true; clearInterval(iv); };
+  }, [signedInEmail]);
+
+  // Plan entitlements (desktop parity): a client in paid mode with a running
+  // plan gets the SAME analysis tools as a developer — Auto Analysis + Manual —
+  // and the one-tap auto-analysis switch in the header.
+  const planActive = !!mobileSub && mobileSubscriptionActive(mobileSub);
+  const isPlanClient = !isDev && planActive && planPaid;
+  const canUseAnalysis = isDev || isPlanClient;
+  // Losing the plan (expired / returned to free / signed out) must not leave the
+  // client stranded on a paid screen that no longer renders.
+  useEffect(() => {
+    if (!canUseAnalysis && (tab === 'analysis' || tab === 'manual')) {
+      histRef.current = [];
+      setTab('home');
+    }
+  }, [canUseAnalysis, tab]);
 
   // Auto-restart radar if enabled but not running (ensures analysis continues across tab navigation)
   useEffect(() => {
@@ -521,11 +668,13 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       window.removeEventListener('mobile-autotrade-resync', rs);
     };
   }, [loadAll]);
-  // CLIENT: Poll radar status from developer (same as desktop) - only when not developer
+  // CLIENT: Poll radar status from developer (same as desktop) - only in FREE
+  // mode. A paid-plan client runs their own radar, so mirroring the developer's
+  // status here would immediately undo the client's own on/off switch.
   useEffect(() => {
     const userEmail = (user?.email || email || '').toLowerCase().trim();
     const isDev = isDeveloperEmail(userEmail);
-    if (isDev) return;
+    if (isDev || isPlanClient) return;
 
     const checkRadarStatus = async () => {
       try {
@@ -553,15 +702,16 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     checkRadarStatus();
     const iv = setInterval(checkRadarStatus, 10000);
     return () => clearInterval(iv);
-  }, [user, email]);
+  }, [user, email, isPlanClient]);
 
 
 
-  // CLIENT: Poll Firestore for shared signals from desktop (same as desktop client logic)
+  // CLIENT: Poll Firestore for shared signals from desktop (same as desktop client logic).
+  // Paid-plan clients run their own analysis instead (desktop parity).
   useEffect(() => {
     const userEmail = (user?.email || email || '').toLowerCase().trim();
     const isDev = isDeveloperEmail(userEmail);
-    if (isDev) return;
+    if (isDev || isPlanClient) return;
 
     const pollFirestore = async () => {
       try {
@@ -607,7 +757,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     pollFirestore();
     const iv = setInterval(pollFirestore, 10000);
     return () => clearInterval(iv);
-  }, [user, email]);
+  }, [user, email, isPlanClient]);
 
   const ping = (freq: number) => {
     if (!sound) return;
@@ -685,11 +835,61 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     };
     try { localStorage.setItem('active_subscription', JSON.stringify({ ...sub, email: buyerEmail })); } catch {}
     setMobileSub({ label: sub.label, amount: sub.amount, expiryDate: sub.expiryDate });
+    // A new payment reopens paid mode immediately (desktop parity).
+    setPlanPaid(true);
+    setFreeChosen(false);
+    setMobilePaidMode(buyerEmail, true);
+    setMobileFreeModeChosen(buyerEmail, false);
     setStorePlan(null);
     setStoreBot(null);
     setAlert(lang === 'ar' ? 'تم تفعيل الخطة بنجاح ✓' : 'Plan activated successfully ✓');
     setTimeout(() => setAlert(null), 5000);
     goTab('store');
+  };
+
+  // ── Plan controls used by the store card (identical to the desktop site) ──
+  // Return to free: keeps the paid plan OWNED until it expires, but stops using
+  // its features and unlocks the free experience right away.
+  const returnToFreePlan = () => {
+    setFreeChosen(true);
+    setPlanPaid(false);
+    setMobileFreeModeChosen(signedInEmail, true);
+    setMobilePaidMode(signedInEmail, false);
+    setAlert(lang === 'ar' ? 'تم الرجوع للخطة المجانية' : 'Returned to the free plan');
+    setTimeout(() => setAlert(null), 4000);
+  };
+
+  // Re-activate a plan the client still owns.
+  const activatePaidPlan = () => {
+    if (!mobileSub) return;
+    setFreeChosen(false);
+    setPlanPaid(true);
+    setMobileFreeModeChosen(signedInEmail, false);
+    setMobilePaidMode(signedInEmail, true);
+    if (signedInEmail) {
+      let requestNo: number | null = null;
+      try {
+        const o = JSON.parse(localStorage.getItem('active_subscription') || 'null');
+        if (o?.requestNo != null) requestNo = Number(o.requestNo);
+      } catch {}
+      activateClientPlan(signedInEmail, requestNo).catch(() => {});
+    }
+    setAlert(lang === 'ar' ? 'تم تفعيل الخطة المدفوعة ✓' : 'Paid plan activated ✓');
+    setTimeout(() => setAlert(null), 4000);
+  };
+
+  // Delete/cancel the plan permanently (revokes the server grant too).
+  const deleteClientPlan = async () => {
+    if (signedInEmail) await revokeClientPlanGrants(signedInEmail).catch(() => {});
+    try { localStorage.removeItem('active_subscription'); } catch {}
+    try { localStorage.removeItem('client_plan_active'); } catch {}
+    setMobileSub(null);
+    setPlanPaid(false);
+    setFreeChosen(false);
+    setMobilePaidMode(signedInEmail, false);
+    setMobileFreeModeChosen(signedInEmail, false);
+    setAlert(lang === 'ar' ? 'تم حذف الخطة' : 'Plan deleted');
+    setTimeout(() => setAlert(null), 4000);
   };
 
   const pickSymbol = (s: string) => {
@@ -766,9 +966,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'quotes' && isDev && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
-        {/* Desktop parity: dev-only sections never render for clients. */}
-        {tab === 'analysis' && isDev && <MobileAnalysis lang={lang} />}
-        {tab === 'manual' && isDev && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
+        {/* Desktop parity: a paid-plan client in paid mode gets Auto + Manual too. */}
+        {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} />}
+        {tab === 'manual' && canUseAnalysis && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} />}
         {tab === 'store' && !storePlan && (
           <StorePage
@@ -789,8 +989,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
               null,
             )}
             customerPlan={mobileSub}
-            planKeyEntered={isDev || !!mobileSub && new Date(mobileSub.expiryDate).getTime() > Date.now()}
-            paidMode={true}
+            planKeyEntered={isDev || planActive}
+            paidMode={planPaid}
+            onCustomerEnterKey={() => activatePaidPlan()}
+            onCustomerUseFree={() => returnToFreePlan()}
+            onCustomerUsePaid={() => activatePaidPlan()}
+            onCustomerDeletePlan={() => { void deleteClientPlan(); }}
             onRequireAuth={() => setShowLoginModal(true)}
           />
         )}
@@ -821,7 +1025,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} />}
         {children}
       </div>
-      <MobileBottomNav activeTab={tab} onTabChange={goTab} isDeveloper={isDev} lang={lang} />
+      <MobileBottomNav activeTab={tab} onTabChange={goTab} isDeveloper={isDev} hasPlan={canUseAnalysis} lang={lang} />
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
       {detail && <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />}
       {showLoginModal && (

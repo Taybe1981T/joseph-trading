@@ -4,7 +4,7 @@ import { AnalysisResult, TradingStyle } from '../../types';
 import { MobileProgress, runMobileManual, getMobileSymbolGroups, getMobileAllSymbols, addMobileCustomSymbol, unhideMobileSymbol } from '../../services/mobileAnalysisEngine';
 import { TIMEFRAMES, TRADING_STYLES, FREE_SYMBOLS, ALL_SYMBOLS_DB } from '../../constants';
 import { Language } from '../../lib/i18n';
-import { mobileT, detectMobileMode, hasClientPlan } from '../../lib/mobileMode';
+import { mobileT, isMobilePlanClient } from '../../lib/mobileMode';
 
 interface Props { lang: Language; onClose: () => void; onDone: (r: AnalysisResult[]) => void; }
 
@@ -15,10 +15,9 @@ const STYLE_LBL: Record<string, { en: string; ar: string }> = {
 };
 
 function hasPlan(): boolean {
-  // Same detection the app uses everywhere: email-based developer mode OR an active plan.
-  try { if (detectMobileMode().mode === 'developer') return true; } catch {}
-  try { if (hasClientPlan()) return true; } catch {}
-  try { return !!localStorage.getItem('active_subscription'); } catch { return false; }
+  // Same detection the app uses everywhere: developer account OR a running paid
+  // plan that is currently in paid mode (returning to free locks it again).
+  try { return isMobilePlanClient(); } catch { return false; }
 }
 
 export function MobileManualSheet({ lang, onClose, onDone }: Props) {

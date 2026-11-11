@@ -7,20 +7,24 @@ interface MobileBottomNavProps {
   activeTab: MobileTab;
   onTabChange: (tab: MobileTab) => void;
   isDeveloper: boolean;
+  /** A paid-plan client (paid mode) may use the same analysis tools as a developer. */
+  hasPlan?: boolean;
   lang: 'en' | 'ar';
 }
 
-export function MobileBottomNav({ activeTab, onTabChange, isDeveloper: isDev, lang }: MobileBottomNavProps) {
+export function MobileBottomNav({ activeTab, onTabChange, isDeveloper: isDev, hasPlan = false, lang }: MobileBottomNavProps) {
   const isAr = lang === 'ar';
   // Desktop parity (App.tsx DEV_ONLY_PAGES + effectivePage):
   // - CLIENT sees: Home, Trade, Positions, Transactions, Store, Settings.
-  // - DEVELOPER sees everything: + Auto AI + Manual + Clients.
+  // - CLIENT WITH A PAID PLAN also gets Auto AI + Manual (isPlanClient).
+  // - DEVELOPER sees everything: + Clients.
   // The Store is for EVERYONE (a client buys plans/products there, exactly like
-  // on the desktop site); only the AI/dev tools stay developer-only.
+  // on the desktop site).
+  const canAnalyze = isDev || hasPlan;
   const items: { id: MobileTab; label: string; icon: React.ElementType; dev?: boolean }[] = [
     { id: 'home', label: isAr ? 'الرئيسية' : 'Home', icon: Home },
-    ...(isDev ? [{ id: 'analysis' as MobileTab, label: isAr ? 'تحليل تلقائي' : 'Auto AI', icon: Zap, dev: true }] : []),
-    ...(isDev ? [{ id: 'manual' as MobileTab, label: isAr ? 'تحليل يدوي' : 'Manual', icon: Hand, dev: true }] : []),
+    ...(canAnalyze ? [{ id: 'analysis' as MobileTab, label: isAr ? 'تحليل تلقائي' : 'Auto AI', icon: Zap }] : []),
+    ...(canAnalyze ? [{ id: 'manual' as MobileTab, label: isAr ? 'تحليل يدوي' : 'Manual', icon: Hand }] : []),
     { id: 'store', label: isAr ? 'المتجر' : 'Store', icon: Package },
     { id: 'transactions', label: isAr ? 'معاملات' : 'Tx', icon: Receipt },
     { id: 'trade', label: isAr ? 'تداول' : 'Trade', icon: TrendingUp },
