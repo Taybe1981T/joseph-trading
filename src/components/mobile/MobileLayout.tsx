@@ -168,12 +168,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [storePlan, setStorePlan] = useState<{ amount: number; label: string; durationDays: number; planUnit?: string; planUnits?: number } | null>(null);
   const [storeBot, setStoreBot] = useState<StoreBot | null>(null);
   const [mobileSub, setMobileSub] = useState<{ label: string; amount: number; expiryDate: string } | null>(() => {
-    try {
-      const o = JSON.parse(localStorage.getItem('active_subscription') || 'null');
-      return o && o.expiryDate
-        ? { label: String(o.label || ''), amount: Number(o.amount || 0), expiryDate: String(o.expiryDate) }
-        : null;
-    } catch { return null; }
+    // Strict owner read: the stored record must belong to the account signed in
+    // on THIS device. A guest or another account never sees it.
+    const sub = readMobileSubscription();
+    return sub ? { label: sub.label, amount: sub.amount, expiryDate: sub.expiryDate } : null;
   });
   // Paid mode / explicit free-mode choice — SAME per-account keys as the desktop
   // site, so a client can move between paid and free on either device and the
@@ -348,29 +346,23 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       setMobileSub(null);
       return;
     }
-    try {
-      const raw = localStorage.getItem('active_subscription');
-      if (!raw) { setMobileSub(null); return; }
-      const sub = JSON.parse(raw);
-      const subEmail = String(sub?.email || '').toLowerCase().trim();
-      if (subEmail && subEmail !== signedInEmail) { setMobileSub(null); return; }
-      if (sub?.expiryDate && new Date(sub.expiryDate).getTime() <= Date.now()) {
-        localStorage.removeItem('active_subscription');
-        setMobileSub(null);
-        return;
-      }
-      setMobileSub({
-        label: String(sub.label || ''),
-        amount: Number(sub.amount || 0),
-        expiryDate: String(sub.expiryDate || ''),
-      });
-    } catch { setMobileSub(null); }
+    // Strict ownership: only the account named in the record may use it. A
+    // legacy record with NO email belongs to nobody and is never adopted.
+    const sub = readMobileSubscription(signedInEmail);
+    if (!sub) { setMobileSub(null); return; }
+    if (sub.expiryDate && new Date(sub.expiryDate).getTime() <= Date.now()) {
+      localStorage.removeItem('active_subscription');
+      setMobileSub(null);
+      return;
+    }
+    setMobileSub({ label: sub.label, amount: sub.amount, expiryDate: sub.expiryDate });
   }, [signedInEmail]);
 
   // Plan reached its expiry while the app is open → back to free, like the site.
   useEffect(() => {
+    if (!signedInEmail) return;
     const iv = setInterval(() => {
-      const sub = readMobileSubscription();
+      const sub = readMobileSubscription(signedInEmail);
       if (!sub?.expiryDate) return;
       const ms = new Date(sub.expiryDate).getTime();
       if (!isFinite(ms) || ms > Date.now()) return;
@@ -423,6 +415,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         };
         let prev: any = null;
         try { prev = JSON.parse(localStorage.getItem('active_subscription') || 'null'); } catch {}
+        // Only merge with a record this account owns; never let another
+        // account's leftover plan lengthen (or rename) this one.
+        const prevOwner = String(prev?.email || '').toLowerCase().trim();
+        if (prevOwner !== signedInEmail) prev = null;
         const prevEnd = prev?.expiryDate ? new Date(prev.expiryDate).getTime() : 0;
         const thisEnd = next.expiryDate ? new Date(next.expiryDate).getTime() : 0;
         // Never keep a date the server no longer reports (an expired plan must go),
@@ -526,6 +522,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       localStorage.removeItem('finalyze_user');
       localStorage.removeItem('finalyze_auth_user');
       localStorage.removeItem('finalyze_dev_email');
+      // Legacy device-global plan flag: never let it survive a logout.
+      localStorage.removeItem('client_plan_active');
       // Per-account assets (finalyze_custom_avatar_<email>) are intentionally
       // NOT deleted: signing out must not erase the owner's picture. They are
       // scoped by email, so another account can never read them.
@@ -533,6 +531,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     setUser(null);
     setEmail('');
     setIsDev(false);
+    // Guest mode from this instant: no plan is visible anywhere.
+    setMobileSub(null);
+    setPlanPaid(false);
     try { window.location.reload(); } catch {}
   };
 
@@ -860,7 +861,6 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
           rank: 0,
         }, { merge: true });
       } catch (e) { console.warn('Auto client registration on payment failed:', e); }
-      try { localStorage.setItem('client_plan_active', '1'); } catch {}
     }
     const sub = {
       label: plan?.label || '',
@@ -873,6 +873,14 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       planUnit: plan?.planUnit,
       planUnits: plan?.planUnits,
     };
+    // A plan may only be activated for a SIGNED-IN buyer whose email owns it.
+    // Without an identity nothing is stored, so a guest can never end up with
+    // somebody else's plan on this device.
+    if (!buyerEmail) {
+      setAlert(lang === 'ar' ? 'سجّل الدخول أولاً لتفعيل الخطة' : 'Sign in first to activate the plan');
+      setTimeout(() => setAlert(null), 5000);
+      return;
+    }
     try { localStorage.setItem('active_subscription', JSON.stringify({ ...sub, email: buyerEmail })); } catch {}
     setMobileSub({ label: sub.label, amount: sub.amount, expiryDate: sub.expiryDate });
     // A new payment reopens paid mode immediately (desktop parity).
@@ -910,7 +918,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       let requestNo: number | null = null;
       try {
         const o = JSON.parse(localStorage.getItem('active_subscription') || 'null');
-        if (o?.requestNo != null) requestNo = Number(o.requestNo);
+        if (String(o?.email || '').toLowerCase().trim() === signedInEmail && o?.requestNo != null) {
+          requestNo = Number(o.requestNo);
+        }
       } catch {}
       activateClientPlan(signedInEmail, requestNo).catch(() => {});
     }
@@ -921,7 +931,13 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // Delete/cancel the plan permanently (revokes the server grant too).
   const deleteClientPlan = async () => {
     if (signedInEmail) await revokeClientPlanGrants(signedInEmail).catch(() => {});
-    try { localStorage.removeItem('active_subscription'); } catch {}
+    // Only remove the local record when this account owns it — never wipe a
+    // plan that belongs to a different account on this device.
+    try {
+      const o = JSON.parse(localStorage.getItem('active_subscription') || 'null');
+      const owner = String(o?.email || '').toLowerCase().trim();
+      if (owner && (owner === signedInEmail || isDev)) localStorage.removeItem('active_subscription');
+    } catch {}
     try { localStorage.removeItem('client_plan_active'); } catch {}
     setMobileSub(null);
     setPlanPaid(false);

@@ -233,11 +233,14 @@ export default function App() {
       return;
     }
     try {
+      const myEmail = (user.email || '').toLowerCase().trim();
       const saved = localStorage.getItem('active_subscription');
       if (!saved) { setActiveSubscription(null); return; }
       const sub = JSON.parse(saved);
       const subEmail = String(sub?.email || '').toLowerCase().trim();
-      if (subEmail && subEmail !== user.email.toLowerCase().trim()) {
+      // Strict ownership: the plan must name this exact account. A record with
+      // no owner (legacy) or another account's record unlocks NOTHING here.
+      if (!subEmail || subEmail !== myEmail) {
         setActiveSubscription(null);
         return;
       }
@@ -246,7 +249,7 @@ export default function App() {
         setActiveSubscription(null);
         return;
       }
-      setActiveSubscription({ ...sub, email: user.email.toLowerCase().trim() });
+      setActiveSubscription({ ...sub, email: myEmail });
     } catch {
       setActiveSubscription(null);
     }
@@ -258,9 +261,12 @@ export default function App() {
     if (!activeSubscription?.expiryDate) return;
     const checkExpiry = () => {
       try {
+        const myEmail = (user?.email || '').toLowerCase().trim();
         const saved = localStorage.getItem('active_subscription');
         if (!saved) return;
         const sub = JSON.parse(saved);
+        // Never touch a record that belongs to a different account.
+        if (String(sub?.email || '').toLowerCase().trim() !== myEmail) return;
         if (sub?.expiryDate && new Date(sub.expiryDate).getTime() <= Date.now()) {
           console.log('[EXPIRY] Plan reached expiry time at', sub.expiryDate, '- removing active subscription');
           localStorage.removeItem('active_subscription');
@@ -273,7 +279,7 @@ export default function App() {
     checkExpiry();
     const t = setInterval(checkExpiry, 1000);
     return () => clearInterval(t);
-  }, [activeSubscription?.expiryDate]);
+  }, [activeSubscription?.expiryDate, user?.email]);
 
   const DEV_EMAILS = DEVELOPER_EMAILS;
 
@@ -393,7 +399,14 @@ const isDeveloperSession = () => {
     if (user?.email) {
       await revokeClientPlanGrants(user.email).catch(() => {});
     }
-    try { localStorage.removeItem('active_subscription'); } catch {}
+    // Only this account's own record is removed; another account's plan on the
+    // same browser is left untouched.
+    try {
+      const o = JSON.parse(localStorage.getItem('active_subscription') || 'null');
+      const owner = String(o?.email || '').toLowerCase().trim();
+      const myEmail = (user?.email || '').toLowerCase().trim();
+      if (owner && (owner === myEmail || isDeveloperSession())) localStorage.removeItem('active_subscription');
+    } catch {}
     setActiveSubscription(null);
     setFreeModeChosen(false);
     setPaidMode(false);

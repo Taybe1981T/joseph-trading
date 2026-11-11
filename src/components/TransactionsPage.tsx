@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, RefreshCw, XCircle, Receipt, CheckCircle2, Clock, Store, Trash2, AlertTriangle } from 'lucide-react';
 import { Language } from '../lib/i18n';
-import { loadAllSessions, cancelSession, getLastEmail, clearLocalSessions, removeLocalSessionById, PaymentSession } from '../services/paymentSession';
+import { loadAllSessions, cancelSession, clearLocalSessions, removeLocalSessionById, PaymentSession } from '../services/paymentSession';
 import { fetchPaymentRequests, fetchUserPaymentRequests, fetchUserGrants, fetchDevHistory, deleteTransaction, deleteAllTransactions, deleteMyTransaction, deleteAllMyTransactions, fetchHiddenTxKeys, hideTxKeys, PaymentRequest, PaymentGrant } from '../services/paymentRequests';
 import { db } from '../lib/firebase';
 import { deleteDoc, doc, getDocs, collection, query, where } from 'firebase/firestore';
@@ -49,9 +49,11 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
   const [confirmDeleteAll, setConfirmDeleteAll] = useState(false);
   const isAr = lang === 'ar';
 
-  // Whose transactions this page shows. A client falls back to the email they
-  // paid with, so a customer always reaches their own list and nothing else.
-  const myEmail = (isDeveloper ? autoEmail : (autoEmail || getLastEmail()) || '').toLowerCase().trim();
+  // Whose transactions this page shows. It is ALWAYS the signed-in account's
+  // own email. Never fall back to a device-global "last payment email": that
+  // belongs to whoever paid on this browser, not to the current visitor, and it
+  // is exactly what made a guest / new account see another client's plan.
+  const myEmail = (autoEmail || '').toLowerCase().trim();
 
   const load = useCallback(async () => {
     if (!myEmail) { setLoaded(true); return; }
@@ -122,12 +124,16 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
       });
     });
 
-    // Also include active_subscription from localStorage if present and not already displayed
+    // Also include active_subscription from localStorage if present, not already
+    // displayed, and OWNED by the account whose page this is. A developer may
+    // see the device record; a client sees only their own; a guest sees none.
     try {
       const activeSubRaw = localStorage.getItem('active_subscription');
       if (activeSubRaw) {
         const activeSub = JSON.parse(activeSubRaw);
-        if (activeSub && activeSub.label) {
+        const subOwner = String(activeSub?.email || '').toLowerCase().trim();
+        const ownedByViewer = isDeveloper || (!!myEmail && subOwner === myEmail);
+        if (ownedByViewer && activeSub && activeSub.label) {
           const hasMatchingRow = [...merged.values()].some(r =>
             (activeSub.requestNo && r.requestNo === activeSub.requestNo) ||
             (r.title === activeSub.label && r.status === 'confirmed')

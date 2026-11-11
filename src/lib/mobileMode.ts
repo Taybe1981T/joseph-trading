@@ -30,17 +30,34 @@ export interface MobileSubscription {
   label: string;
   amount: number;
   expiryDate: string;
+  /** Owner of the plan. A record without one belongs to NOBODY. */
+  email?: string;
 }
 
-/** The stored plan record, exactly as the desktop site writes it. */
-export function readMobileSubscription(): MobileSubscription | null {
+/**
+ * The stored plan record — ONLY when it belongs to the given account (or the
+ * account currently signed in on this device).
+ *
+ * A plan is a per-account entitlement. `active_subscription` lives in
+ * device-global localStorage, so a guest, a brand-new account or any other
+ * account signing in on the same phone must NEVER inherit it:
+ *   - no signed-in email            -> null (guests own nothing)
+ *   - record has no owner email     -> null (legacy/unknown records are inert)
+ *   - record owner != signed-in     -> null
+ */
+export function readMobileSubscription(email?: string | null): MobileSubscription | null {
+  const owner = planEmail(email);
+  if (!owner) return null;
   try {
     const o = JSON.parse(localStorage.getItem('active_subscription') || 'null');
     if (!o) return null;
+    const stored = String(o.email || '').toLowerCase().trim();
+    if (!stored || stored !== owner) return null;
     return {
       label: String(o.label || ''),
       amount: Number(o.amount || 0),
       expiryDate: String(o.expiryDate || ''),
+      email: stored,
     };
   } catch {
     return null;
@@ -105,21 +122,19 @@ export function isMobilePlanClient(email?: string | null): boolean {
   const info = detectMobileMode();
   if (info.mode === 'developer') return true;
   if (!info.email) return false;
-  if (!mobilePaidMode(email || info.email)) return false;
-  return mobileSubscriptionActive();
+  return hasClientPlan(email || info.email);
 }
 
-export function hasClientPlan(): boolean {
-  // The real source of truth is the stored subscription: it carries an expiry,
-  // so an expired plan must not keep unlocking paid sections.
-  const sub = readMobileSubscription();
-  if (sub) return mobileSubscriptionActive(sub) && mobilePaidMode();
-  // Legacy flag written by an older build when a payment completed.
-  try {
-    return localStorage.getItem('client_plan_active') === '1' && mobilePaidMode();
-  } catch {
-    return false;
-  }
+export function hasClientPlan(email?: string | null): boolean {
+  const info = detectMobileMode();
+  const owner = planEmail(email) || info.email;
+  // No identity = no plan. A guest never owns a subscription.
+  if (!owner) return false;
+  if (!mobilePaidMode(owner)) return false;
+  // readMobileSubscription is strict: it returns the record only when its stored
+  // owner email equals `owner`, so an expired/foreign/legacy record never counts.
+  const sub = readMobileSubscription(owner);
+  return !!sub && mobileSubscriptionActive(sub);
 }
 
 export function useMobileMode() {
