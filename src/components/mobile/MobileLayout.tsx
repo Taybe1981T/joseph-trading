@@ -324,8 +324,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     setPlanPaid(mobilePaidMode(signedInEmail));
     setFreeChosen(mobileFreeModeChosen(signedInEmail));
     if (!signedInEmail) {
+      // Not signed in: HIDE the plan, but do not delete it. The record carries
+      // its owner's email, so nobody else can ever see it, and the real owner
+      // gets it back on the next sign-in (desktop parity).
       setMobileSub(null);
-      try { localStorage.removeItem('active_subscription'); } catch {}
       return;
     }
     try {

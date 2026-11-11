@@ -225,8 +225,11 @@ export default function App() {
   // account never inherits someone else's plan from localStorage.
   useEffect(() => {
     if (!user?.email) {
+      // Signed out (or auth not resolved yet): HIDE the plan but keep the record.
+      // It stores its owner's email, so no other account can inherit it, and
+      // deleting it here destroyed a legitimate plan whenever this effect ran
+      // before Firebase finished restoring the session.
       setActiveSubscription(null);
-      try { localStorage.removeItem('active_subscription'); } catch {}
       return;
     }
     try {

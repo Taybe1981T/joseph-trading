@@ -12,8 +12,22 @@ import './styles/mobile_pt2.css';
 
 (window as any).__BUILD = 'v3.2.0';
 
+/** Phone layout? Decided SYNCHRONOUSLY, before the first render. */
+function detectIsMobile(): boolean {
+  try {
+    const forced = new URLSearchParams(window.location.search).get('mobile') === '1';
+    return window.matchMedia('(max-width: 768px)').matches || forced;
+  } catch {
+    return false;
+  }
+}
+
 function AppWrapper() {
-  const [isMobile, setIsMobile] = useState<boolean>(false);
+  // IMPORTANT: this must never start as `false` and flip later. With `false`
+  // the desktop <App /> mounted for one render on a phone and its "no signed-in
+  // user" effect deleted `active_subscription` from localStorage — which silently
+  // destroyed a paid client's plan before the mobile layout ever loaded.
+  const [isMobile, setIsMobile] = useState<boolean>(() => detectIsMobile());
 
   // Firebase auth يعمل في الخلفية فقط — لا يوقف عرض واجهة الموبايل إطلاقاً
   useEffect(() => {
