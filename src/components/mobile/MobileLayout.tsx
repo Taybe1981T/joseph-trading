@@ -33,7 +33,7 @@ import {
   startMobilePositionManager,
 } from '../../services/mobileTradeBridge';
 import { auth, db } from '../../lib/firebase';
-import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 
 interface MobileSignal {
@@ -186,15 +186,28 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     return code || (isAr ? 'تعذر تسجيل الدخول. أعد المحاولة.' : 'Sign-in failed. Try again.');
   };
 
-  // A popup cannot always be used on mobile. When signInWithPopup is blocked
-  // we switch to a full-page redirect; this completes the sign-in on return.
+  // Full-page redirect sign-in: this completes the sign-in when Google sends
+  // the browser back to the site.
   useEffect(() => {
     let cancelled = false;
     getRedirectResult(auth)
       .then((result) => {
         if (cancelled || !result?.user?.email) return;
+        const em = result.user.email.toLowerCase().trim();
         setUser(result.user);
-        setEmail(result.user.email.toLowerCase().trim());
+        setEmail(em);
+        setIsDev(isDeveloperEmail(em));
+        try {
+          localStorage.setItem('finalyze_user', JSON.stringify({ email: em, uid: result.user.uid }));
+          localStorage.setItem('finalyze_auth_user', JSON.stringify({ email: em, uid: result.user.uid }));
+          localStorage.setItem('finalyze_auth_timestamp', Date.now().toString());
+          const raw = localStorage.getItem('finalyze_saved_accounts');
+          const arr: unknown = raw ? JSON.parse(raw) : [];
+          const list = Array.isArray(arr) ? arr.map((x) => String(x).toLowerCase().trim()) : [];
+          const next = [em, ...list.filter((x) => x && x !== em)].slice(0, 8);
+          localStorage.setItem('finalyze_saved_accounts', JSON.stringify(next));
+          setSavedAccounts(next);
+        } catch {}
       })
       .catch((e) => {
         if (!cancelled) setLoginError(loginErrorText(e, lang === 'ar'));
@@ -281,47 +294,15 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     setLoginError(null);
     try {
       const provider = new GoogleAuthProvider();
-      if (emailHint) {
-        provider.setCustomParameters({ login_hint: emailHint });
-      }
-      let result;
-      try {
-        result = await signInWithPopup(auth, provider);
-      } catch (popupError: any) {
-        const code = String(popupError?.code || '');
-        // Popups are routinely blocked on phones and in-app browsers. Fall back
-        // to a redirect sign-in instead of silently staying a guest.
-        if (
-          code === 'auth/popup-blocked' ||
-          code === 'auth/operation-not-supported-in-this-environment' ||
-          code === 'auth/cancelled-popup-request'
-        ) {
-          await signInWithRedirect(auth, provider);
-          return;
-        }
-        throw popupError;
-      }
-      const u = result?.user;
-      const em = (u?.email || '').toLowerCase().trim();
-      if (!u || !em) throw new Error('no_email');
-
-      // Make the signed-in account visible RIGHT NOW (the auth listener also
-      // fires, but this removes any dependency on listener timing).
-      setUser(u);
-      setEmail(em);
-      setIsDev(isDeveloperEmail(em));
-      try {
-        localStorage.setItem('finalyze_user', JSON.stringify({ email: em, uid: u.uid }));
-        localStorage.setItem('finalyze_auth_user', JSON.stringify({ email: em, uid: u.uid }));
-        localStorage.setItem('finalyze_auth_timestamp', Date.now().toString());
-      } catch {}
-
-      setSavedAccounts(prev => {
-        if (prev.includes(em)) return prev;
-        const next = [...prev, em];
-        try { localStorage.setItem('finalyze_saved_accounts', JSON.stringify(next)); } catch {}
-        return next;
-      });
+      const params: Record<string, string> = { prompt: 'select_account' };
+      if (emailHint) params.login_hint = emailHint;
+      provider.setCustomParameters(params);
+      // Full-page redirect is the default on phones: popups are routinely
+      // blocked in mobile browsers and in-app webviews, and a blocked popup used
+      // to leave the visitor stuck as a guest. getRedirectResult below finishes
+      // the sign-in when Google sends the browser back.
+      await signInWithRedirect(auth, provider);
+      return;
     } catch (e: any) {
       console.error(e);
       setLoginError(loginErrorText(e, lang === 'ar'));

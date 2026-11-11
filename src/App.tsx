@@ -2703,7 +2703,11 @@ const started = planGrants
     return () => { stopped = true; clearInterval(interval); };
   }, [user?.email]);
 
-  const handleLogin = async (which: AuthProviderId = 'google', emailHint?: string) => {
+  const handleLogin = async (
+    which: AuthProviderId = 'google',
+    emailHint?: string,
+    mode: 'redirect' | 'popup' = 'redirect',
+  ) => {
     // This is also wired straight to onClick in a couple of places, so a stray
     // click event must never be mistaken for a provider id.
     const providerId: AuthProviderId = which === 'microsoft' ? 'microsoft' : 'google';
@@ -2712,11 +2716,21 @@ const started = planGrants
     setManualAuthUrl(null);
     setRedirecting(true);
     setRedirectingProvider(providerId);
+    let keepBusy = false;
     try {
       const provider = providerId === 'microsoft' ? new OAuthProvider('microsoft.com') : new GoogleAuthProvider();
       const params: Record<string, string> = { prompt: 'select_account' };
       if (emailHint) params.login_hint = emailHint;
       provider.setCustomParameters(params);
+
+      // Full-page redirect is the default: it works in every browser, including
+      // in-app webviews and browsers that block popups or third-party storage.
+      // The result is completed by getRedirectResult when Google sends us back.
+      if (mode === 'redirect') {
+        await signInWithRedirect(auth, provider);
+        keepBusy = true;
+        return;
+      }
 
       let result;
       try {
@@ -2732,6 +2746,7 @@ const started = planGrants
           code === 'auth/web-storage-unsupported'
         ) {
           await signInWithRedirect(auth, provider);
+          keepBusy = true;
           return;
         }
         throw popupError;
@@ -2748,7 +2763,7 @@ const started = planGrants
     } catch (error: any) {
       console.error("=== OAuth sign-in ERROR ===", error);
       if (error.code === 'auth/popup-closed-by-user') {
-        setLoginError('\u0644\u0642\u062f \u0623\u063a\u0644\u0642\u062a \u0646\u0627\u0641\u0630\u0629 \u062a\u0633\u062c\u064a\u0644 \u0627\u0644\u062f\u062e\u0648\u0644. \u062a\u0639\u064a\u062f \u0644\u0644\u0645\u062d\u0627\u0648\u0644 \u0645\u0631\u0629 \u0623\u062e\u0631\u0649.');
+        setLoginError('أُغلقت نافذة Google قبل إكمال الدخول. اضغط «المتابعة بحساب Google» — سيتم الدخول في نفس الصفحة بدون نافذة.');
       } else if (error.code === 'auth/unauthorized-domain') {
         setLoginError(`\u062d\u0635\u0631 \u0627\u0644\u0645\u0646\u0637\u0642\u0629 (${window.location.hostname}) \u063a\u064a\u0631 \u0645\u0635\u063a\u0651\u064a\u0631 \u0639\u0644\u0649 Firebase.`);
       } else if (error.code === 'auth/popup-blocked' || error.code === 'auth/blocked-by-popup-blocker') {
@@ -2762,8 +2777,12 @@ const started = planGrants
       // sign-in surface is not on screen, open it so the error is visible.
       if (!clientLoginRequired) setAuthModalOpen(true);
     } finally {
-      setRedirecting(false);
-      setRedirectingProvider(null);
+      // While a redirect sign-in is navigating away, keep the "Opening Google…"
+      // state; resetting it here made the modal flash back to idle.
+      if (!keepBusy) {
+        setRedirecting(false);
+        setRedirectingProvider(null);
+      }
     }
   };
 

@@ -10,7 +10,7 @@ interface AuthModalProps {
   lang: Language;
   onClose: () => void;
   /** Google-only sign-in. `emailHint` preselects a saved account in Google's chooser. */
-  onLogin: (provider?: AuthProviderId, emailHint?: string) => void;
+  onLogin: (provider?: AuthProviderId, emailHint?: string, mode?: 'redirect' | 'popup') => void;
   loginError?: string | null;
   redirecting?: boolean;
   /** Bold context line, e.g. the purchase gate message. */
@@ -54,9 +54,9 @@ export default function AuthModal({
   const heading = title || (isAr ? 'تسجيل الدخول أو إنشاء حساب' : 'Sign in or create an account');
   const hasAccounts = accounts.length > 0;
 
-  const start = (emailHint?: string) => {
+  const start = (emailHint?: string, mode: 'redirect' | 'popup' = 'redirect') => {
     if (emailHint) rememberSavedEmail(emailHint);
-    onLogin('google', emailHint);
+    onLogin('google', emailHint, mode);
   };
 
   const body = useMemo(() => (
@@ -143,6 +143,15 @@ export default function AuthModal({
         {redirecting
           ? (isAr ? 'جاري فتح Google…' : 'Opening Google…')
           : (isAr ? 'المتابعة بحساب Google' : 'Continue with Google')}
+      </button>
+
+      <button
+        type="button"
+        onClick={() => start(undefined, 'popup')}
+        disabled={redirecting}
+        className="w-full text-center text-[11px] font-bold text-slate-400 hover:text-emerald-300 underline underline-offset-4 transition-colors disabled:opacity-50"
+      >
+        {isAr ? 'أو الدخول في نافذة منبثقة بدلاً من ذلك' : 'Or sign in with a popup instead'}
       </button>
 
       {loginError && (
