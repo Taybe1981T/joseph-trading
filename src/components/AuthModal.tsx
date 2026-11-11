@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { X, Loader2, ShieldCheck, UserRound, ArrowLeft } from 'lucide-react';
 import { Language } from '../lib/i18n';
 import { AuthProviderId } from '../lib/authPolicy';
@@ -159,22 +159,23 @@ export default function AuthModal({
     </div>
   ), [accounts, hasAccounts, isAr, loginError, notice, redirecting]);
 
+  // A plain conditional (no AnimatePresence exit) guarantees the overlay is
+  // removed the moment it closes. A stuck exit animation left an invisible
+  // full-screen layer behind that blocked the whole page.
+  if (!open) return null;
+
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-start sm:items-center justify-center p-4 overflow-y-auto"
-          onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
-        >
-          <motion.div
-            initial={{ opacity: 0, y: 16, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 16, scale: 0.97 }}
-            className="w-full max-w-md bg-brand-alt border border-white/10 rounded-3xl shadow-2xl p-5 sm:p-6 my-auto"
-          >
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-start sm:items-center justify-center p-4 overflow-y-auto"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 16, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        className="w-full max-w-md bg-brand-alt border border-white/10 rounded-3xl shadow-2xl p-5 sm:p-6 my-auto"
+      >
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
                 <h3 className="text-lg font-black text-white leading-tight">{heading}</h3>
@@ -192,9 +193,7 @@ export default function AuthModal({
               </button>
             </div>
             {body}
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+      </motion.div>
+    </motion.div>
   );
 }
