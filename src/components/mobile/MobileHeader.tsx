@@ -81,10 +81,27 @@ export function MobileHeader({
             </div>
           )}
         </div>
-        <button className="mt5-icon-btn" style={{ width: 72, height: 72, position: 'relative' }} onClick={onAutoAnalysisToggle} aria-label="Auto Analysis">
-          <Activity size={34} style={{ color: autoAnalysisRunning ? '#10B981' : '#ffffff', animation: autoAnalysisRunning ? 'pulse 1.5s infinite' : 'none' }} />
-          <span style={{ position: 'absolute', top: 4, right: 4, width: 16, height: 16, borderRadius: '50%', background: autoAnalysisRunning ? '#10B981' : '#ffffff' }} />
-        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+          <button className="mt5-icon-btn" style={{ width: 72, height: 72, position: 'relative' }} onClick={onAutoAnalysisToggle} aria-label={isAr ? 'بدء التحليل التلقائي' : 'Start auto analysis'}>
+            <Activity size={34} style={{ color: autoAnalysisRunning ? '#10B981' : '#ffffff', animation: autoAnalysisRunning ? 'pulse 1.5s infinite' : 'none' }} />
+            <span style={{ position: 'absolute', top: 4, right: 4, width: 16, height: 16, borderRadius: '50%', background: autoAnalysisRunning ? '#10B981' : '#ffffff' }} />
+          </button>
+          {/* Developer + paid client only: this button starts the same auto
+              analysis the desktop icon starts. Guests / free accounts do not get
+              the control at all. */}
+          {onAutoAnalysisToggle && (
+            <span style={{
+              fontSize: 9,
+              fontWeight: 900,
+              letterSpacing: '0.08em',
+              lineHeight: 1,
+              textTransform: 'uppercase',
+              color: autoAnalysisRunning ? '#10B981' : '#F59E0B',
+            }}>
+              {autoAnalysisRunning ? (isAr ? 'يعمل' : 'ON') : (isAr ? 'بدء' : 'START')}
+            </span>
+          )}
+        </div>
         <button className="mt5-icon-btn" style={{ width: 36, height: 36 }} onClick={toggleTheme} aria-label="Theme">
           {isDark ? <Sun size={17} /> : <Moon size={17} />}
         </button>

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, RefreshCw, XCircle, Receipt, CheckCircle2, Clock, Store, Trash2, AlertTriangle } from 'lucide-react';
 import { Language } from '../lib/i18n';
-import { loadAllSessions, cancelSession, clearLocalSessions, removeLocalSessionById, PaymentSession } from '../services/paymentSession';
-import { fetchPaymentRequests, fetchUserPaymentRequests, fetchUserGrants, fetchDevHistory, deleteTransaction, deleteAllTransactions, deleteMyTransaction, deleteAllMyTransactions, fetchHiddenTxKeys, hideTxKeys, PaymentRequest, PaymentGrant } from '../services/paymentRequests';
+import { loadAllSessions, cancelSession, clearLocalSessions, removeLocalSessionById, createSession, PaymentSession } from '../services/paymentSession';
+import { fetchPaymentRequests, fetchUserPaymentRequests, fetchUserGrants, fetchDevHistory, deleteTransaction, deleteAllTransactions, deleteMyTransaction, deleteAllMyTransactions, fetchHiddenTxKeys, hideTxKeys, cleanupPendingPlanRequests, PaymentRequest, PaymentGrant } from '../services/paymentRequests';
 import { db } from '../lib/firebase';
 import { deleteDoc, doc, getDocs, collection, query, where } from 'firebase/firestore';
 import PaymentRequestsSection from './PaymentRequestsSection';
@@ -58,6 +58,12 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
   const load = useCallback(async () => {
     if (!myEmail) { setLoaded(true); return; }
     setLoading(true);
+    // Automatic housekeeping (phone + desktop): a client never keeps more than
+    // two pending rows of the same plan type. Once a third appears, the three
+    // oldest are deleted before the list is shown.
+    if (!isDeveloper) {
+      try { await cleanupPendingPlanRequests(myEmail); } catch {}
+    }
     const [sessions, requests, grants] = await Promise.all([
       loadAllSessions(myEmail),
       isDeveloper ? fetchPaymentRequests() : fetchUserPaymentRequests(myEmail),
@@ -188,6 +194,42 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
   const handleCancel = async (id: string) => {
     await cancelSession(id);
     load();
+  };
+
+  // Resume a pending row. Newer rows keep their session record (withdrawing no
+  // longer deletes it); older pending requests get a session rebuilt from the
+  // saved request, so "Resume" works for every client on phone and desktop.
+  const handleResume = async (t: TxRow) => {
+    if (t.session) { onResumeSession?.(t.session); return; }
+    const r = t.request;
+    if (!r) return;
+    try {
+      const s = await createSession({
+        kind: r.kind,
+        botId: r.botId,
+        botName: r.botName,
+        planLabel: r.planLabel,
+        durationDays: r.durationDays,
+        planUnit: r.planUnit,
+        planUnits: r.planUnits,
+        amountUsd: r.amountUsd,
+        // NOTE: the request stores the CONFIRM method ("manual"), not the coin
+        // network, so it must not be restored as a network. Leaving it empty
+        // makes the modal show the address list again, which is exactly where
+        // the client needs to continue.
+        symbol: r.coinId,
+        label: r.coinName,
+        address: r.address,
+        coinId: r.coinId,
+        coinName: r.coinName,
+        coinAmountExpected: r.coinAmountExpected,
+        buyerEmail: r.buyerEmail,
+        requestNo: r.requestNo,
+        timerMinutes: 0,
+        activeUntil: Date.now(),
+      } as any);
+      onResumeSession?.(s);
+    } catch {}
   };
 
   // حذف معاملة فردية — يحاول السيرفر أولاً، إن فشل يحذف مباشرة من Firestore
@@ -485,23 +527,29 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
                   </span>
                 </div>
                 <div className="flex items-center gap-2.5 mt-3 flex-wrap">
-                  {(t.status === 'active' || t.status === 'pending') && t.session && (
+                  {(t.status === 'active' || t.status === 'pending' || (t.status === 'cancelled' && t.session?.status === 'cancelled' && t.request?.status !== 'rejected')) && (t.session || t.request) && (
                     <button
-                      onClick={() => onResumeSession?.(t.session!)}
+                      onClick={() => handleResume(t)}
                       className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#F59E0B] text-black font-black text-sm uppercase tracking-wider hover:bg-[#d97706] transition-all shadow-md active:scale-95"
                     >
                       <RefreshCw size={14} />
                       {isAr ? 'متابعة المعاملة' : 'Resume'}
                     </button>
                   )}
-                  {t.status === 'active' && t.session && (
+                  {((t.status === 'active' || t.status === 'pending') && t.session && t.session.status !== 'cancelled') && (
                     <button
                       onClick={() => handleCancel(t.session!.id)}
                       className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-300 hover:text-red-400 hover:border-red-500/40 text-sm font-black uppercase tracking-wider transition-all"
                     >
                       <XCircle size={14} />
-                      {isAr ? 'إلغاء' : 'Cancel'}
+                      {isAr ? 'سحب الدفع' : 'Withdraw'}
                     </button>
+                  )}
+                  {t.status === 'pending' && t.session?.status === 'cancelled' && (
+                    <span className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-sm font-black uppercase tracking-wider">
+                      <Clock size={14} />
+                      {isAr ? 'تم سحب الدفع — يمكنك الاستئناف' : 'Withdrawn — you can resume'}
+                    </span>
                   )}
                   {t.status === 'confirmed' && (
                     <span className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-sm font-black uppercase tracking-wider">
@@ -519,9 +567,13 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
                     </button>
                   )}
                   {(t.status === 'cancelled') && (
-                    <span className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 text-sm font-black uppercase tracking-wider">
+                    <span className={(t.session?.status === 'cancelled' && t.request?.status !== 'rejected')
+                      ? 'flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 text-sm font-black uppercase tracking-wider'
+                      : 'flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-500/15 border border-red-500/30 text-red-400 text-sm font-black uppercase tracking-wider'}>
                       <XCircle size={14} />
-                      {isAr ? 'تم الرفض / الإلغاء' : 'Rejected / cancelled'}
+                      {(t.session?.status === 'cancelled' && t.request?.status !== 'rejected')
+                        ? (isAr ? 'تم سحب الدفع — يمكنك الاستئناف' : 'Withdrawn — you can resume')
+                        : (isAr ? 'تم الرفض / الإلغاء' : 'Rejected / cancelled')}
                     </span>
                   )}
                   <button

@@ -1,6 +1,7 @@
 import { db, auth } from '../lib/firebase';
 import { clientDocId } from '../lib/clientIds';
 import { ensureClientIdentity } from './clientIdentity';
+import { removeLocalSessionById } from './paymentSession';
 import {
   collection,
   addDoc,
@@ -220,6 +221,65 @@ export async function createPaymentRequest(
     createdAt: Date.now(),
   };
 }
+
+// ── Pending-plan housekeeping ───────────────────────────────────────────────
+// A client who steps back from a payment keeps a pending row so they can resume.
+// Pending rows of the SAME plan type must never pile up: when a group reaches 3,
+// the three oldest are removed automatically (Transactions, phone AND desktop).
+// Only pending PLAN requests are touched — never an approved grant, never a bot.
+function planTypeKey(r: PaymentRequest): string {
+  const unit = String(r.planUnit || '').toLowerCase().trim();
+  const units = Number(r.planUnits || 0) || 1;
+  if (unit) return `${unit}:${units}`;
+  const label = String(r.planLabel || '').toLowerCase().trim();
+  return label || 'plan';
+}
+
+export async function cleanupPendingPlanRequests(email: string): Promise<number> {
+  const owner = (email || '').toLowerCase().trim();
+  if (!owner) return 0;
+  let removed = 0;
+  try {
+    const all = await fetchUserPaymentRequests(owner);
+    const pending = (all || []).filter(
+      (r) => (r.kind || 'plan') === 'plan' && (r.status || 'pending') === 'pending',
+    );
+    const groups = new Map<string, PaymentRequest[]>();
+    pending.forEach((r) => {
+      const key = planTypeKey(r);
+      const arr = groups.get(key) || [];
+      arr.push(r);
+      groups.set(key, arr);
+    });
+    for (const arr of groups.values()) {
+      if (arr.length < 3) continue;
+      const victims = [...arr]
+        .sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0))
+        .slice(0, 3);
+      for (const v of victims) {
+        const id = v.id || '';
+        if (!id) continue;
+        let ok = false;
+        try { ok = await deleteMyTransaction(id); } catch {}
+        if (!ok) {
+          try { await deleteDoc(doc(db, REQUESTS, id)); ok = true; } catch {}
+        }
+        if (!ok) continue;
+        removed += 1;
+        // Remove the saved payment session of that request too (remote + this
+        // browser), otherwise the deleted row would reappear on the next load.
+        try {
+          const snap = await getDocs(query(collection(db, 'payment_sessions'), where('buyerEmail', '==', owner)));
+          const matches = snap.docs.filter((d) => Number((d.data() as any).requestNo) === Number(v.requestNo));
+          await Promise.allSettled(matches.map((d) => deleteDoc(d.ref)));
+          matches.forEach((d) => removeLocalSessionById(d.id));
+        } catch {}
+      }
+    }
+  } catch {}
+  return removed;
+}
+
 
 export async function fetchPaymentRequests(): Promise<PaymentRequest[]> {
   try {

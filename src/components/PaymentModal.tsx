@@ -6,8 +6,8 @@ import { db } from '../lib/firebase';
 import { StoreBot, downloadBot, recordBotPurchase, getDownloadGrant, grantBotDownload, consumeBotDownload, hasDownloadedBot } from '../services/storeService';
 import { loadPaymentSettings, ConfirmMode, DEFAULT_CONFIRM_MODE, DEFAULT_BINANCE_EMAIL, PaymentAddress, SYMBOL_TO_PRICE_KEY } from '../services/paymentSettings';
 import { fetchCryptoPricesDirect } from '../services/apiDirect';
-import { createPaymentRequest, checkUserGrant, consumeBotGrant } from '../services/paymentRequests';
-import { createSession, updateSession, completeSession, cancelSession, getCachedSession, getRemoteSession, readLocalSessions, genSessionId, setLastEmail, PaymentSession } from '../services/paymentSession';
+import { createPaymentRequest, checkUserGrant, consumeBotGrant, cleanupPendingPlanRequests } from '../services/paymentRequests';
+import { createSession, updateSession, completeSession, cancelSession, discardSession, getCachedSession, getRemoteSession, readLocalSessions, genSessionId, setLastEmail, PaymentSession } from '../services/paymentSession';
 import { rememberBuyerEmail } from '../lib/clientScope';
 import { ensureClientIdentity } from '../services/clientIdentity';
 import { isGoogleOrMicrosoftEmail } from '../lib/authPolicy';
@@ -155,15 +155,26 @@ export default function PaymentModal({ isOpen, onClose, planLabel, amount, asPag
     (async () => {
       const local = getCachedSession(resumeSessionId);
       const session = local || (await getRemoteSession(resumeSessionId));
-      if (cancelled || !session || (session.status !== 'active' && session.status !== 'pending')) return;
+      if (cancelled || !session) return;
       setSessionId(session.id);
       setContactEmail((session.buyerEmail || buyerEmail || '').trim());
       if (session.method) {
         setSelectedNetwork(session.method);
-        setTimerRunning(true);
         const remaining = Math.max(0, Math.floor((session.activeUntil - Date.now()) / 1000));
-        setTimerSeconds(remaining);
-        if (remaining <= 0) setTimerRunning(false);
+        // A withdrawn (cancelled) transaction — or one whose wait period ran
+        // out — resumes with a fresh full wait period. The record is revived so
+        // the pending row keeps working on both phone and desktop.
+        const restart = session.status === 'cancelled' || remaining <= 0;
+        if (restart) {
+          const until = Date.now() + timerMinutes * 60 * 1000;
+          setTimerSeconds(timerMinutes * 60);
+          setTimerRunning(true);
+          if (session.status === 'cancelled') updateSession(session.id, { status: 'active', activeUntil: until });
+          else updateSession(session.id, { activeUntil: until });
+        } else {
+          setTimerRunning(true);
+          setTimerSeconds(remaining);
+        }
       }
       if (session.requestNo) {
         setRequestNo(session.requestNo);
@@ -244,6 +255,13 @@ export default function PaymentModal({ isOpen, onClose, planLabel, amount, asPag
     setError(null);
     setRequestCreating(true);
     try {
+      // Housekeeping (phone + desktop): when this same plan type already has 3
+      // pending requests, those three are cleared automatically. It runs BEFORE
+      // the new request, so a payment the client is submitting right now is
+      // never the one that disappears.
+      if (!isBotProduct) {
+        try { await cleanupPendingPlanRequests(buyerEmailFinal); } catch {}
+      }
       const priceKey = SYMBOL_TO_PRICE_KEY[item.symbol] || 'tether';
       const price = item.stable ? 1 : (prices[priceKey]?.usd || 0);
       const expectedCoin = item.stable ? amount : (price > 0 ? amount / price : 0);
@@ -398,7 +416,7 @@ export default function PaymentModal({ isOpen, onClose, planLabel, amount, asPag
       // email of an existing session (would break cross-device matching).
       const current = getCachedSession(sessionId);
       if (current && current.buyerEmail && current.buyerEmail !== email) {
-        cancelSession(sessionId);
+        discardSession(sessionId);
         setSessionId(null);
         createSession(base as any).then((s) => setSessionId(s.id)).catch(() => {});
       } else {

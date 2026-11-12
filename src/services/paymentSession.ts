@@ -218,7 +218,17 @@ export async function completeSession(id: string): Promise<void> {
   await updateSession(id, { status: 'completed' });
 }
 
+// Withdraw/cancel a payment. The record is KEPT (status "cancelled") so the
+// pending request row in My Transactions can still offer "Resume": during the
+// plan-release wait period a client may step back at any time and continue a
+// second time without losing the transaction.
 export async function cancelSession(id: string): Promise<void> {
+  await updateSession(id, { status: 'cancelled', activeUntil: Date.now() });
+}
+
+// Full cleanup (used when an email change starts a completely new transaction):
+// the old record must disappear from every device, not remain as cancelled.
+export async function discardSession(id: string): Promise<void> {
   await updateSession(id, { status: 'cancelled', activeUntil: Date.now() });
   removeLocal(id);
   await remoteDelete(id);

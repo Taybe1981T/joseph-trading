@@ -169,7 +169,7 @@ export default function AnalysisDetailPage({ result, onBack, lang, isClient = fa
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className={compact ? 'fixed inset-0 z-[60] overflow-y-auto bg-[#0a0f1a]' : 'fixed inset-0 z-50 overflow-y-auto bg-[#0a0f1a]'}
+      className={compact ? 'fixed inset-x-0 top-0 bottom-[72px] z-[300] overflow-y-auto bg-[#0a0f1a]' : 'fixed inset-0 z-50 overflow-y-auto bg-[#0a0f1a]'}
     >
       {/* Spacer for main header (desktop only — the phone layout has its own) */}
       {!compact && <div className="h-[320px]" />}
@@ -205,11 +205,11 @@ export default function AnalysisDetailPage({ result, onBack, lang, isClient = fa
           {compact && (
             <button
               onClick={onBack}
-              className="p-2 rounded-xl bg-white/10 hover:bg-white/20 transition-all border border-white/10"
+              className="p-2.5 rounded-xl bg-red-500/25 hover:bg-red-500/40 transition-all border border-red-500/50 shadow-lg"
               aria-label={isAr ? 'إغلاق' : 'Close'}
               title={isAr ? 'إغلاق' : 'Close'}
             >
-              <X size={20} className="text-white" />
+              <X size={22} className="text-white" />
             </button>
           )}
         </div>

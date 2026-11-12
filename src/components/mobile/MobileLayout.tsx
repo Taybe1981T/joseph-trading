@@ -49,6 +49,8 @@ import { collection, getDocs, doc, getDoc, setDoc, serverTimestamp } from 'fireb
 import StorePage from '../StorePage';
 import PaymentModal from '../PaymentModal';
 import type { StoreBot } from '../../services/storeService';
+import { fetchStoreBots } from '../../services/storeService';
+import type { PaymentSession } from '../../services/paymentSession';
 import { getLivePrices, calcPnl } from '../../services/paperTradingService';
 import { rememberBuyerEmail, setCurrentUserEmail } from '../../lib/clientScope';
 
@@ -167,6 +169,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // developer) can buy, exactly like on the site.
   const [storePlan, setStorePlan] = useState<{ amount: number; label: string; durationDays: number; planUnit?: string; planUnits?: number } | null>(null);
   const [storeBot, setStoreBot] = useState<StoreBot | null>(null);
+  const [resumeSessionId, setResumeSessionId] = useState<string | null>(null);
   const [mobileSub, setMobileSub] = useState<{ label: string; amount: number; expiryDate: string } | null>(() => {
     // Strict owner read: the stored record must belong to the account signed in
     // on THIS device. A guest or another account never sees it.
@@ -833,8 +836,31 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     plan: { amount: number; label: string; durationDays: number; planUnit?: string; planUnits?: number } | null,
     bot: StoreBot | null,
   ) => {
+    setResumeSessionId(null);
     setStorePlan(plan);
     setStoreBot(bot);
+  };
+
+  // Transactions → Resume: reopen the very same payment in the store with its
+  // saved method/address/timer — identical to the desktop behaviour.
+  const resumeStorePayment = async (session: PaymentSession) => {
+    let bot: StoreBot | null = null;
+    if (session.kind === 'bot' && session.botId) {
+      try {
+        const bots = await fetchStoreBots();
+        bot = bots.find((b) => b.id === session.botId) || null;
+      } catch {}
+    }
+    setStoreBot(bot);
+    setStorePlan({
+      amount: session.amountUsd,
+      label: session.planLabel || '',
+      durationDays: session.durationDays || 0,
+      planUnit: session.planUnit,
+      planUnits: session.planUnits,
+    });
+    setResumeSessionId(session.id);
+    goTab('store');
   };
 
   // Same post-payment work as the desktop handler (App.tsx): the buyer is
@@ -890,6 +916,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     setMobileFreeModeChosen(buyerEmail, false);
     setStorePlan(null);
     setStoreBot(null);
+    setResumeSessionId(null);
     setAlert(lang === 'ar' ? 'تم تفعيل الخطة بنجاح ✓' : 'Plan activated successfully ✓');
     setTimeout(() => setAlert(null), 5000);
     goTab('store');
@@ -1052,7 +1079,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {/* Desktop parity: a paid-plan client in paid mode gets Auto + Manual too. */}
         {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} />}
         {tab === 'manual' && canUseAnalysis && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
-        {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} />}
+        {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} onGoToStore={() => goTab('store')} onResumeSession={resumeStorePayment} />}
         {tab === 'store' && !storePlan && (
           <StorePage
             lang={lang}
@@ -1083,9 +1110,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         )}
         {tab === 'store' && storePlan && (
           <PaymentModal
-            key={user?.uid || 'no-session'}
+            key={(user?.uid || 'no-session') + (resumeSessionId ? `_${resumeSessionId}` : '')}
             isOpen={true}
-            onClose={() => { setStorePlan(null); setStoreBot(null); goTab('store'); }}
+            onClose={() => { setResumeSessionId(null); setStorePlan(null); setStoreBot(null); goTab('store'); }}
             planLabel={storePlan.label}
             amount={storePlan.amount}
             asPage
@@ -1097,9 +1124,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
             planDurationDays={storePlan.durationDays}
             planUnit={storePlan.planUnit}
             planUnits={storePlan.planUnits}
-            onBotPaid={() => { setStorePlan(null); setStoreBot(null); goTab('store'); }}
-            onGoToStore={() => { setStorePlan(null); setStoreBot(null); goTab('store'); }}
-            onGoToPlans={() => { setStorePlan(null); setStoreBot(null); goTab('store'); }}
+            resumeSessionId={resumeSessionId}
+            onBotPaid={() => { setResumeSessionId(null); setStorePlan(null); setStoreBot(null); goTab('store'); }}
+            onGoToStore={() => { setResumeSessionId(null); setStorePlan(null); setStoreBot(null); goTab('store'); }}
+            onGoToPlans={() => { setResumeSessionId(null); setStorePlan(null); setStoreBot(null); goTab('store'); }}
             onConfirm={completeStorePayment}
           />
         )}
