@@ -211,17 +211,23 @@ export default function RadarSettingsPage({ autoSettings, onAutoSettingsChange, 
             </span>
           </div>
           <select
-            value={autoSettings.interval}
+            value={hasActivePlan && !isDeveloper ? 240 : autoSettings.interval}
             onChange={(e) => onAutoSettingsChange({ ...autoSettings, interval: parseInt(e.target.value) })}
             className="w-full bg-brand-bg border-2 border-brand-text/10 rounded-2xl px-4 py-3 text-sm font-black text-brand-text focus:border-primary outline-none appearance-none cursor-pointer"
           >
-            <option value="1">1 Minute</option>
-            <option value="5">5 Minutes</option>
-            <option value="15">15 Minutes</option>
-            <option value="60">1 Hour</option>
-            <option value="120">2 Hours</option>
-            <option value="240">4 Hours</option>
-            <option value="1440">1 Day</option>
+            {hasActivePlan && !isDeveloper ? (
+              <option value="240">4 Hours</option>
+            ) : (
+              <>
+                <option value="1">1 Minute</option>
+                <option value="5">5 Minutes</option>
+                <option value="15">15 Minutes</option>
+                <option value="60">1 Hour</option>
+                <option value="120">2 Hours</option>
+                <option value="240">4 Hours</option>
+                <option value="1440">1 Day</option>
+              </>
+            )}
           </select>
         </div>
         <div className="bg-brand-alt rounded-2xl border border-white/10 p-6 space-y-3">

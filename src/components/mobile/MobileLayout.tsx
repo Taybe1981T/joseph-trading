@@ -29,6 +29,7 @@ import {
 import { fetchUserGrants, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from '../../services/paymentRequests';
 import { MobileAnalysis } from './MobileAnalysis';
 import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar, getMobileRadarProgress } from '../../services/mobileAnalysisEngine';
+import { detectMobileType } from '../../services/mobileAnalysisEngine';
 import { flagManualRadarStart, takeRadarStartNow, isFreshRadarSession } from '../../services/radarSession';
 import { MobileManualSheet } from './MobileManualSheet';
 import { MobileClientMonitor } from './MobileClientMonitor';
@@ -52,7 +53,7 @@ import PaymentModal from '../PaymentModal';
 import type { StoreBot } from '../../services/storeService';
 import { fetchStoreBots } from '../../services/storeService';
 import type { PaymentSession } from '../../services/paymentSession';
-import { getLivePrices, calcPnl } from '../../services/paperTradingService';
+import { getLivePrices, calcPnl, isMarketOpen } from '../../services/paperTradingService';
 import { rememberBuyerEmail, setCurrentUserEmail } from '../../lib/clientScope';
 import { stackedPlanExpiry } from '../../lib/planPeriod';
 
@@ -824,6 +825,12 @@ const immediate = takeRadarStartNow();
   };
 
   const openTrade = (sym: string, type: 'buy' | 'sell', vol: number) => {
+    const cat = String(detectMobileType(sym));
+    if (!isMarketOpen(cat, sym)) {
+      setAlert((lang === 'ar' ? 'السوق مغلق حالياً، لا يمكن فتح/إغلاق الصفقات حتى يفتح: ' : 'Market is currently closed; trades cannot be opened/closed until it opens: ') + sym);
+      setTimeout(() => setAlert(null), 4000);
+      return;
+    }
     ping(type === 'buy' ? 880 : 440);
     setAlert((lang === 'ar' ? 'تم إرسال الأمر: ' : 'Order sent: ') + type.toUpperCase() + ' ' + vol.toFixed(2) + ' ' + sym);
     setTimeout(() => setAlert(null), 4000);

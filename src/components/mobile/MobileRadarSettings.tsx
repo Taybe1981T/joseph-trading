@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Zap, Layers, Sparkles, Clock, Music } from 'lucide-react';
 import { Language } from '../../lib/i18n';
-import { mobileT, useMobileMode } from '../../lib/mobileMode';
+import { mobileT, useMobileMode, isMobilePlanClient } from '../../lib/mobileMode';
 import { flagManualRadarStart } from '../../services/radarSession';
 import { getMobileSymbolGroups } from '../../services/mobileAnalysisEngine';
 
@@ -34,6 +34,8 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
   // Sound / alert options are developer-only (desktop parity: RadarSettingsPage
   // hides the whole audio section for clients).
   const { isDev } = useMobileMode();
+  const isPaidClient = !isDev && isMobilePlanClient();
+  const intervalOptions = isPaidClient ? [240] : INTERVALS;
   const [s, setS] = useState<AutoSettings>(readAuto);
   const [groups, setGroups] = useState(getMobileSymbolGroups);
   const commit = (patch: Partial<AutoSettings>) => {
@@ -100,8 +102,8 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <Row icon={<Zap size={15} style={{ color: '#F59E0B' }} />} label={mobileT(lang, 'Scan Every', 'امسح كل')}>
-          <select value={s.interval} onChange={(e) => { e.stopPropagation(); commit({ interval: parseInt(e.target.value) }); }} style={{ width: '100%', background: '#0a0a0a', border: '1px solid #333', color: '#fff', borderRadius: 10, padding: '10px 12px', fontSize: 14, fontWeight: 700 }}>
-            {INTERVALS.map((v) => <option key={v} value={v}>{INTERVAL_LABEL[v]}</option>)}
+          <select value={isPaidClient ? 240 : s.interval} onChange={(e) => { e.stopPropagation(); commit({ interval: parseInt(e.target.value) }); }} style={{ width: '100%', background: '#0a0a0a', border: '1px solid #333', color: '#fff', borderRadius: 10, padding: '10px 12px', fontSize: 14, fontWeight: 700 }}>
+            {intervalOptions.map((v) => <option key={v} value={v}>{INTERVAL_LABEL[v]}</option>)}
           </select>
         </Row>
         <Row icon={<Sparkles size={15} style={{ color: '#F59E0B' }} />} label={mobileT(lang, 'Strategy', 'الأسلوب')}>

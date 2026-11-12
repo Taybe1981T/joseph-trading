@@ -4,7 +4,8 @@ import { AnalysisResult, TradingStyle } from '../../types';
 import { MobileProgress, runMobileManual, getMobileSymbolGroups, getMobileAllSymbols, addMobileCustomSymbol, unhideMobileSymbol } from '../../services/mobileAnalysisEngine';
 import { TIMEFRAMES, TRADING_STYLES, FREE_SYMBOLS, ALL_SYMBOLS_DB } from '../../constants';
 import { Language } from '../../lib/i18n';
-import { mobileT, isMobilePlanClient } from '../../lib/mobileMode';
+import { mobileT, isMobilePlanClient, useMobileMode } from '../../lib/mobileMode';
+import { tryConsumeManualQuota, classifyManualSymbols } from '../../services/manualQuota';
 
 interface Props { lang: Language; onClose: () => void; onDone: (r: AnalysisResult[]) => void; }
 
@@ -23,6 +24,7 @@ function hasPlan(): boolean {
 export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const isAr = lang === 'ar';
   const paid = hasPlan();
+  const { isDev } = useMobileMode();
   const [groups, setGroups] = useState(getMobileSymbolGroups);
   const [selectedType, setSelectedType] = useState<string>(groups[0]?.id || 'forex');
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
@@ -33,6 +35,7 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const [prog, setProg] = useState<MobileProgress | null>(null);
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [failed, setFailed] = useState<string[]>([]);
+  const [quotaMsg, setQuotaMsg] = useState<string | null>(null);
   const [customInput, setCustomInput] = useState('');
   const [hiddenTick, setHiddenTick] = useState(0);
 
@@ -139,6 +142,15 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const analyze = async () => {
     const allSyms = [...new Set(selectedSymbols)];
     if (busy || allSyms.length === 0) return;
+    // Paid-client manual quota (desktop parity).
+    if (!isDev) {
+      const email = (() => { try { return String(JSON.parse(localStorage.getItem('finalyze_user') || '{}')?.email || ''); } catch { return ''; } })();
+      const catSyms: Record<string, string[]> = {};
+      for (const g of groups) catSyms[g.id] = g.symbols;
+      const { bucket, category } = classifyManualSymbols(allSyms, catSyms);
+      const q = tryConsumeManualQuota(email, bucket, category, isAr ? 'ar' : 'en');
+      if (!q.allowed) { setQuotaMsg(q.message || ''); return; }
+    }
     setBusy(true); setProg(null); setResults([]); setFailed([]);
     try {
       const r = await runMobileManual(allSyms, uid(), (p) => setProg(p), { timeframe: tf, tradingStyle: style });
@@ -156,6 +168,7 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
           <div className="mt5-trade-title" style={{ margin: 0, textAlign: 'left' }}>{mobileT(lang, 'Manual Analysis', 'التحليل اليدوي')}</div>
           <button className="mt5-icon-btn" onClick={onClose}><X size={18} /></button>
         </div>
+        {quotaMsg && <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', padding: 10, borderRadius: 10, fontSize: 12, fontWeight: 700, marginBottom: 10 }}>{quotaMsg}</div>}
 
         <div style={{ fontSize: 12, fontWeight: 800, color: '#F59E0B', marginBottom: 6 }}>{mobileT(lang, 'Category', 'الفئة')}</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -188,8 +201,8 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
           <div>
             <div style={{ fontSize: 12, fontWeight: 800, color: '#F59E0B', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}><Zap size={13} /> {mobileT(lang, 'Style', 'الأسلوب')}</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {TRADING_STYLES.map((st) => {
-                const locked = !paid && st.id !== 'day_trading';
+              { (isDev ? TRADING_STYLES : TRADING_STYLES.filter(s => s.id === 'day_trading')).map((st) => {
+                const locked = false;
                 const on = style === st.id;
                 const lbl = STYLE_LBL[st.id] || { en: st.label, ar: st.label };
                 return (

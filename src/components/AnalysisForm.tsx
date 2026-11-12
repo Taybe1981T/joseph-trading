@@ -12,6 +12,8 @@ import { cn } from '../lib/utils';
 import { Language, translations } from '../lib/i18n';
 import { getStatus, subscribe } from '../services/rateLimitTracker';
 import { getOpenStockExchanges } from '../lib/marketHours';
+import { isDeveloperEmail } from '../lib/clientIds';
+import { tryConsumeManualQuota, classifyManualSymbols, MANUAL_QUOTA_MSG_AR, MANUAL_QUOTA_MSG_EN } from '../services/manualQuota';
 
 interface AnalysisFormProps {
   user: User | null;
@@ -200,6 +202,21 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
     if (allSymbolsToAnalyze.length === 0) {
       setFormErrors([t.selectAtLeastOne]);
       return;
+    }
+
+    // Paid-client manual-analysis quota (6 full-batch / 6 per-category / 20
+    // individual per UTC day). Developers are never limited.
+    if (hasActivePlan && !isDeveloperEmail(user?.email)) {
+      const categorySymbols: Record<string, string[]> = {};
+      for (const cat of Object.keys(SYMBOL_GROUPS)) {
+        categorySymbols[cat] = (SYMBOL_GROUPS as any)[cat].flatMap((g: any) => g.symbols || []);
+      }
+      const { bucket, category } = classifyManualSymbols(allSymbolsToAnalyze, categorySymbols);
+      const quota = tryConsumeManualQuota(user?.email || null, bucket, category, lang);
+      if (!quota.allowed) {
+        setFormErrors([quota.message || (lang === 'ar' ? MANUAL_QUOTA_MSG_AR : MANUAL_QUOTA_MSG_EN)]);
+        return;
+      }
     }
 
     console.log("[Form] Beginning analysis for:", allSymbolsToAnalyze);
@@ -688,8 +705,8 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
            <div className="space-y-4">
             <label className="text-base font-black text-brand-text opacity-100 uppercase tracking-widest pl-2">{t.tradingStyle}</label>
             <div className="grid grid-cols-1 gap-3">
-              {TRADING_STYLES.map((style) => {
-                const isLocked = !hasActivePlan && style.id !== 'day_trading';
+              {(isDeveloperEmail(user?.email) ? TRADING_STYLES : TRADING_STYLES.filter(s => s.id === 'day_trading')).map((style) => {
+                const isLocked = false;
                 return (
                 <button
                   key={style.id}
