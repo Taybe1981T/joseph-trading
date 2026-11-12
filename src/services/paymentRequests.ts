@@ -327,21 +327,6 @@ export async function rejectPaymentRequest(req: PaymentRequest, developerEmail: 
 // pending number did not make it into component state (page reopened, session
 // restored after a reload) — without it the grant would be looked up as
 // `plan_none`, return nothing, and the customer would wait forever.
-async function pendingRequestNoFor(email: string, kind: ProductKind, botId?: string): Promise<number | undefined> {
-  const snap = await getDocs(
-    query(collection(db, 'payment_sessions'), where('buyerEmail', '==', (email || '').toLowerCase()))
-  );
-  let best = 0;
-  for (const d of snap.docs) {
-    const s: any = d.data() || {};
-    if (String(s.kind || '') !== kind) continue;
-    if (kind === 'bot' && String(s.botId || '') !== String(botId || '')) continue;
-    const n = Number(s.requestNo) || 0;
-    if (n > best) best = n;
-  }
-  return best || undefined;
-}
-
 export async function checkUserGrant(
   email: string,
   kind: ProductKind,
@@ -361,12 +346,16 @@ export async function checkUserGrant(
     return null;
   }
 
+  // A plan grant always belongs to ONE numbered request (plan_<requestNo>).
+  // Without that number there is nothing to look up: returning "any" active
+  // plan here is what made a paid client's new plan auto-activate with the OLD
+  // plan and hide the payment screen. A fresh purchase must stay payment-only.
+  if (kind === 'plan' && !planReqNo) return null;
+
   // 1. Check open collections in Firestore (shared_settings & shared_status) — 100% permission-safe in every browser
   try {
-    let no = planReqNo;
-    if (kind === 'plan' && !no) no = await pendingRequestNoFor(e, kind, botId);
-    if (kind !== 'plan' || no) {
-      const docKey = grantDocId(e, kind, botId, kind === 'plan' ? no : undefined);
+    if (kind !== 'plan' || planReqNo) {
+      const docKey = grantDocId(e, kind, botId, kind === 'plan' ? planReqNo : undefined);
       const sharedSnap = await getDoc(doc(db, 'shared_settings', `grant_${docKey}`));
       if (sharedSnap.exists()) {
         const g = deriveGrantExpiry({ id: sharedSnap.id, ...(sharedSnap.data() as any) } as PaymentGrant);
@@ -401,10 +390,7 @@ export async function checkUserGrant(
 
   // 3. Fallback check via direct GRANTS collection
   const attempt = async (): Promise<PaymentGrant | null> => {
-    let no = planReqNo;
-    if (kind === 'plan' && !no) no = await pendingRequestNoFor(e, kind, botId);
-    if (kind === 'plan' && !no) return null;
-    const snap = await getDoc(doc(db, GRANTS, grantDocId(e, kind, botId, kind === 'plan' ? no : undefined)));
+    const snap = await getDoc(doc(db, GRANTS, grantDocId(e, kind, botId, kind === 'plan' ? planReqNo : undefined)));
     if (!snap.exists()) return null;
     const g = deriveGrantExpiry({ id: snap.id, ...(snap.data() as any) } as PaymentGrant);
     return g.status === 'active' ? g : null;

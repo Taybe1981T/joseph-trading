@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Zap, Layers, Sparkles, Clock, Music } from 'lucide-react';
 import { Language } from '../../lib/i18n';
-import { mobileT } from '../../lib/mobileMode';
+import { mobileT, useMobileMode } from '../../lib/mobileMode';
 import { getMobileSymbolGroups } from '../../services/mobileAnalysisEngine';
 
 interface AutoSettings {
@@ -30,6 +30,9 @@ const STYLES = [
 
 export function MobileRadarSettings({ lang }: { lang: Language }) {
   const isAr = lang === 'ar';
+  // Sound / alert options are developer-only (desktop parity: RadarSettingsPage
+  // hides the whole audio section for clients).
+  const { isDev } = useMobileMode();
   const [s, setS] = useState<AutoSettings>(readAuto);
   const [groups, setGroups] = useState(getMobileSymbolGroups);
   const commit = (patch: Partial<AutoSettings>) => {
@@ -66,7 +69,7 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
       </div>
 
 
-      
+      {isDev && (
       <Row icon={<Music size={16} style={{ color: '#F59E0B' }} />} label={mobileT(lang, 'Sound', 'الصوت')}>
         <select value={s.volume} onChange={(e) => commit({ volume: parseFloat(e.target.value) })} style={{ width: '100%', background: '#0a0a0a', border: '1px solid #333', color: '#fff', borderRadius: 10, padding: '10px 12px', fontSize: 14, fontWeight: 700 }}>
           <option value={0.1}>{mobileT(lang, 'Muted (0.1)', 'كتم (0.1)')}</option>
@@ -76,6 +79,7 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
           <option value={1.0}>{mobileT(lang, 'Full (1.0)', 'اقصى (1.0)')}</option>
         </select>
       </Row>
+      )}
 
 <Row icon={<Layers size={16} style={{ color: '#F59E0B' }} />} label={mobileT(lang, 'Market', 'السوق')}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>

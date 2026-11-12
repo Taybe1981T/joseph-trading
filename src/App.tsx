@@ -30,6 +30,7 @@ import { resolveConflicts } from './services/portfolioRiskService';
 import ApiKeyModal from './components/ApiKeyModal';
 import SubscriptionModal from './components/SubscriptionModal';
 import PaymentModal from './components/PaymentModal';
+import { stackedPlanExpiry } from './lib/planPeriod';
 import AuthModal from './components/AuthModal';
 import { getUnreadDevNotificationCount, getUnreadSiteRequestCount, fetchUserGrants, fetchUserGrantsForEmails, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from './services/paymentRequests';
 import ProfilePage from './components/ProfilePage';
@@ -1886,35 +1887,82 @@ const isDeveloperSession = () => {
     setRadarProgress(null);
   }, [settings, lang, hasActivePlan, user, isPlanClient]);
 
-  // Radar lifecycle: start on toggle-ON, stop on toggle-OFF
+  // Radar lifecycle: start on toggle-ON, stop on toggle-OFF, reschedule when the
+  // interval changes, and ALWAYS run the current scan callback. The timer used
+  // to capture the first `runRadarScan`, so changing settings/language or the
+  // signed-in account kept scanning with stale values until a manual OFF→ON.
+  // A run token guarantees that only the newest schedule can continue.
+  const runRadarScanRef = useRef(runRadarScan);
+  useEffect(() => { runRadarScanRef.current = runRadarScan; }, [runRadarScan]);
   const prevRadarEnabledRef = useRef(false);
-  const radarFirstRenderRef = useRef(true);
+  const radarTokenRef = useRef(0);
+  const radarBusyRef = useRef(false);
 
   useEffect(() => {
-    if (!isDeveloperSession() && !planClientActive) return;
-
+    const allowed = isDeveloperSession() || planClientActive;
     const isOn = autoSettings.isEnabled;
-    const wasOn = prevRadarEnabledRef.current;
-    prevRadarEnabledRef.current = isOn;
+    const token = ++radarTokenRef.current;
 
-    // Turned OFF: cancel timer, stop
-    if (wasOn && !isOn) {
-      if (radarTimerRef.current) {
-        clearTimeout(radarTimerRef.current);
-        radarTimerRef.current = null;
-      }
+    // Every restart of this effect supersedes the previous schedule.
+    if (radarTimerRef.current) {
+      clearTimeout(radarTimerRef.current);
+      radarTimerRef.current = null;
+    }
+
+    if (!allowed) {
+      // A free account must never stay "ON": a plan that just expired resolves
+      // to OFF on both platforms instead of silently doing nothing.
+      if (isOn) setAutoSettings((prev) => (prev.isEnabled ? { ...prev, isEnabled: false } : prev));
+      prevRadarEnabledRef.current = false;
+      return;
+    }
+    if (!isOn) {
+      prevRadarEnabledRef.current = false;
       return;
     }
 
-    if (!isOn) return;
+    const wasOn = prevRadarEnabledRef.current;
+    prevRadarEnabledRef.current = true;
 
-    // Shared scan loop
+    // Schedule the next run from the CURRENT settings (ref, never a stale
+    // closure). If a scan is still busy (e.g. the plan changed mid-run), poll
+    // briefly instead of starting a second scan.
+    const scheduleNext = (immediate: boolean) => {
+      if (token !== radarTokenRef.current) return;
+      if (radarBusyRef.current) {
+        radarTimerRef.current = setTimeout(() => {
+          radarTimerRef.current = null;
+          scheduleNext(false);
+        }, 10000);
+        return;
+      }
+      const ms = (autoSettingsRef.current.interval || 15) * 60000;
+      const lastTs = autoSettingsRef.current.lastFinishedAt || 0;
+      const elapsed = lastTs ? Date.now() - lastTs : Infinity;
+      if (immediate || elapsed >= ms) {
+        void loop();
+      } else {
+        setIsScanningFinished(true);
+        radarTimerRef.current = setTimeout(() => {
+          radarTimerRef.current = null;
+          scheduleNext(false);
+        }, ms - elapsed);
+      }
+    };
+
+    // Shared scan loop. Toggling OFF is still honoured between symbols because
+    // the scan itself consults autoSettingsRef.
     const loop = async () => {
+      if (token !== radarTokenRef.current) return;
+      radarBusyRef.current = true;
       try {
-        await runRadarScan();
+        await runRadarScanRef.current();
       } catch (e) {
         console.error('Radar error:', e);
-      }       finally {
+      } finally {
+        radarBusyRef.current = false;
+        // A newer schedule replaced this run: it owns the timer and the UI.
+        if (token !== radarTokenRef.current) return;
         // Save UTC timestamp so catch-up works after tab throttling
         const nowTs = Date.now();
         try {
@@ -1937,65 +1985,32 @@ const isDeveloperSession = () => {
           const ms = (autoSettingsRef.current.interval || 15) * 60000;
           radarTimerRef.current = setTimeout(() => {
             radarTimerRef.current = null;
+            if (token !== radarTokenRef.current) return;
             setIsScanningFinished(false);
-            loop();
+            void loop();
           }, ms);
         }
       }
     };
 
-    // First render: check UTC-based catch-up, or schedule after interval
-    if (radarFirstRenderRef.current) {
-      radarFirstRenderRef.current = false;
-      const ms = (autoSettings.interval || 15) * 60000;
-      const lastTs = autoSettings.lastFinishedAt || 0;
-      const elapsed = lastTs ? Date.now() - lastTs : Infinity;
-      if (elapsed >= ms) {
-        // Overdue — scan immediately
-        setIsScanningFinished(false);
-        loop();
-      } else {
-        // Schedule with remaining time
-        setIsScanningFinished(true);
-        radarTimerRef.current = setTimeout(() => {
-          radarTimerRef.current = null;
-          setIsScanningFinished(false);
-          loop();
-        }, ms - elapsed);
-      }
-      return;
-    }
+    // Due now (never scanned, overdue, or just toggled ON) → scan immediately;
+    // otherwise wait only the remaining part of the interval.
+    if (!wasOn) setIsScanningFinished(false);
+    scheduleNext(!wasOn);
 
-    // Toggled from OFF to ON — scan immediately
-    if (!wasOn) {
-      loop();
-    }
-
-    // Catch up on missed scans when tab becomes visible again
+    // Catch up on missed scans when the tab becomes visible again (mobile
+    // browsers throttle/suspend timers in the background).
     const onVisibilityChange = () => {
       if (document.hidden || !autoSettingsRef.current.isEnabled) return;
-      if (radarTimerRef.current) return;
-      const lastTs = autoSettingsRef.current.lastFinishedAt || 0;
-      const ms = (autoSettingsRef.current.interval || 15) * 60000;
-      const elapsed = lastTs ? Date.now() - lastTs : Infinity;
-      if (elapsed >= ms) {
-        setIsScanningFinished(false);
-        loop();
-      } else {
-        setIsScanningFinished(true);
-        radarTimerRef.current = setTimeout(() => {
-          radarTimerRef.current = null;
-          setIsScanningFinished(false);
-          loop();
-        }, ms - elapsed);
-      }
+      if (radarTimerRef.current || radarBusyRef.current) return;
+      scheduleNext(false);
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibilityChange);
     };
-  }, [autoSettings.isEnabled, user]);
+  }, [autoSettings.isEnabled, autoSettings.interval, user, planClientActive]);
 
   // Build version check: force cache bust on new deploy
   useEffect(() => {
@@ -3092,6 +3107,8 @@ const started = planGrants
                 planDurationDays={paymentPlan?.durationDays}
                 planUnit={paymentPlan?.planUnit}
                 planUnits={paymentPlan?.planUnits}
+                currentPlanExpiry={activeSubscription?.expiryDate ?? null}
+                currentPlanLabel={activeSubscription?.label ?? null}
                 resumeSessionId={resumeSessionId}
                 onBotPaid={() => { setResumeSessionId(null); setBotPurchase(null); setPaymentPlan(null); goBack(); }}
                 onGoToStore={() => { setResumeSessionId(null); setPaymentPlan(null); setBotPurchase(null); navigateTo('store'); }}
@@ -3103,9 +3120,10 @@ const started = planGrants
                   // fall back to a local calculation only when no grant info is passed.
                   const serverExpiry = grantInfo?.expiryDate ? new Date(grantInfo.expiryDate) : null;
                   // Without a grant the period is still the plan's own: one hour
-                  // must never fall back to a thirty-day month.
-                  const fallbackDays = Number(plan.durationDays) > 0 ? Number(plan.durationDays) : 30;
-                  const subExpiry = serverExpiry ?? new Date(Date.now() + fallbackDays * 86400000);
+                  // must never fall back to a thirty-day month. When a valid plan
+                  // is still active the new period is STACKED onto its end date
+                  // (same calendar maths as the server), never restarted from now.
+                  const subExpiry = serverExpiry ?? stackedPlanExpiry(activeSubscription?.expiryDate, plan);
                   const firstReleaseIso = new Date().toISOString();
                   if (buyerEmail) {
                     // A successful payment REGISTERS the client on the site under

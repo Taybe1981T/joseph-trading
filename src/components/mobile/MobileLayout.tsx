@@ -53,6 +53,7 @@ import { fetchStoreBots } from '../../services/storeService';
 import type { PaymentSession } from '../../services/paymentSession';
 import { getLivePrices, calcPnl } from '../../services/paperTradingService';
 import { rememberBuyerEmail, setCurrentUserEmail } from '../../lib/clientScope';
+import { stackedPlanExpiry } from '../../lib/planPeriod';
 
 interface MobileSignal {
   symbol: string;
@@ -870,8 +871,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     const plan = storePlan;
     const buyerEmail = (user?.email || email || '').toLowerCase().trim();
     const serverExpiry = grantInfo?.expiryDate ? new Date(grantInfo.expiryDate) : null;
-    const fallbackDays = Number(plan?.durationDays) > 0 ? Number(plan.durationDays) : 30;
-    const expiry = serverExpiry ?? new Date(Date.now() + fallbackDays * 86400000);
+    const expiry = serverExpiry ?? stackedPlanExpiry(mobileSub?.expiryDate, {
+      label: plan?.label || '',
+      durationDays: plan?.durationDays,
+      planUnit: plan?.planUnit,
+      planUnits: plan?.planUnits,
+    });
     if (buyerEmail) {
       try { rememberBuyerEmail(buyerEmail, buyerEmail); } catch {}
       try { setCurrentUserEmail(buyerEmail); } catch {}
@@ -1124,6 +1129,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
             planDurationDays={storePlan.durationDays}
             planUnit={storePlan.planUnit}
             planUnits={storePlan.planUnits}
+            currentPlanExpiry={mobileSub?.expiryDate ?? null}
+            currentPlanLabel={mobileSub?.label ?? null}
             resumeSessionId={resumeSessionId}
             onBotPaid={() => { setResumeSessionId(null); setStorePlan(null); setStoreBot(null); goTab('store'); }}
             onGoToStore={() => { setResumeSessionId(null); setStorePlan(null); setStoreBot(null); goTab('store'); }}

@@ -83,7 +83,9 @@ export default function RadarSettingsPage({ autoSettings, onAutoSettingsChange, 
         </button>
       </div>
 
-      {/* Audio Section */}
+      {/* Audio Section — developer only. Paid clients get the radar and its
+          results, but sound/alert options are intentionally not shown to them. */}
+      {isDeveloper && (
       <div className="bg-brand-alt rounded-2xl border border-white/10 p-6 space-y-6">
         <div className="flex items-center gap-3 text-brand-muted">
           <Music size={18} className="text-[#F59E0B]" />
@@ -154,6 +156,7 @@ export default function RadarSettingsPage({ autoSettings, onAutoSettingsChange, 
           />
         </div>
       </div>
+      )}
 
       {/* Market Selection */}
       <div className="bg-brand-alt rounded-2xl border border-white/10 p-6 space-y-4">

@@ -2734,6 +2734,13 @@ app.get("/api/payment-grant/check", async (req: any, res: any) => {
     const requestNo = req.query && req.query.requestNo ? Number(req.query.requestNo) : undefined;
     if (!email) return res.status(400).json({ ok: false, error: 'missing email' });
 
+    // A plan is keyed to ONE numbered request. Without requestNo there is no
+    // plan to return: a paid client buying an ADDITIONAL plan must see the
+    // payment flow, not their old plan auto-activating.
+    if (kind === 'plan' && !requestNo) {
+      return res.json({ ok: true, grant: null });
+    }
+
     // 1. Direct ID lookup
     if (kind === 'bot' && botId) {
       const grantId = grantDocIdFs(email, 'bot', botId);
@@ -2766,19 +2773,6 @@ app.get("/api/payment-grant/check", async (req: any, res: any) => {
     if (matching.length > 0) {
       matching.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
       return res.json({ ok: true, grant: matching[0] });
-    }
-
-    // 3. If plan without requestNo, return latest active plan grant
-    if (kind === 'plan' && !requestNo) {
-      const activePlans = all.filter((g) => {
-        return String(g.email || '').toLowerCase().trim() === email &&
-               String(g.kind || '') === 'plan' &&
-               String(g.status || '') === 'active';
-      });
-      if (activePlans.length > 0) {
-        activePlans.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
-        return res.json({ ok: true, grant: activePlans[0] });
-      }
     }
 
     return res.json({ ok: true, grant: null });
@@ -2972,6 +2966,9 @@ app.post("/api/payment-request-decision", async (req: any, res: any) => {
     if (action === 'approve') {
       const buyerEmail = String(reqDoc.buyerEmail || '').toLowerCase().trim();
       const grantId = grantDocIdFs(buyerEmail, String(reqDoc.kind || 'bot'), reqDoc.botId, String(reqDoc.kind) === 'plan' ? reqDoc.requestNo : undefined);
+      // Read the grant before writing: a re-approval keeps the clock the client
+      // already earned instead of restarting it.
+      const priorGrant = String(reqDoc.kind) === 'plan' ? await fsGet('payment_grants', grantId) : null;
       const grant: Json = {
         email: buyerEmail,
         kind: reqDoc.kind || 'bot',
@@ -2989,25 +2986,60 @@ app.post("/api/payment-request-decision", async (req: any, res: any) => {
         //
         // The clock is a real calendar period counted in GMT: hourly = 1 hour,
         // daily = 24h, weekly = 7 days, monthly = one calendar month, yearly =
-        // one calendar year. Every grant carries ITS OWN period, measured from
-        // its own release: one hour plan = one hour, one year plan = one year.
-        // Stacking is not applied to the expiry, otherwise a single hourly
-        // purchase would inherit the end date of an older, longer plan (and
-        // repeated approvals would push a plan years into the future).
+        // one calendar year.
+        //
+        // CUMULATIVE (STACKED) DURATION: buying another plan while one is still
+        // running must never replace its end date. The new period is added on
+        // top of the latest end date the client already has, without any cap:
+        // current end + new period = new end. The only exception is a repeated
+        // approval of the SAME request, which keeps its own expiry.
         const unit = inferPlanUnit(reqDoc.planLabel, reqDoc.durationDays, reqDoc.planUnit);
         const days = Number(reqDoc.durationDays) > 0 ? Number(reqDoc.durationDays) : 0;
         const count = planPeriodCount(unit, days, reqDoc.planUnits);
-        const startAt = now;
-        const expiryDate = new Date(addPlanPeriod(startAt, unit, count)).toISOString();
-        released = { startAt, expiryDate, unit };
-        grant.durationDays = days || undefined;
-        grant.planUnit = unit;
-        grant.planUnits = count;
-        // ISO strings, not epoch numbers: epoch values are read back as raw
-        // integers and break the first-release date shown to the client.
-        grant.activatedAt = new Date(startAt).toISOString();
-        grant.expiryDate = expiryDate;
-        grant.releasedAt = new Date(now).toISOString();
+
+        const priorExpiryMs = priorGrant && priorGrant.expiryDate
+          ? new Date(String(priorGrant.expiryDate)).getTime()
+          : NaN;
+        if (priorGrant && isFinite(priorExpiryMs)) {
+          // Re-approval of the same request: keep the granted clock untouched.
+          const priorStartMs = priorGrant.activatedAt
+            ? new Date(String(priorGrant.activatedAt)).getTime()
+            : now;
+          const startAt = isFinite(priorStartMs) ? priorStartMs : now;
+          const expiryDate = new Date(priorExpiryMs).toISOString();
+          released = { startAt, expiryDate, unit };
+          grant.durationDays = days || undefined;
+          grant.planUnit = unit;
+          grant.planUnits = count;
+          grant.activatedAt = new Date(startAt).toISOString();
+          grant.expiryDate = expiryDate;
+          grant.releasedAt = new Date(now).toISOString();
+        } else {
+          // Current end date = the latest unexpired plan this buyer already has
+          // (excluding the grant we are writing right now).
+          let currentEndMs = 0;
+          try {
+            const existing = await fsListWhere('payment_grants', 'email', buyerEmail);
+            for (const g of existing) {
+              if (String(g.id || '') === grantId) continue;
+              if (String(g.kind || '') !== 'plan') continue;
+              if (String(g.status || '') !== 'active') continue;
+              const ms = g.expiryDate ? new Date(String(g.expiryDate)).getTime() : NaN;
+              if (isFinite(ms) && ms > currentEndMs) currentEndMs = ms;
+            }
+          } catch { /* a failed scan must never block a release */ }
+          const startAt = currentEndMs > now ? currentEndMs : now;
+          const expiryDate = new Date(addPlanPeriod(startAt, unit, count)).toISOString();
+          released = { startAt, expiryDate, unit };
+          grant.durationDays = days || undefined;
+          grant.planUnit = unit;
+          grant.planUnits = count;
+          // ISO strings, not epoch numbers: epoch values are read back as raw
+          // integers and break the first-release date shown to the client.
+          grant.activatedAt = new Date(now).toISOString();
+          grant.expiryDate = expiryDate;
+          grant.releasedAt = new Date(now).toISOString();
+        }
       }
       // Merge, never replace: a re-approval must not wipe an already-started
       // clock (activatedAt/expiryDate) that the client already earned.

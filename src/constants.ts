@@ -1,4 +1,5 @@
 import { StrategySettings, MarketType, TradingStyle } from "./types";
+import { TOP_CRYPTO_SYMBOLS } from './data/topCrypto150';
 
 export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   momentumThreshold: 70,
@@ -77,12 +78,7 @@ export const SYMBOL_CATEGORIES = {
     'AUDJPY', 'AUDNZD', 'AUDCAD', 'AUDCHF', 'NZDJPY', 'NZDCAD', 'NZDCHF',
     'CADJPY', 'CADCHF', 'CHFJPY'
   ],
-  crypto: [
-    'BTCUSD', 'ETHUSD', 'SOLUSD', 'BNBUSD', 'XRPUSD', 'ADAUSD', 'AVAXUSD',
-    'DOGEUSD', 'SHIBUSD', 'PEPEUSD', 'WIFUSD', 'BONKUSD',
-    'DOTUSD', 'LINKUSD', 'MATICUSD', 'UNIUSD', 'LTCUSD', 'BCHUSD',
-    'TONUSD', 'SUIUSD', 'NEARUSD', 'SEIUSD', 'OPUSD', 'ARBUSD'
-  ],
+  crypto: TOP_CRYPTO_SYMBOLS,
   stocks: [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'NFLX',
     'AMD', 'INTC', 'TSM', 'ASML', 'ARM', 'SMCI',
@@ -196,10 +192,12 @@ export const SYMBOL_GROUPS: Record<string, { label: string, symbols: string[] }[
     { label: 'chfCadPairs', symbols: ['CADJPY', 'CADCHF', 'CHFJPY'] },
   ],
   crypto: [
-    { label: 'topCrypto', symbols: ['BTCUSD', 'ETHUSD', 'SOLUSD', 'BNBUSD', 'XRPUSD', 'ADAUSD', 'AVAXUSD', 'TONUSD'] },
-    { label: 'momentumCrypto', symbols: ['DOGEUSD', 'SHIBUSD', 'PEPEUSD', 'WIFUSD', 'BONKUSD'] },
-    { label: 'altCrypto', symbols: ['DOTUSD', 'LINKUSD', 'MATICUSD', 'UNIUSD', 'LTCUSD', 'BCHUSD', 'SUIUSD', 'NEARUSD', 'SEIUSD'] },
-    { label: 'layer2', symbols: ['OPUSD', 'ARBUSD', 'MATICUSD', 'IMXUSD'] },
+    // The full top-150 list is split into its liquidity bands so every symbol
+    // is visible in both manual and automatic analysis (no symbol is orphaned).
+    { label: 'topCrypto', symbols: TOP_CRYPTO_SYMBOLS.slice(0, 20) },
+    { label: 'momentumCrypto', symbols: TOP_CRYPTO_SYMBOLS.slice(20, 50) },
+    { label: 'altCrypto', symbols: TOP_CRYPTO_SYMBOLS.slice(50, 100) },
+    { label: 'layer2', symbols: TOP_CRYPTO_SYMBOLS.slice(100, 150) },
   ],
   stocks: [
     { label: 'techStocks', symbols: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'NFLX'] },
@@ -250,23 +248,7 @@ export const ALL_SYMBOLS_DB: Record<string, string[]> = {
     'GBPTRY', 'GBPZAR', 'GBPSEK', 'GBPNOK',
     'AUDSGD', 'NZDSGD', 'SGDJPY',
   ].sort(),
-  crypto: [
-    // Top 10 by Market Cap
-    'BTCUSD', 'ETHUSD', 'BNBUSD', 'SOLUSD', 'XRPUSD', 'ADAUSD', 'DOGEUSD', 'TRXUSD', 'AVAXUSD', 'DOTUSD',
-    // DeFi
-    'LINKUSD', 'UNIUSD', 'AAVEUSD', 'MKRUSD', 'SNXUSD', 'LDOUSD', 'COMPUSD', 'CRVUSD', 'SUSHIUSD', '1INCHUSD', 'PENDLEUSD',
-    // Layer 2
-    'MATICUSD', 'POLUSD', 'OPUSD', 'ARBUSD', 'IMXUSD', 'MANTUSD', 'STRKUSD', 'ZKUSD', 'STXUSD',
-    // Layer 1
-    'NEARUSD', 'ICPUSD', 'APTUSD', 'SUIUSD', 'INJUSD', 'SEIUSD', 'ATOMUSD', 'ALGOUSD', 'FTMUSD', 'HBARUSD', 'EOSUSD', 'TONUSD', 'KASUSD', 'KAVAUSD',
-    // Meme
-    'SHIBUSD', 'PEPEUSD', 'WIFUSD', 'BONKUSD', 'FLOKIUSD', 'MEMEUSD', 'JUPUSD',
-    // Infrastructure & AI
-    'RNDRUSD', 'FILUSD', 'THETAUSD', 'ARUSD', 'FETUSD', 'TAOUSD', 'OCEANUSD', 'WLDUSD',
-    // Others
-    'LTCUSD', 'BCHUSD', 'ETCUSD', 'XLMUSD', 'VETUSD', 'XMRUSD', 'ZECUSD', 'DASHUSD',
-    'SANDUSD', 'MANAUSD', 'AXSUSD', 'GALAUSD', 'ENJUSD', 'CHZUSD',
-  ].sort(),
+  crypto: [...TOP_CRYPTO_SYMBOLS],
   stocks: [
     // US Tech Giants (FAANG+)
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'NFLX',

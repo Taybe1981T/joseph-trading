@@ -12,6 +12,7 @@ import { rememberBuyerEmail } from '../lib/clientScope';
 import { ensureClientIdentity } from '../services/clientIdentity';
 import { isGoogleOrMicrosoftEmail } from '../lib/authPolicy';
 import { loadPaymentWaitHours, readCachedWaitHours, savePaymentWaitHours } from '../services/paymentWait';
+import { stackedPlanExpiry } from '../lib/planPeriod';
 
 const DEFAULT_PRICES = { weekly: 2, monthly: 6, yearly: 60 };
 const SUBSCRIPTION_STORAGE_KEY = 'subscription_prices';
@@ -40,9 +41,14 @@ interface PaymentModalProps {
   planUnit?: string;
   planUnits?: number;
   resumeSessionId?: string | null;
+  /** End of the client's CURRENT active plan (ISO). When it is in the future a
+   *  new purchase is added on top of it instead of starting from now. */
+  currentPlanExpiry?: string | null;
+  /** Label of the current active plan, only used in the stacking notice. */
+  currentPlanLabel?: string | null;
 }
 
-export default function PaymentModal({ isOpen, onClose, planLabel, amount, asPage, manageMode, onConfirm, lang, freemiumDisabled: externalFreemium, onFreemiumToggle, botPurchase, sectionTab = 'bot', onBotPaid, onGoToStore, onGoToPlans, buyerEmail, buyerName, planDurationDays, planUnit, planUnits, resumeSessionId }: PaymentModalProps) {
+export default function PaymentModal({ isOpen, onClose, planLabel, amount, asPage, manageMode, onConfirm, lang, freemiumDisabled: externalFreemium, onFreemiumToggle, botPurchase, sectionTab = 'bot', onBotPaid, onGoToStore, onGoToPlans, buyerEmail, buyerName, planDurationDays, planUnit, planUnits, resumeSessionId, currentPlanExpiry, currentPlanLabel }: PaymentModalProps) {
   const isAr = lang === 'ar';
   const [section, setSection] = useState<'bot' | 'plan'>(sectionTab || 'bot');
   const [usdtAddresses, setUsdtAddresses] = useState<PaymentAddress[]>([]);
@@ -524,6 +530,23 @@ export default function PaymentModal({ isOpen, onClose, planLabel, amount, asPag
   const currentLabel = isBotSection ? botPurchase!.name : planLabel;
   const botCopyLocked = !!botPurchase?.id && botDownloaded && !botGrantTs;
 
+  // Cumulative durations: when the signed-in client still has a valid plan, a
+  // new purchase (daily / weekly / monthly / yearly) is added on top of that
+  // plan's end date instead of starting from today. There is no cap; repeat
+  // purchases keep extending the same end date. The notice below makes that
+  // explicit so a client never wonders why two plans overlap.
+  const activeCurrentExpiry = currentPlanExpiry && new Date(currentPlanExpiry).getTime() > Date.now()
+    ? currentPlanExpiry
+    : null;
+  const stackedExpiry = activeCurrentExpiry
+    ? stackedPlanExpiry(activeCurrentExpiry, { label: planLabel, durationDays: planDurationDays, planUnit, planUnits })
+    : null;
+  const fmtPlanDate = (v: string | Date) => {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${d.toISOString().slice(0, 16).replace('T', ' ')} GMT`;
+  };
+
   const pageInner = (
     <>
       <div className="flex items-center justify-between mb-6">
@@ -577,6 +600,33 @@ export default function PaymentModal({ isOpen, onClose, planLabel, amount, asPag
           >
             {showBotDummy ? (isAr ? 'الذهاب للمتجر' : 'Go to Store') : (isAr ? 'الذهاب للخطط' : 'Go to Plans')}
           </button>
+        </div>
+      )}
+
+      {!manageMode && section === 'plan' && !botPurchase && activeCurrentExpiry && stackedExpiry && (
+        <div className="bg-emerald-500/10 border-2 border-emerald-500/35 rounded-2xl p-4 mb-5">
+          <p className="text-xs font-black text-emerald-300 text-center mb-1.5">
+            {isAr ? '➕ خطتك الحالية سارية — سيُضاف هذا الشراء فوقها' : '➕ Your current plan is active — this purchase is added on top'}
+          </p>
+          <p className="text-[11px] text-emerald-100/85 leading-relaxed text-center font-bold">
+            {isAr ? (
+              <>
+                تنتهي خطتك {currentPlanLabel ? `«${currentPlanLabel}» ` : ''}الحالية في{' '}
+                <span className="font-black text-emerald-300">{fmtPlanDate(activeCurrentExpiry)}</span>.
+                ستُضاف مدة «{planLabel}» فوقها، فتصبح نهاية خطتك الجديدة{' '}
+                <span className="font-black text-emerald-300">{fmtPlanDate(stackedExpiry)}</span>.
+                تُجمع المدد تلقائياً بلا حد، ويمكنك تكرار الشراء في أي وقت.
+              </>
+            ) : (
+              <>
+                Your {currentPlanLabel ? `${currentPlanLabel} ` : ''}plan currently ends{' '}
+                <span className="font-black text-emerald-300">{fmtPlanDate(activeCurrentExpiry)}</span>.
+                The new {planLabel} period is added on top, so your new end date will be{' '}
+                <span className="font-black text-emerald-300">{fmtPlanDate(stackedExpiry)}</span>.
+                Durations stack automatically with no cap — you can purchase again at any time.
+              </>
+            )}
+          </p>
         </div>
       )}
 

@@ -1,4 +1,6 @@
 // Popular TradingView symbols database for search suggestions
+import { TOP_CRYPTO_150 } from '../data/topCrypto150';
+
 export interface SuggestedSymbol {
   symbol: string;      // short display: TSLA
   tv: string;          // full TradingView: NASDAQ:TSLA
@@ -9,33 +11,15 @@ export interface SuggestedSymbol {
 const S = (symbol: string, tv: string, name: string, cat: SuggestedSymbol['cat']): SuggestedSymbol =>
   ({ symbol, tv, name, cat });
 
+// Crypto suggestions are generated from the single top-150 liquidity list so
+// search, charts and both analysis modes can never drift apart again.
+const CRYPTO_SUGGESTIONS: SuggestedSymbol[] = TOP_CRYPTO_150.map((c) =>
+  S(c.symbol, `BINANCE:${c.symbol.replace(/USD$/, '')}USDT`, `${c.name} / Dollar`, 'crypto'),
+);
+
 export const SYMBOL_DB: SuggestedSymbol[] = [
   // ---------- Crypto ----------
-  S('BTCUSD', 'BINANCE:BTCUSDT', 'Bitcoin / Dollar', 'crypto'),
-  S('ETHUSD', 'BINANCE:ETHUSDT', 'Ethereum / Dollar', 'crypto'),
-  S('SOLUSD', 'BINANCE:SOLUSDT', 'Solana / Dollar', 'crypto'),
-  S('BNBUSD', 'BINANCE:BNBUSDT', 'BNB / Dollar', 'crypto'),
-  S('XRPUSD', 'BINANCE:XRPUSDT', 'Ripple / Dollar', 'crypto'),
-  S('ADAUSD', 'BINANCE:ADAUSDT', 'Cardano / Dollar', 'crypto'),
-  S('DOGEUSD', 'BINANCE:DOGEUSDT', 'Dogecoin / Dollar', 'crypto'),
-  S('AVAXUSD', 'BINANCE:AVAXUSDT', 'Avalanche / Dollar', 'crypto'),
-  S('DOTUSD', 'BINANCE:DOTUSDT', 'Polkadot / Dollar', 'crypto'),
-  S('LINKUSD', 'BINANCE:LINKUSDT', 'Chainlink / Dollar', 'crypto'),
-  S('MATICUSD', 'BINANCE:MATICUSDT', 'Polygon / Dollar', 'crypto'),
-  S('TONUSD', 'BINANCE:TONUSDT', 'Toncoin / Dollar', 'crypto'),
-  S('SHIBUSD', 'BINANCE:SHIBUSDT', 'Shiba Inu / Dollar', 'crypto'),
-  S('LTCUSD', 'BINANCE:LTCUSDT', 'Litecoin / Dollar', 'crypto'),
-  S('BCHUSD', 'BINANCE:BCHUSDT', 'Bitcoin Cash / Dollar', 'crypto'),
-  S('UNIUSD', 'BINANCE:UNIUSDT', 'Uniswap / Dollar', 'crypto'),
-  S('ATOMUSD', 'BINANCE:ATOMUSDT', 'Cosmos / Dollar', 'crypto'),
-  S('NEARUSD', 'BINANCE:NEARUSDT', 'NEAR Protocol / Dollar', 'crypto'),
-  S('APTUSD', 'BINANCE:APTUSDT', 'Aptos / Dollar', 'crypto'),
-  S('ARBUSD', 'BINANCE:ARBUSDT', 'Arbitrum / Dollar', 'crypto'),
-  S('OPUSD', 'BINANCE:OPUSDT', 'Optimism / Dollar', 'crypto'),
-  S('SUIUSD', 'BINANCE:SUIUSDT', 'Sui / Dollar', 'crypto'),
-  S('PEPEUSD', 'BINANCE:PEPEUSDT', 'Pepe / Dollar', 'crypto'),
-  S('WIFUSD', 'BINANCE:WIFUSDT', 'dogwifhat / Dollar', 'crypto'),
-  S('TRXUSD', 'BINANCE:TRXUSDT', 'Tron / Dollar', 'crypto'),
+  ...CRYPTO_SUGGESTIONS,
 
   // ---------- Forex ----------
   S('EURUSD', 'FX:EURUSD', 'Euro / US Dollar', 'forex'),
@@ -152,18 +136,25 @@ const CAT_EMOJI: Record<SuggestedSymbol['cat'], string> = {
 export function searchSymbols(queryStr: string, limit = 8): SuggestedSymbol[] {
   const q = queryStr.trim().toUpperCase();
   if (!q) return [];
+  const exact: SuggestedSymbol[] = [];
   const startsWith: SuggestedSymbol[] = [];
   const includesName: SuggestedSymbol[] = [];
   const includesSym: SuggestedSymbol[] = [];
 
   for (const s of SYMBOL_DB) {
-    if (s.symbol === q) return [s];
+    // An exact ticker match is ranked first but must NOT hide the other
+    // matches: a 2-letter query like "BA" is both Boeing and BATUSD, and every
+    // crypto must stay findable from its second letter (even after deletion).
+    if (s.symbol === q) {
+      if (!exact.some((e) => e.symbol === s.symbol)) exact.push(s);
+      continue;
+    }
     if (s.symbol.startsWith(q)) startsWith.push(s);
     else if (s.name.toUpperCase().startsWith(q) || s.name.toUpperCase().includes(` ${q}`)) includesName.push(s);
     else if (s.symbol.includes(q)) includesSym.push(s);
   }
 
-  const dbResults = [...startsWith, ...includesName, ...includesSym].slice(0, limit);
+  const dbResults = [...exact, ...startsWith, ...includesName, ...includesSym].slice(0, limit);
 
   // If query looks like a full TV symbol (e.g., NYSE:JNJ) or no results, allow adding directly
   if (q.includes(':') || (dbResults.length === 0 && q.length >= 2)) {

@@ -231,19 +231,31 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
   const catSet = FIXED_ORDER.filter((c) => wanted.includes(c))
     .concat(wanted.filter((c) => !FIXED_ORDER.includes(c)));
   const jobs: { cat: string; syms: string[]; exKey?: any }[] = [];
+  // Desktop parity: forex/metals/stocks are closed on Saturday/Sunday (UTC) and
+  // stocks are only scanned while their exchange is open. Crypto is 24/7.
+  const utcDay = new Date().getUTCDay();
+  const weekend = utcDay === 0 || utcDay === 6;
   for (const cat of catSet) {
     const g = groups.find((x) => x.id === cat);
     if (!g) continue;
-    if (cat === 'stocks') {
-      const exs = getOpenStockExchanges();
-      if (exs.length > 0) {
-        for (const ex of exs) jobs.push({ cat, syms: (ex.symbols as string[]).slice(0, 15), exKey: ex.key });
-      } else {
-        jobs.push({ cat, syms: g.symbols.slice(0, 15) });
-      }
-    } else {
-      jobs.push({ cat, syms: g.symbols.slice(0, 15) });
+    if (cat === 'custom') {
+      // Custom symbols follow the market they belong to: at the weekend only the
+      // crypto ones are scanned (desktop merges them into their own category).
+      const syms = weekend
+        ? g.symbols.filter((s) => detectMobileType(s) === MarketType.CRYPTO)
+        : g.symbols;
+      if (syms.length) jobs.push({ cat, syms });
+      continue;
     }
+    if (cat !== 'crypto' && weekend) continue;
+    if (cat === 'stocks') {
+      // Never scan stocks outside their session (desktop: getOpenStockExchanges).
+      for (const ex of getOpenStockExchanges()) jobs.push({ cat, syms: ex.symbols as string[], exKey: ex.key });
+      continue;
+    }
+    // FULL category list — the crypto category is the whole top-150 liquidity
+    // list (no 15-symbol cap), exactly like the desktop radar.
+    jobs.push({ cat, syms: g.symbols });
   }
   // FIX: grand total across ALL categories so the progress bar never jumps
   // backwards when the radar moves to the next category.
@@ -270,6 +282,8 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
           await persistMobileResults(b.results, uid || 'anonymous');
         } else { failed++; }
       } catch { failed++; await new Promise((r) => setTimeout(r, 3000)); }
+      // Desktop parity: pace the scan so the shared key pool is never hammered.
+      if (readMobileAuto().isEnabled) await new Promise((r) => setTimeout(r, 2500));
     }
   }
   try { initAudio(); } catch {}
