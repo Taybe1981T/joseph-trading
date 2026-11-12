@@ -29,6 +29,7 @@ import {
 import { fetchUserGrants, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from '../../services/paymentRequests';
 import { MobileAnalysis } from './MobileAnalysis';
 import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar, getMobileRadarProgress } from '../../services/mobileAnalysisEngine';
+import { flagManualRadarStart, takeRadarStartNow, isFreshRadarSession } from '../../services/radarSession';
 import { MobileManualSheet } from './MobileManualSheet';
 import { MobileClientMonitor } from './MobileClientMonitor';
 import TransactionsPage from '../TransactionsPage';
@@ -116,7 +117,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         const info = detectMobileMode();
         startMobileRadar(info.uid, info.email, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
           setRadarProgress(null);
-        });
+        }, { immediate: true });
       } else {
         stopMobileRadar();
         setRadarProgress(null);
@@ -469,6 +470,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     }
   }, [canUseAnalysis, tab]);
 
+  // Establish the page-session marker once, so "refresh" and "reopened after
+  // close" are told apart the same way as on desktop.
+  useEffect(() => { isFreshRadarSession(); }, []);
+
   // Auto-restart radar if enabled but not running (ensures analysis continues across tab navigation)
   useEffect(() => {
     const ensureRadar = () => {
@@ -485,9 +490,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         }
         const uid = (user?.uid || 'anonymous');
         const emailVal = (user?.email || email || '');
+const immediate = takeRadarStartNow();
         startMobileRadar(uid, emailVal, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
           setRadarProgress(null);
-        });
+        }, { immediate });
       } catch {}
     };
     ensureRadar();

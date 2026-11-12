@@ -309,7 +309,7 @@ let mRadarOnDone: ((r: any) => void) | null = null;
 export function isMobileRadarOn(): boolean { return mRadarOn; }
 export function getMobileRadarProgress(): MobileProgress | null { return mRadarProg; }
 export function stopMobileRadar() { mRadarOn = false; if (mRadarTimer) { clearTimeout(mRadarTimer); mRadarTimer = null; } }
-export async function startMobileRadar(uid: string, email: string, onProg?: (p: MobileProgress) => void, onDone?: (r: any) => void) {
+export async function startMobileRadar(uid: string, email: string, onProg?: (p: MobileProgress) => void, onDone?: (r: any) => void, opts?: { immediate?: boolean }) {
   // Update callbacks even if already running
   if (onProg) mRadarOnProg = onProg;
   if (onDone) mRadarOnDone = onDone;
@@ -325,5 +325,16 @@ export async function startMobileRadar(uid: string, email: string, onProg?: (p: 
     if (!mRadarOn || !readMobileAuto().isEnabled) { mRadarOn = false; return; }
     mRadarTimer = setTimeout(loop, (readMobileAuto().interval || 15) * 60000);
   };
-  await loop();
+  const auto = readMobileAuto();
+  const ms = (auto.interval || 15) * 60000;
+  const last = Number(auto.lastFinishedAt || 0);
+  const elapsed = last ? Date.now() - last : Infinity;
+  // Refresh semantics: on a plain refresh `immediate` is false, so we only
+  // scan when the interval is actually due; otherwise we wait for it.
+  const immediate = opts?.immediate === false ? (elapsed >= ms) : true;
+  if (immediate) {
+    await loop();
+  } else {
+    mRadarTimer = setTimeout(() => { mRadarTimer = null; void loop(); }, ms - elapsed);
+  }
 }

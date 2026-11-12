@@ -31,6 +31,7 @@ import ApiKeyModal from './components/ApiKeyModal';
 import SubscriptionModal from './components/SubscriptionModal';
 import PaymentModal from './components/PaymentModal';
 import { stackedPlanExpiry } from './lib/planPeriod';
+import { isFreshRadarSession, takeRadarStartNow, flagManualRadarStart } from './services/radarSession';
 import AuthModal from './components/AuthModal';
 import { getUnreadDevNotificationCount, getUnreadSiteRequestCount, fetchUserGrants, fetchUserGrantsForEmails, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from './services/paymentRequests';
 import ProfilePage from './components/ProfilePage';
@@ -915,6 +916,25 @@ const isDeveloperSession = () => {
     }
     return base;
   });
+
+  // ── Auto-analysis start policy (desktop + mobile share this gate) ─────────
+  // A scan may start ONLY from a manual ON, a due re-analysis interval, or a
+  // fresh open of the site. A plain refresh must keep waiting for the interval.
+  const handleAutoSettingsChange = useCallback((next: AutoAnalysisSettings) => {
+    setAutoSettings((prev) => {
+      if (!prev.isEnabled && next.isEnabled) flagManualRadarStart();
+      return next;
+    });
+  }, []);
+
+  const toggleAutoAnalysisManually = useCallback(() => {
+    try { initAudio(); } catch {}
+    setAutoSettings((prev) => {
+      const next = { ...prev, isEnabled: !prev.isEnabled };
+      if (next.isEnabled) flagManualRadarStart();
+      return next;
+    });
+  }, []);
 
   const [cardColor, setCardColor] = useState<string>(() => {
     return localStorage.getItem('card_color') || '#F59E0B';
@@ -1897,6 +1917,9 @@ const isDeveloperSession = () => {
   const prevRadarEnabledRef = useRef(false);
   const radarTokenRef = useRef(0);
   const radarBusyRef = useRef(false);
+  // Establish the session marker on mount. Computed once per page session, so
+  // the desktop App and the mobile layout always agree on "refresh" vs "fresh".
+  useEffect(() => { isFreshRadarSession(); }, []);
 
   useEffect(() => {
     const allowed = isDeveloperSession() || planClientActive;
@@ -1940,6 +1963,7 @@ const isDeveloperSession = () => {
       const lastTs = autoSettingsRef.current.lastFinishedAt || 0;
       const elapsed = lastTs ? Date.now() - lastTs : Infinity;
       if (immediate || elapsed >= ms) {
+        setIsScanningFinished(false);
         void loop();
       } else {
         setIsScanningFinished(true);
@@ -1993,10 +2017,12 @@ const isDeveloperSession = () => {
       }
     };
 
-    // Due now (never scanned, overdue, or just toggled ON) → scan immediately;
-    // otherwise wait only the remaining part of the interval.
-    if (!wasOn) setIsScanningFinished(false);
-    scheduleNext(!wasOn);
+    // Only a MANUAL ON, a due interval, or the first open of a session may scan
+    // immediately. A plain page refresh (sessionStorage still has the marker)
+    // must NOT restart the scan; it waits for the remaining interval.
+    const startNow = wasOn ? false : takeRadarStartNow();
+    if (startNow) setIsScanningFinished(false);
+    scheduleNext(startNow);
 
     // Catch up on missed scans when the tab becomes visible again (mobile
     // browsers throttle/suspend timers in the background).
@@ -2936,7 +2962,7 @@ const started = planGrants
         isDark={isDark} toggleTheme={() => setIsDark(!isDark)}
         lang={lang} onLangChange={setLang}
         showBack={!!analysisResults} onBack={() => { setAnalysisResults(null); setAnalysisError(null); goBack(); }}
-        autoSettings={autoSettings} onAutoSettingsChange={setAutoSettings}
+        autoSettings={autoSettings} onAutoSettingsChange={handleAutoSettingsChange}
         isWaiting={isScanningFinished}
         hasApiKey={hasApiKey || isDeveloperSession()}
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -2949,7 +2975,7 @@ const started = planGrants
         onOpenMyPlan={() => setShowMyPlan(true)}
         onStartClientAutoAnalysis={() => {
           try { initAudio(); } catch {}
-          setAutoSettings(prev => ({ ...prev, isEnabled: !prev.isEnabled }));
+          toggleAutoAnalysisManually();
           setIsSidebarOpen(false);
         }}
         lastSyncStatus={lastSyncStatus}
@@ -2988,7 +3014,7 @@ const started = planGrants
             planClient={isPlanClient}
             onStartClientAutoAnalysis={() => {
               try { initAudio(); } catch {}
-              setAutoSettings(prev => ({ ...prev, isEnabled: !prev.isEnabled }));
+              toggleAutoAnalysisManually();
               setIsSidebarOpen(false);
             }}
           />
@@ -3180,7 +3206,7 @@ const started = planGrants
               <RadarSettingsPage
                 key={user?.uid || 'no-session'}
                 autoSettings={autoSettings}
-                onAutoSettingsChange={setAutoSettings}
+                onAutoSettingsChange={handleAutoSettingsChange}
                 onSave={saveAutoSettings}
                 isWaiting={isScanningFinished}
                 lang={lang}
@@ -3553,7 +3579,7 @@ const started = planGrants
               onOpenMyPlan={openMyPlan}
               onNavigateManual={() => navigateTo('manualAnalysis')}
               onNavigateRadar={() => navigateTo('radar')}
-              onToggleAutoAnalysis={() => { initAudio(); setAutoSettings({ ...autoSettings, isEnabled: !autoSettings.isEnabled }); }}
+              onToggleAutoAnalysis={() => { initAudio(); toggleAutoAnalysisManually(); }}
               onTrade={(sym) => { try { sessionStorage.setItem('joseph_session_ui', JSON.stringify({ symbol: sym })); } catch {} navigateTo('trade'); }}
               onRemove={removeClientSignal}
               onClearAll={handleClearClientSignals}

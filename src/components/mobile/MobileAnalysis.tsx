@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Zap, Loader2, Settings } from 'lucide-react';
-import { MobileProgress, readMobileAuto, startMobileRadar, stopMobileRadar, getMobileRadarProgress } from '../../services/mobileAnalysisEngine';
+import { MobileProgress, readMobileAuto, startMobileRadar, stopMobileRadar, getMobileRadarProgress, isMobileRadarOn } from '../../services/mobileAnalysisEngine';
+import { takeRadarStartNow } from '../../services/radarSession';
 import { MobileRadarSettings } from './MobileRadarSettings';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
@@ -32,14 +33,14 @@ export function MobileAnalysis({ lang }: Props) {
     window.addEventListener('mobile-radar-settings', onSettings);
     const iv = setInterval(sync, 5000);
     // Reconnect progress callback if radar is already running
-    if (readMobileAuto().isEnabled) {
+    if (readMobileAuto().isEnabled && !isMobileRadarOn()) {
       const { uid, email } = uidEmail();
       startMobileRadar(uid, email, (p) => setProg(p), (r) => {
         setProg(null);
         setLastRun(new Date().toLocaleTimeString());
         setDoneMsg(mobileT(lang, `Done: ${r.scanned} scanned, ${r.fresh} fresh`, `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد`));
         setTimeout(() => setDoneMsg(null), 15000);
-      });
+      }, { immediate: takeRadarStartNow() });
     }
     return () => {
       window.removeEventListener('storage', sync);

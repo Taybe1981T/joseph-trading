@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Zap, Layers, Sparkles, Clock, Music } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT, useMobileMode } from '../../lib/mobileMode';
+import { flagManualRadarStart } from '../../services/radarSession';
 import { getMobileSymbolGroups } from '../../services/mobileAnalysisEngine';
 
 interface AutoSettings {
@@ -37,6 +38,7 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
   const [groups, setGroups] = useState(getMobileSymbolGroups);
   const commit = (patch: Partial<AutoSettings>) => {
     const next = { ...s, ...patch }; setS(next); writeAuto(next);
+    if (!s.isEnabled && patch.isEnabled) flagManualRadarStart();
     try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
   };
   const selectedList = useMemo(() => s.category === 'all' ? groups.map((g) => g.id) : s.category.split(',').filter(Boolean), [s.category, groups]);
