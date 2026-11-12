@@ -13,7 +13,7 @@ import { Language, translations } from '../lib/i18n';
 import { getStatus, subscribe } from '../services/rateLimitTracker';
 import { getOpenStockExchanges } from '../lib/marketHours';
 import { isDeveloperEmail } from '../lib/clientIds';
-import { tryConsumeManualQuota, classifyManualSymbols, MANUAL_QUOTA_MSG_AR, MANUAL_QUOTA_MSG_EN } from '../services/manualQuota';
+import { consumeSymbolAnalyses } from '../services/manualQuota';
 
 interface AnalysisFormProps {
   user: User | null;
@@ -204,22 +204,18 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
       return;
     }
 
-    // Paid-client manual-analysis quota (6 full-batch / 6 per-category / 20
-    // individual per UTC day). Developers are never limited.
+    // Paid-client analysis quota: 5 analyses per symbol per UTC day, shared
+    // between manual and automatic analysis. A batch consumes one unit of every
+    // symbol it contains. Developers are never limited.
+    let targets = allSymbolsToAnalyze;
     if (hasActivePlan && !isDeveloperEmail(user?.email)) {
-      const categorySymbols: Record<string, string[]> = {};
-      for (const cat of Object.keys(SYMBOL_GROUPS)) {
-        categorySymbols[cat] = (SYMBOL_GROUPS as any)[cat].flatMap((g: any) => g.symbols || []);
-      }
-      const { bucket, category } = classifyManualSymbols(allSymbolsToAnalyze, categorySymbols);
-      const quota = tryConsumeManualQuota(user?.email || null, bucket, category, lang);
-      if (!quota.allowed) {
-        setFormErrors([quota.message || (lang === 'ar' ? MANUAL_QUOTA_MSG_AR : MANUAL_QUOTA_MSG_EN)]);
-        return;
-      }
+      const quota = consumeSymbolAnalyses(user?.email || null, allSymbolsToAnalyze, lang);
+      if (quota.blocked.length > 0 && quota.message) setFormErrors([quota.message]);
+      if (quota.allowed.length === 0) return;
+      targets = quota.allowed;
     }
 
-    console.log("[Form] Beginning analysis for:", allSymbolsToAnalyze);
+    console.log("[Form] Beginning analysis for:", targets);
     onBegin();
     const results: AnalysisResult[] = [];
     const failedSymbols: { symbol: string; error: string }[] = [];
@@ -228,9 +224,9 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
 
     try {
       // Batch analysis: ONE AI call for ALL symbols — eliminates rate limiting
-      onProgress(allSymbolsToAnalyze[0], allSymbolsToAnalyze.length, 0);
+      onProgress(targets[0], targets.length, 0);
       const batchResult = await analyzeMarketBatch(
-        allSymbolsToAnalyze.map(sym => ({
+        targets.map(sym => ({
           symbol: sym,
           type: data.type,
           timeframe: data.timeframe,
@@ -286,8 +282,8 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
         const failedList = failedSymbols.map(f => `${f.symbol}`).join(', ');
         const sampleErrors = [...new Set(failedSymbols.map(f => f.error))].slice(0, 3).join('; ');
         const summary = lang === 'ar'
-          ? `نجح ${results.length} من ${allSymbolsToAnalyze.length}. فشل ${failedSymbols.length}: ${failedList}. (${sampleErrors})`
-          : `${results.length}/${allSymbolsToAnalyze.length} succeeded. ${failedSymbols.length} failed: ${failedList}. (${sampleErrors})`;
+          ? `نجح ${results.length} من ${targets.length}. فشل ${failedSymbols.length}: ${failedList}. (${sampleErrors})`
+          : `${results.length}/${targets.length} succeeded. ${failedSymbols.length} failed: ${failedList}. (${sampleErrors})`;
         setFormErrors(failedSymbols.map(f => `${f.symbol}: ${f.error}`));
         onError(summary, results.length === 0);
       } else if (results.length === 0) {

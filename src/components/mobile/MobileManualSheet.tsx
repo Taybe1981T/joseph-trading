@@ -5,7 +5,7 @@ import { MobileProgress, runMobileManual, getMobileSymbolGroups, getMobileAllSym
 import { TIMEFRAMES, TRADING_STYLES, FREE_SYMBOLS, ALL_SYMBOLS_DB } from '../../constants';
 import { Language } from '../../lib/i18n';
 import { mobileT, isMobilePlanClient, useMobileMode } from '../../lib/mobileMode';
-import { tryConsumeManualQuota, classifyManualSymbols } from '../../services/manualQuota';
+import { consumeSymbolAnalyses } from '../../services/manualQuota';
 
 interface Props { lang: Language; onClose: () => void; onDone: (r: AnalysisResult[]) => void; }
 
@@ -142,18 +142,20 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const analyze = async () => {
     const allSyms = [...new Set(selectedSymbols)];
     if (busy || allSyms.length === 0) return;
-    // Paid-client manual quota (desktop parity).
-    if (!isDev) {
+    setQuotaMsg(null);
+    let targets = allSyms;
+    // Paid-client analysis quota (desktop parity): 5 analyses per symbol per
+    // UTC day, shared with automatic analysis.
+    if (!isDev && paid) {
       const email = (() => { try { return String(JSON.parse(localStorage.getItem('finalyze_user') || '{}')?.email || ''); } catch { return ''; } })();
-      const catSyms: Record<string, string[]> = {};
-      for (const g of groups) catSyms[g.id] = g.symbols;
-      const { bucket, category } = classifyManualSymbols(allSyms, catSyms);
-      const q = tryConsumeManualQuota(email, bucket, category, isAr ? 'ar' : 'en');
-      if (!q.allowed) { setQuotaMsg(q.message || ''); return; }
+      const q = consumeSymbolAnalyses(email, allSyms, isAr ? 'ar' : 'en');
+      if (q.blocked.length > 0) setQuotaMsg(q.message || '');
+      if (q.allowed.length === 0) return;
+      targets = q.allowed;
     }
     setBusy(true); setProg(null); setResults([]); setFailed([]);
     try {
-      const r = await runMobileManual(allSyms, uid(), (p) => setProg(p), { timeframe: tf, tradingStyle: style });
+      const r = await runMobileManual(targets, uid(), (p) => setProg(p), { timeframe: tf, tradingStyle: style });
       setResults(r.results); setFailed(r.failed);
       if (r.results.length > 0) onDone(r.results);
     } finally { setBusy(false); setProg(null); }

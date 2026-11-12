@@ -26,6 +26,7 @@ import { getOpenStockExchanges, exchangeLabel, StockExchangeKey, OpenExchange } 
 import { Language, translations } from './lib/i18n';
 import { analyzeMarket } from './services/geminiService';
 import { waitIfRateLimited } from './services/rateLimitTracker';
+import { consumeSymbolAnalyses } from './services/manualQuota';
 import { resolveConflicts } from './services/portfolioRiskService';
 import ApiKeyModal from './components/ApiKeyModal';
 import SubscriptionModal from './components/SubscriptionModal';
@@ -1780,6 +1781,13 @@ const isDeveloperSession = () => {
 
       for (const sym of syms) {
         if (!autoSettingsRef.current.isEnabled) break;
+
+        // Paid-client analysis quota: 5 analyses per symbol per UTC day, shared
+        // with manual analysis. Blocked symbols are skipped, not re-analyzed.
+        if (hasActivePlan && !isDeveloperSession()) {
+          const quota = consumeSymbolAnalyses(user?.email || null, [sym], lang);
+          if (quota.allowed.length === 0) continue;
+        }
 
           setRadarProgress({ current: sym, total: syms.length, index: scanResults.length, failed: scanFailed, exchange: exchange ? exchangeLabel(exchange.key, lang) : undefined });
 

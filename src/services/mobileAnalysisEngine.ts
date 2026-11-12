@@ -7,6 +7,7 @@ import { collection, addDoc, serverTimestamp, doc, setDoc } from 'firebase/fires
 import { db } from '../lib/firebase';
 import { Language } from '../lib/i18n';
 import { isDeveloperEmail } from '../lib/clientIds';
+import { consumeSymbolAnalyses } from './manualQuota';
 import { initAudio, playStart, playCompletion, playCategoryChange } from '../lib/audioEngine';
 
 export interface MobileProgress {
@@ -267,6 +268,12 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
     if (!readMobileAuto().isEnabled) break;
     for (const sym of j.syms) {
       if (!readMobileAuto().isEnabled) break;
+      // Paid-client analysis quota (desktop parity): 5 analyses per symbol per
+      // UTC day, shared with manual analysis.
+      if (email && !isDeveloperEmail(email)) {
+        const q = consumeSymbolAnalyses(email, [sym], lang);
+        if (q.allowed.length === 0) continue;
+      }
       done++;
       onProg?.({ current: sym, total: grandTotal, index: done, failed, exchange: j.exKey ? exchangeLabel(j.exKey, lang) : undefined, category: j.cat });
       try {

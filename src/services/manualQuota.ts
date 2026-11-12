@@ -1,67 +1,59 @@
-// Per-account, per-UTC-day manual-analysis quota.
+// Per-account, per-symbol, per-UTC-day analysis quota (simplified).
 //
-// Paid clients are limited to a small number of manual analyses every 24 hours
-// (resetting at 00:00 UTC). Three independent buckets exist:
-//   - 'fullBatch'    : all categories at once          -> 6 / day
-//   - 'perCategory'  : all symbols of one category     -> 6 / day per category
-//   - 'individual'   : 1..10 symbols                  -> 20 / day
+// Rule (same on desktop and mobile):
+//   A paid client may analyze any symbol at most 5 times per day, counted across
+//   BOTH manual and automatic analysis.
+//   - Analyzing one symbol consumes 1 unit of that symbol.
+//   - Analyzing a whole category (all its symbols) consumes 1 unit of each of
+//     those symbols.
+//   - Analyzing every category at once consumes 1 unit of every symbol involved.
+//   Example: a symbol analyzed 2 times has 3 units left. When it reaches 5 it is
+//   blocked for the rest of the day and becomes available again after 00:00 UTC
+//   (midnight GMT), when the counter resets automatically.
 //
 // Developers are never limited. Free/guest accounts are handled by the existing
 // symbol locks and never reach this module.
 //
 // Shared by the desktop site and the mobile app (same localStorage shape, keyed
-// by the signed-in email so the two platforms stay in sync on one device).
+// by the signed-in email so both platforms agree on one device).
 
 import { isDeveloperEmail } from '../lib/clientIds';
 
-export const MANUAL_QUOTA_MSG_AR =
-  'لقد استنفدت رصيد التحليل اليومي، انتظر حتى بداية يوم آخر لتجديد الرصيد تلقائياً بعد 12 ليلاً بتوقيت غرينتش';
-export const MANUAL_QUOTA_MSG_EN =
-  'You have exhausted your daily analysis balance. Wait until the start of a new day for automatic renewal at midnight UTC (GMT).';
+export const SYMBOL_DAILY_LIMIT = 5;
 
-export const MANUAL_QUOTA_LIMITS = {
-  fullBatch: 6,
-  perCategory: 6,
-  individual: 20,
-};
-
-export type ManualQuotaBucket = 'fullBatch' | 'perCategory' | 'individual';
-
-interface BucketState {
-  fullBatch: number;
-  perCategory: Record<string, number>;
-  individual: number;
-}
+export const QUOTA_RESET_HINT_AR =
+  'يتجدد الرصيد تلقائياً بعد منتصف الليل بتوقيت غرينتش (00:00 UTC).';
+export const QUOTA_RESET_HINT_EN =
+  'The balance renews automatically after midnight GMT (00:00 UTC).';
 
 interface QuotaState {
   date: string; // UTC YYYY-MM-DD
-  buckets: BucketState;
+  counts: Record<string, number>;
 }
 
 function todayUTC(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function normalizeSymbol(symbol: string): string {
+  return String(symbol || '').trim().toUpperCase();
+}
+
 function storageKey(email: string): string {
-  return `finalyze_manual_quota_${(email || '').toLowerCase().trim()}`;
+  return `finalyze_symbol_quota_${(email || '').toLowerCase().trim()}`;
 }
 
 function loadState(email: string): QuotaState {
-  const empty: QuotaState = { date: todayUTC(), buckets: { fullBatch: 0, perCategory: {}, individual: 0 } };
+  const empty: QuotaState = { date: todayUTC(), counts: {} };
   if (!email) return empty;
   try {
     const raw = localStorage.getItem(storageKey(email));
     if (!raw) return empty;
     const parsed = JSON.parse(raw);
-    if (!parsed || parsed.date !== todayUTC()) return empty; // new day -> reset
-    return {
-      date: parsed.date,
-      buckets: {
-        fullBatch: Number(parsed.buckets?.fullBatch || 0),
-        perCategory: parsed.buckets?.perCategory || {},
-        individual: Number(parsed.buckets?.individual || 0),
-      },
-    };
+    if (!parsed || parsed.date !== todayUTC() || !parsed.counts) return empty; // new day -> reset
+    const counts: Record<string, number> = {};
+    for (const [k, v] of Object.entries(parsed.counts)) counts[normalizeSymbol(k)] = Number(v) || 0;
+    return { date: parsed.date, counts };
   } catch {
     return empty;
   }
@@ -72,72 +64,80 @@ function saveState(email: string, state: QuotaState): void {
   try { localStorage.setItem(storageKey(email), JSON.stringify(state)); } catch {}
 }
 
-export function isDeveloperAccount(email: string | null | undefined): boolean {
-  return isDeveloperEmail(email);
+/** How many times `symbol` was already analyzed today (UTC). */
+export function getSymbolUsage(email: string | null | undefined, symbol: string): number {
+  const e = String(email || '').toLowerCase().trim();
+  if (!e) return 0;
+  const st = loadState(e);
+  return Number(st.counts[normalizeSymbol(symbol)] || 0);
+}
+
+/** Remaining analyses for `symbol` today. Developers get Infinity. */
+export function getSymbolRemaining(email: string | null | undefined, symbol: string): number {
+  if (isDeveloperEmail(email)) return Infinity;
+  return Math.max(0, SYMBOL_DAILY_LIMIT - getSymbolUsage(email, symbol));
+}
+
+/** True when `symbol` reached the daily cap and must not be analyzed again. */
+export function isSymbolExhausted(email: string | null | undefined, symbol: string): boolean {
+  if (isDeveloperEmail(email)) return false;
+  return getSymbolUsage(email, symbol) >= SYMBOL_DAILY_LIMIT;
+}
+
+/** Symbols (from `symbols`) that already reached the daily cap. */
+export function getExhaustedSymbols(email: string | null | undefined, symbols: string[]): string[] {
+  if (isDeveloperEmail(email)) return [];
+  const unique = [...new Set(symbols.map(normalizeSymbol).filter(Boolean))];
+  return unique.filter((s) => isSymbolExhausted(email, s));
+}
+
+/** Builds the user-facing message listing the blocked symbols. */
+export function symbolQuotaMessage(symbols: string[], lang: 'ar' | 'en' = 'ar'): string {
+  const list = [...new Set(symbols.map(normalizeSymbol).filter(Boolean))].join(', ');
+  if (lang === 'ar') {
+    return `لقد وصل الرمز ${list} إلى الحد الأقصى (${SYMBOL_DAILY_LIMIT} مرات) للتحليل اليوم. لا يمكن إعادة تحليل هذا الرمز اليوم. ${QUOTA_RESET_HINT_AR}`;
+  }
+  return `Symbol ${list} reached the daily maximum (${SYMBOL_DAILY_LIMIT} analyses today) and cannot be analyzed again today. ${QUOTA_RESET_HINT_EN}`;
 }
 
 /**
- * Classify a manual request into one of the three buckets.
- *  - 1..10 symbols -> 'individual'
- *  - >10 symbols spanning a single category -> 'perCategory'
- *  - >10 symbols spanning multiple categories -> 'fullBatch'
+ * Consumes one analysis unit for each allowed symbol and reports the rest.
+ * - Developers / missing email: everything is allowed and nothing is counted.
+ * - Already-exhausted symbols are returned in `blocked` and NOT counted.
+ * - `message` is present only when at least one symbol was blocked.
  */
-export function classifyManualSymbols(
-  selectedSymbols: string[],
-  categorySymbols: Record<string, string[]>,
-): { bucket: ManualQuotaBucket; category?: string } {
-  const n = selectedSymbols.length;
-  if (n >= 1 && n <= 10) return { bucket: 'individual' };
-  const set = new Set(selectedSymbols);
-  for (const [cat, syms] of Object.entries(categorySymbols)) {
-    if (syms.length > 0 && syms.length === n && syms.every((s) => set.has(s))) {
-      return { bucket: 'perCategory', category: cat };
+export function consumeSymbolAnalyses(
+  email: string | null | undefined,
+  symbols: string[],
+  lang: 'ar' | 'en' = 'ar',
+): { allowed: string[]; blocked: string[]; message?: string } {
+  const unique = [...new Set(symbols.map(normalizeSymbol).filter(Boolean))];
+  const e = String(email || '').toLowerCase().trim();
+  if (!e || isDeveloperEmail(e)) return { allowed: unique, blocked: [] };
+
+  const st = loadState(e);
+  const allowed: string[] = [];
+  const blocked: string[] = [];
+
+  for (const sym of unique) {
+    const used = Number(st.counts[sym] || 0);
+    if (used >= SYMBOL_DAILY_LIMIT) {
+      blocked.push(sym);
+    } else {
+      st.counts[sym] = used + 1;
+      allowed.push(sym);
     }
   }
-  return { bucket: 'fullBatch' };
+
+  if (allowed.length > 0) saveState(e, st);
+  return blocked.length > 0
+    ? { allowed, blocked, message: symbolQuotaMessage(blocked, lang) }
+    : { allowed, blocked };
 }
 
-/**
- * Returns whether a manual analysis may run, and consumes one unit if allowed.
- * Developers are never limited. Returns { allowed, message }.
- */
-export function tryConsumeManualQuota(
-  email: string | null | undefined,
-  bucket: ManualQuotaBucket,
-  category?: string,
-  lang: 'ar' | 'en' = 'en',
-): { allowed: boolean; message?: string } {
-  if (isDeveloperEmail(email)) return { allowed: true };
-  if (!email) return { allowed: false, message: lang === 'ar' ? MANUAL_QUOTA_MSG_AR : MANUAL_QUOTA_MSG_EN };
-
-  const state = loadState(email);
-  const limit = MANUAL_QUOTA_LIMITS[bucket];
-  const msg = lang === 'ar' ? MANUAL_QUOTA_MSG_AR : MANUAL_QUOTA_MSG_EN;
-
-  if (bucket === 'perCategory') {
-    const cat = category || 'all';
-    const used = Number(state.buckets.perCategory[cat] || 0);
-    if (used >= limit) return { allowed: false, message: msg };
-    state.buckets.perCategory[cat] = used + 1;
-  } else if (bucket === 'fullBatch') {
-    if (state.buckets.fullBatch >= limit) return { allowed: false, message: msg };
-    state.buckets.fullBatch += 1;
-  } else {
-    if (state.buckets.individual >= limit) return { allowed: false, message: msg };
-    state.buckets.individual += 1;
-  }
-
-  saveState(email, state);
-  return { allowed: true };
-}
-
-/** Remaining counts for display (optional). */
-export function getManualQuotaRemaining(email: string | null | undefined): { fullBatch: number; perCategory: (cat: string) => number; individual: number } {
-  if (isDeveloperEmail(email)) return { fullBatch: Infinity, perCategory: () => Infinity, individual: Infinity };
-  const state = loadState(email || '');
-  return {
-    fullBatch: Math.max(0, MANUAL_QUOTA_LIMITS.fullBatch - state.buckets.fullBatch),
-    perCategory: (cat: string) => Math.max(0, MANUAL_QUOTA_LIMITS.perCategory - Number(state.buckets.perCategory[cat] || 0)),
-    individual: Math.max(0, MANUAL_QUOTA_LIMITS.individual - state.buckets.individual),
-  };
+/** Clears the whole daily counter for an account (developer/testing helper). */
+export function resetSymbolQuota(email: string | null | undefined): void {
+  const e = String(email || '').toLowerCase().trim();
+  if (!e) return;
+  try { localStorage.removeItem(storageKey(e)); } catch {}
 }
