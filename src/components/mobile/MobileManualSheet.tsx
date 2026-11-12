@@ -146,7 +146,7 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
     let targets = allSyms;
     // Paid-client analysis quota (desktop parity): 5 analyses per symbol per
     // UTC day, shared with automatic analysis.
-    if (!isDev && paid) {
+    if (!isDev) {
       const email = (() => { try { return String(JSON.parse(localStorage.getItem('finalyze_user') || '{}')?.email || ''); } catch { return ''; } })();
       const q = consumeSymbolAnalyses(email, allSyms, isAr ? 'ar' : 'en');
       if (q.blocked.length > 0) setQuotaMsg(q.message || '');
