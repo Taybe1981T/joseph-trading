@@ -17,8 +17,7 @@ import { getTradeStore, calcPnl, START_BALANCE, getLivePrices } from '../../serv
 import { notionalInUSD, usdToPrice } from '../../lib/positionMath';
 import { calcTrailingStop } from '../../lib/trailingStop';
 import type { PaperTrade } from '../../services/paperTradingService';
-import { baseQtyPerCategory } from '../../services/paperTradingService';
-import { getTradingValuesOverride } from '../../services/tradingValues';
+import { getTradingValuesOverride, tradeQtyFor, baseUnitForTrade } from '../../services/tradingValues';
 import TradingViewEmbed from '../TradingViewEmbed';
 
 interface MobileNewTradeProps {
@@ -40,12 +39,14 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   });
   const [symbol, setSymbol] = useState(defaultSymbol || (groups[0]?.symbols[0] || quotes[0]?.symbol || ''));
   const [volume, setVolume] = useState(0.01);
-  // Developer "Trading Values" system ON → show the fixed lot for this
-  // symbol's category (the bridge imposes it on the order itself too).
+  // Volume prefill mirrors desktop + the auto engine:
+  //   • crypto → tiered balance-scaled lot (BTC 0.1 · SOL 1 · DOGE 10 per $1k)
+  //   • other categories → the fixed lot when the system is ON, else dynamic
   useEffect(() => {
-    const fixed = getTradingValuesOverride(detectMobileTradeCategory(symbol));
-    if (fixed) setVolume((prev) => (prev === fixed.qty ? prev : fixed.qty));
-  }, [symbol]);
+    const cat = detectMobileTradeCategory(symbol);
+    const q = tradeQtyFor(cat, symbol, balance);
+    setVolume((prev) => (prev === q ? prev : q));
+  }, [symbol, balance]);
   const [busy, setBusy] = useState(false);
   const [autoTrade, setAutoTrade] = useState<boolean>(() => isMobileAutoTradeOn());
   // Custom symbol management (add/delete) - available for both developer and client
@@ -134,7 +135,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
     const tr = calcTrailingStop({
       qty: openForSymbol.qty,
       openPnlUSD: pnl,
-      baseUnit: baseQtyPerCategory(chartCategory),
+      baseUnit: baseUnitForTrade(chartCategory, symbol),
       baseActivationUSD: tvFixed?.trailingActivationUSD ?? ((openForSymbol as any).trailingActivationUSD ?? 5),
       baseStepUSD: tvFixed?.trailingStepUSD ?? ((openForSymbol as any).trailingStepUSD ?? 2),
       activationLotStep: tvFixed ? 0 : 2,

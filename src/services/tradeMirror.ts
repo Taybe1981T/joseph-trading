@@ -20,14 +20,13 @@
 import { db } from '../lib/firebase';
 import { collection, doc, getDocs, onSnapshot, setDoc, Timestamp } from 'firebase/firestore';
 import {
-  getDefaultQty,
-  calcRiskUSD,
   calcPnl,
   isMarketOpen,
   getLivePrice,
   getTradeStore,
 } from './paperTradingService';
-import { notionalInUSD, usdToPrice } from '../lib/positionMath';
+import { notionalInUSD } from '../lib/positionMath';
+import { tradeQtyFor, resolveRiskLevels } from './tradingValues';
 import type { AnalysisResult } from '../types';
 import {
   isOpened as guardIsOpened,
@@ -236,16 +235,21 @@ export async function pollMirrorEvents(opts: {
         if (!isMarketOpen(cat, sym)) continue; // retry — market may open later
         const price = await getLivePrice(sym).catch(() => null);
         if (price == null || !(price > 0)) continue; // retry — quote feed warms up
-        const q = getDefaultQty(cat, balance);
+        // Same sizing/risk rules as the developer's auto engine and the manual
+        // ticket: crypto → tiered balance-scaled lot + percentage SL/TP;
+        // other categories → fixed values (when ON) or dynamic $ risk.
+        const q = tradeQtyFor(cat, sym, balance);
         const requiredMargin = notionalInUSD(cat, sym, price, q) / leverage;
         if (requiredMargin > balance) continue; // retry — balance may free up
-        const { slUsd, tpUsd } = calcRiskUSD(balance);
         const side: 'buy' | 'sell' = isBuy ? 'buy' : 'sell';
+        const levels = resolveRiskLevels({
+          category: cat, symbol: sym, entry: price, isBuy, qty: q, balance,
+        });
         await store.addTrade({
           symbol: sym, category: cat, side, qty: q, entryPrice: price,
           status: 'open' as const,
-          tp: usdToPrice(sym, tpUsd, price, side === 'buy', q, cat),
-          sl: usdToPrice(sym, slUsd, price, side === 'sell', q, cat),
+          tp: levels.tpPrice,
+          sl: levels.slPrice,
           openedAt: Date.now(),
           source: 'auto',
         });

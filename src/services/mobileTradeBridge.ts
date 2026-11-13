@@ -12,16 +12,18 @@ import {
   getTradeStore,
   getLivePrice,
   getLivePrices,
-  getDefaultQty,
   calcPnl,
-  calcRiskUSD,
   type PaperTrade,
 } from './paperTradingService';
 import { AutoTradeEngine } from './autoTradeEngine';
 import { SignalType, type AnalysisResult } from '../types';
 import { SYMBOL_CATEGORIES } from '../constants';
-import { usdToPrice } from '../lib/positionMath';
-import { getTradingValuesOverride } from './tradingValues';
+import {
+  getTradingValuesOverride,
+  tradeQtyFor,
+  resolveRiskLevels,
+  baseUnitForTrade,
+} from './tradingValues';
 
 export const MOBILE_AUTO_TRADE_KEY = 'paper_trading_auto_trade';
 
@@ -82,32 +84,28 @@ export async function openMobileManualTrade(
   const price = await getLivePrice(sym);
   if (price == null || !isFinite(price) || price <= 0) throw new Error('no live price for ' + sym);
   const category = detectMobileTradeCategory(sym);
-  // Developer "Trading Values" system ON → fixed lot + fixed SL/TP for this
-  // category, exactly like the desktop ticket. OFF → previous behaviour.
   const fixed = getTradingValuesOverride(category);
-  let qty = fixed ? fixed.qty : Number(volume);
-  if (!isFinite(qty) || qty <= 0) {
-    try {
-      const acc = await store.getAccount();
-      qty = getDefaultQty(category, acc.balance);
-    } catch { qty = getDefaultQty(category, 10000); }
-  }
-  let sl: number | null = null;
-  let tp: number | null = null;
-  if (fixed) {
-    sl = usdToPrice(sym, fixed.slUsd, price, side === 'sell', qty, category);
-    tp = usdToPrice(sym, fixed.tpUsd, price, side === 'buy', qty, category);
-  } else {
-    sl = signal?.stopLoss ?? null;
-    tp = signal?.takeProfit ?? null;
-    if (sl == null || tp == null) {
-      try {
-        const acc = await store.getAccount();
-        const risk = calcRiskUSD(acc.balance);
-        if (sl == null) sl = usdToPrice(sym, risk.slUsd, price, side === 'sell', qty, category);
-        if (tp == null) tp = usdToPrice(sym, risk.tpUsd, price, side === 'buy', qty, category);
-      } catch {}
-    }
+  // Same sizing rules as desktop + the global engine:
+  //   • crypto → tiered balance-scaled lot (BTC 0.1 · SOL 1 · DOGE 10 per $1k)
+  //     and SL/TP as PERCENTAGES (1.5 % / 3 %), never tiny USD distances.
+  //   • other categories → the developer's fixed lot when ON, otherwise the
+  //     typed/calculated volume.
+  let balance = 10000;
+  try { balance = (await store.getAccount()).balance ?? 10000; } catch {}
+  let qty = Number(volume);
+  if (fixed && category !== 'crypto') qty = tradeQtyFor(category, sym, balance);
+  if (!isFinite(qty) || qty <= 0) qty = tradeQtyFor(category, sym, balance);
+
+  const levels = resolveRiskLevels({
+    category, symbol: sym, entry: price, isBuy: side === 'buy', qty, balance,
+  });
+  let sl: number | null = levels.slPrice;
+  let tp: number | null = levels.tpPrice;
+  // Non-crypto keeps the displayed signal's own risk plan when the developer
+  // system is OFF (desktop parity); crypto always follows the % system.
+  if (category !== 'crypto' && !fixed && signal?.stopLoss && signal?.takeProfit) {
+    sl = signal.stopLoss;
+    tp = signal.takeProfit;
   }
   const row: Omit<PaperTrade, 'id'> = {
     symbol: sym, category, side, qty, entryPrice: price, status: 'open',
@@ -237,7 +235,6 @@ async function mobileManagePositions(): Promise<void> {
     const tfFixed = getTradingValuesOverride(t.category || detectMobileTradeCategory(t.symbol));
     if (!cfg.enabled && !tfFixed) continue;
     try {
-      const { baseQtyPerCategory } = await import('./paperTradingService');
       const { calcTrailingStop } = await import('../lib/trailingStop');
       const { usdToPrice } = await import('../lib/positionMath');
       const pnl = calcPnl(t, price);
@@ -250,7 +247,10 @@ async function mobileManagePositions(): Promise<void> {
         ? tfFixed.trailingStepUSD
         : ((t as any).trailingStepUSD != null ? (t as any).trailingStepUSD : cfg.baseStepUSD);
       const tr = calcTrailingStop({
-        qty: t.qty, openPnlUSD: pnl, baseUnit: baseQtyPerCategory(t.category || detectMobileTradeCategory(t.symbol)),
+        qty: t.qty, openPnlUSD: pnl,
+        // Symbol-aware base unit — crypto uses the coin's tier base (0.1/1/10)
+        // so activation/step never explode on a large DOGE/XRP lot.
+        baseUnit: baseUnitForTrade(t.category || detectMobileTradeCategory(t.symbol), t.symbol),
         baseActivationUSD: act, baseStepUSD: step,
         activationLotStep: tfFixed ? 0 : cfg.activationLotStep,
         stepLotStep: tfFixed ? 0 : cfg.stepLotStep,

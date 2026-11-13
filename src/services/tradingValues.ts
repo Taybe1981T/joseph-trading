@@ -23,7 +23,8 @@
 
 import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { baseQtyPerCategory, calcRiskUSD } from './paperTradingService';
+import { usdToPrice } from '../lib/positionMath';
+import { baseQtyForSymbol, baseQtyPerCategory, calcRiskUSD, getDefaultQty } from './paperTradingService';
 
 export type TradingCategory = 'forex' | 'crypto' | 'stocks' | 'metals';
 
@@ -51,6 +52,18 @@ export const TRADING_VALUES_STORAGE_KEY = 'finalyze_trading_values_v1';
 // standard trailing rule ($5 activation / $2 step).
 const DEFAULT_RISK = calcRiskUSD(10000);
 
+// Crypto stops/targets are PERCENTAGES of the entry price, not USD amounts.
+// A USD distance divided by the coin quantity is meaningless across coins:
+// $60 with 0.1 BTC = 0.6% (too tight) and $60 with 0.1 DOGE = a price 3000×
+// below zero. Percentages give logical levels on every coin.
+export const CRYPTO_SL_PCT = 1.5;   // 1.5% stop
+export const CRYPTO_TP_PCT = 3;     // 3% target (1:2 R:R)
+const CRYPTO_PCT_MIN = 0.1;
+const CRYPTO_PCT_MAX = 25;
+// Old documents stored crypto SL/TP as USD (60 / 120). They are migrated by
+// dividing by 40 → the equivalent percentage (1.5% / 3%).
+const LEGACY_CRYPTO_USD_ANCHOR = 40;
+
 export function normalizeTradingCategory(category: string): TradingCategory {
   const key = String(category || '').toLowerCase().trim();
   return (TRADING_CATEGORIES as string[]).includes(key) ? (key as TradingCategory) : 'stocks';
@@ -58,6 +71,17 @@ export function normalizeTradingCategory(category: string): TradingCategory {
 
 export function defaultCategoryTradingValues(category: string): CategoryTradingValues {
   const cat = normalizeTradingCategory(category);
+  if (cat === 'crypto') {
+    // Crypto: lotSize is the HIGH-tier base (×10 medium, ×100 low) and the
+    // SL/TP fields hold percentages.
+    return {
+      lotSize: baseQtyPerCategory('crypto'),
+      stopLossUSD: CRYPTO_SL_PCT,
+      takeProfitUSD: CRYPTO_TP_PCT,
+      trailingActivationUSD: 5,
+      trailingStepUSD: 2,
+    };
+  }
   return {
     lotSize: baseQtyPerCategory(cat),
     stopLossUSD: DEFAULT_RISK.slUsd,
@@ -82,16 +106,25 @@ function positiveNumber(value: unknown, fallback: number): number {
   return Math.min(1e9, n);
 }
 
+// Crypto SL/TP are percentages. Values coming from an older document (USD,
+// e.g. 60/120) are converted to their percentage equivalent and clamped.
+function cryptoPercent(value: unknown, fallback: number): number {
+  const n = positiveNumber(value, fallback);
+  const pct = n > 25 ? n / LEGACY_CRYPTO_USD_ANCHOR : n;
+  return Math.min(CRYPTO_PCT_MAX, Math.max(CRYPTO_PCT_MIN, pct));
+}
+
 export function normalizeTradingValues(raw: any): TradingValuesConfig {
   const cats = {} as Record<TradingCategory, CategoryTradingValues>;
   for (const cat of TRADING_CATEGORIES) {
     const def = defaultCategoryTradingValues(cat);
     const src = raw && raw.categories && typeof raw.categories === 'object' ? raw.categories[cat] : null;
     const value = src && typeof src === 'object' ? src : {};
+    const isCrypto = cat === 'crypto';
     cats[cat] = {
       lotSize: positiveNumber(value.lotSize, def.lotSize),
-      stopLossUSD: positiveNumber(value.stopLossUSD, def.stopLossUSD),
-      takeProfitUSD: positiveNumber(value.takeProfitUSD, def.takeProfitUSD),
+      stopLossUSD: isCrypto ? cryptoPercent(value.stopLossUSD, def.stopLossUSD) : positiveNumber(value.stopLossUSD, def.stopLossUSD),
+      takeProfitUSD: isCrypto ? cryptoPercent(value.takeProfitUSD, def.takeProfitUSD) : positiveNumber(value.takeProfitUSD, def.takeProfitUSD),
       trailingActivationUSD: positiveNumber(value.trailingActivationUSD, def.trailingActivationUSD),
       trailingStepUSD: positiveNumber(value.trailingStepUSD, def.trailingStepUSD),
     };
@@ -165,6 +198,9 @@ export interface FixedTradingValues {
   tpUsd: number;
   trailingActivationUSD: number;
   trailingStepUSD: number;
+  /** Crypto only: stop/target as a percentage of the entry price. */
+  slPct?: number;
+  tpPct?: number;
 }
 
 /**
@@ -179,7 +215,7 @@ export function getTradingValuesOverride(category: string): FixedTradingValues |
   const cat = normalizeTradingCategory(category);
   const v = config.categories[cat];
   if (!v) return null;
-  return {
+  const base = {
     category: cat,
     qty: v.lotSize,
     slUsd: v.stopLossUSD,
@@ -187,9 +223,128 @@ export function getTradingValuesOverride(category: string): FixedTradingValues |
     trailingActivationUSD: v.trailingActivationUSD,
     trailingStepUSD: v.trailingStepUSD,
   };
+  // Crypto → the SL/TP numbers are percentages of price.
+  if (cat === 'crypto') {
+    return { ...base, slPct: v.stopLossUSD, tpPct: v.takeProfitUSD };
+  }
+  return base;
 }
 
 /** True when the developer's fixed-values system is currently ON. */
 export function isTradingValuesEnabled(): boolean {
   return readCachedTradingValues().enabled;
+}
+
+// ───────────────────────── Trade helpers (desktop + mobile) ─────────────────
+
+export interface TradeLevels {
+  slPrice: number;
+  tpPrice: number;
+  /** USD risk of the stop (for display / logs). */
+  slUsd: number;
+  /** USD reward of the target. */
+  tpUsd: number;
+}
+
+/** Percentage stop/target for crypto (always logical, on any coin price). */
+export function cryptoPctLevels(
+  entry: number,
+  isBuy: boolean,
+  slPct: number,
+  tpPct: number,
+  qty: number,
+): TradeLevels {
+  const e = entry > 0 ? entry : 0;
+  const slDistance = e * (slPct / 100);
+  const tpDistance = e * (tpPct / 100);
+  return {
+    slPrice: isBuy ? e - slDistance : e + slDistance,
+    tpPrice: isBuy ? e + tpDistance : e - tpDistance,
+    slUsd: slDistance * qty,
+    tpUsd: tpDistance * qty,
+  };
+}
+
+/**
+ * Lot size for a trade.
+ * - crypto: ALWAYS the tiered, balance-scaled lot (BTC 0.1 / SOL 1 / DOGE 10
+ *   per $1,000); the panel's crypto lot is the high-tier base.
+ * - other categories: the developer's fixed lot when the system is ON,
+ *   otherwise the balance-scaled lot.
+ */
+export function tradeQtyFor(category: string, symbol: string, balance: number): number {
+  const cat = normalizeTradingCategory(category);
+  const fixed = getTradingValuesOverride(cat);
+  if (cat === 'crypto') return getDefaultQty('crypto', balance, symbol, fixed?.qty);
+  return fixed ? fixed.qty : getDefaultQty(cat, balance, symbol);
+}
+
+/**
+ * Manual ticket size: identical to tradeQtyFor, except that when the fixed
+ * system is OFF the user's typed lot wins (non-crypto only — crypto always
+ * uses the tiered system lot so cheap coins are never traded at 0.01).
+ */
+export function manualTradeQty(category: string, symbol: string, balance: number, typed?: number): number {
+  const cat = normalizeTradingCategory(category);
+  const fixed = getTradingValuesOverride(cat);
+  if (cat === 'crypto') return getDefaultQty('crypto', balance, symbol, fixed?.qty);
+  if (fixed) return fixed.qty;
+  const t = Number(typed);
+  return Number.isFinite(t) && t > 0 ? t : getDefaultQty(cat, balance, symbol);
+}
+
+/**
+ * Trailing "base unit" for a trade (qty / baseUnit = number of risk units).
+ * Crypto uses the coin's tier base so activation/step stay proportional.
+ */
+export function baseUnitForTrade(category: string, symbol?: string): number {
+  const cat = normalizeTradingCategory(category);
+  const fixed = cat === 'crypto' ? getTradingValuesOverride('crypto') : null;
+  return baseQtyForSymbol(cat, symbol, fixed?.qty ?? baseQtyPerCategory('crypto'));
+}
+
+/**
+ * SL/TP price levels for a trade — the SINGLE source of truth for auto and
+ * manual orders on desktop + mobile:
+ *   • system ON  → forced fixed values (crypto = % of price)
+ *   • system OFF → dynamic balance risk (crypto = % of price)
+ */
+export function resolveRiskLevels(args: {
+  category: string;
+  symbol: string;
+  entry: number;
+  isBuy: boolean;
+  qty: number;
+  balance: number;
+}): TradeLevels {
+  const { symbol, entry, isBuy, qty, balance } = args;
+  const cat = normalizeTradingCategory(args.category);
+  const fixed = getTradingValuesOverride(cat);
+
+  if (cat === 'crypto') {
+    return cryptoPctLevels(
+      entry,
+      isBuy,
+      fixed?.slPct ?? CRYPTO_SL_PCT,
+      fixed?.tpPct ?? CRYPTO_TP_PCT,
+      qty,
+    );
+  }
+
+  if (fixed) {
+    return {
+      slPrice: usdToPrice(symbol, fixed.slUsd, entry, !isBuy, qty, cat),
+      tpPrice: usdToPrice(symbol, fixed.tpUsd, entry, isBuy, qty, cat),
+      slUsd: fixed.slUsd,
+      tpUsd: fixed.tpUsd,
+    };
+  }
+
+  const { slUsd, tpUsd } = calcRiskUSD(balance);
+  return {
+    slPrice: usdToPrice(symbol, slUsd, entry, !isBuy, qty, cat),
+    tpPrice: usdToPrice(symbol, tpUsd, entry, isBuy, qty, cat),
+    slUsd,
+    tpUsd,
+  };
 }

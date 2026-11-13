@@ -8,14 +8,21 @@ import TradingViewWidget from './TradingViewWidget';
 import MT5Web from './MT5Web';
 import {
   PaperTrade, getTradeStore, getLivePrice, subscribePrices,
-  calcPnl, getDefaultQty, START_BALANCE, MIN_BALANCE, DEFAULT_LEVERAGE, LEVERAGE_OPTIONS, isMarketOpen, calcRiskUSD, baseQtyPerCategory,
+  calcPnl, getDefaultQty, START_BALANCE, MIN_BALANCE, DEFAULT_LEVERAGE, LEVERAGE_OPTIONS, isMarketOpen, calcRiskUSD,
 } from '../services/paperTradingService';
 import { searchSymbols, catEmoji, SuggestedSymbol } from '../services/symbolSuggestions';
 import { playOpenSound, playCloseSound, playDragTick } from '../lib/tradeSounds';
 import { pricesToUsd, usdToPrice, slAmountUSD, notionalInUSD } from '../lib/positionMath';
 import { toTvSymbol as toTvSymbolShared } from '../lib/tvSymbol';
 import { calcTrailingStop } from '../lib/trailingStop';
-import { getTradingValuesOverride } from '../services/tradingValues';
+import {
+  getTradingValuesOverride,
+  tradeQtyFor,
+  cryptoPctLevels,
+  baseUnitForTrade,
+  CRYPTO_SL_PCT,
+  CRYPTO_TP_PCT,
+} from '../services/tradingValues';
 import { clearOpened as clearAutoOpened, resetGuard as resetAutoGuard } from '../services/autoGuard';
 import { openEventFor, broadcastMirrorEvent } from '../services/tradeMirror';
 import MT5ConnectModal from './MT5ConnectModal';
@@ -165,6 +172,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   const isAr = lang === 'ar';
   const [category, setCategory] = useState<string>('forex');
   const [symbol, setSymbol] = useState<string>('EURUSD');
+  const isCryptoTicket = detectCategory(symbol) === 'crypto';
 
   // Custom symbols
   const [customSymbols, setCustomSymbols] = useState<string[]>(loadCustomSymbols);
@@ -334,21 +342,43 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol]);
 
-  // ── Ticket auto-fill from the SAME balance-scaled logic the auto-trader uses ──
-  // Pre-fills qty + SL/TP $ fields with getDefaultQty + calcRiskUSD whenever the
-  // symbol or balance changes — but ONLY for fields the user has not typed in yet
-  // (ticketTouchedRef). Once typed, the value is sacred and never overwritten.
-  // matchedSignal wins for SL/TP when present (its values already follow the
-  // signal's own risk plan); otherwise the balance-scaled defaults apply.
+  // ── Ticket auto-fill from the SAME logic the auto-trader uses ──
+  // Crypto is special, matching the auto engine exactly:
+  //   • lot = the coin's tiered, balance-scaled size (BTC 0.1 · SOL 1 · DOGE 10
+  //     per $1,000) — the old 0.01 lot was meaningless for cheap coins.
+  //   • SL/TP fields hold PERCENTAGES (1.5 % stop / 3 % target), not dollars, so
+  //     the levels stay logical on every coin price.
+  // Other categories keep the fixed-values system (when ON) or the old dynamic
+  // USD risk (when OFF). Values the user typed are never overwritten.
   useEffect(() => {
     if (!symbol) return;
     const cat = detectCategory(symbol);
-    // Developer "Trading Values" system ON → the ticket is forced to the fixed
-    // values for this category (lot + SL/TP in USD), overriding signals and
-    // typed values. OFF → the previous dynamic behaviour below.
+    const isCrypto = cat === 'crypto';
     const fixed = getTradingValuesOverride(cat);
-    if (fixed) {
+
+    // ── Lot ──
+    if (isCrypto) {
+      if (!ticketTouchedRef.current.qty) {
+        const autoQty = tradeQtyFor('crypto', symbol, balance);
+        setQty((prev) => (prev === autoQty ? prev : autoQty));
+      }
+    } else if (fixed) {
       setQty((prev) => (prev === fixed.qty ? prev : fixed.qty));
+    } else if (!ticketTouchedRef.current.qty) {
+      const autoQty = getDefaultQty(cat, balance, symbol);
+      setQty((prev) => (prev === autoQty ? prev : autoQty));
+    }
+
+    // ── SL / TP ──
+    if (isCrypto) {
+      // Percent of price, taken from the developer panel when the system is ON.
+      const slPct = String(Number((fixed?.slPct ?? CRYPTO_SL_PCT).toFixed(2)));
+      const tpPct = String(Number((fixed?.tpPct ?? CRYPTO_TP_PCT).toFixed(2)));
+      if (!ticketTouchedRef.current.sl) setSlPrice((prev) => (prev === slPct ? prev : slPct));
+      if (!ticketTouchedRef.current.tp) setTpPrice((prev) => (prev === tpPct ? prev : tpPct));
+      return;
+    }
+    if (fixed) {
       setSlPrice((prev) => {
         const next = fixed.slUsd.toFixed(2);
         return prev === next ? prev : next;
@@ -358,10 +388,6 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
         return prev === next ? prev : next;
       });
       return;
-    }
-    if (!ticketTouchedRef.current.qty) {
-      const autoQty = getDefaultQty(cat, balance);
-      setQty((prev) => (prev === autoQty ? prev : autoQty));
     }
     // A matching signal already carries its own SL/TP risk plan (filled above as
     // USD). When one exists, keep those values — the balance-scaled defaults below
@@ -525,7 +551,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
         } else {
         const trail = calcTrailingStop({
           qty: t.qty, openPnlUSD: pnlUSD,
-          baseUnit: baseQtyPerCategory(t.category || detectCategory(t.symbol)),
+          baseUnit: baseUnitForTrade(t.category || detectCategory(t.symbol), t.symbol),
           baseActivationUSD: fixed ? fixed.trailingActivationUSD : ts.baseActivationUSD,
           baseStepUSD: fixed ? fixed.trailingStepUSD : ts.baseStepUSD,
           activationLotStep: fixed ? 0 : ts.activationLotStep,
@@ -737,7 +763,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     setCategory(key);
     const first = allSymbolsFor(key)[0] || '';
     setSymbol(first);
-    if (first) setQty(getDefaultQty(detectCategory(first), balance));
+    if (first) setQty(tradeQtyFor(detectCategory(first), first, balanceRef.current || balance));
   }
 
   function unhideSymbol(sym: string) {
@@ -864,7 +890,12 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     // fixed SL/TP for this category. Typed values and the matched signal risk
     // plan are ignored (the system imposes its own numbers on every symbol).
     const fixed = getTradingValuesOverride(pendingCat);
-    const execQty = fixed ? fixed.qty : qty;
+    // Crypto always uses the tiered ticket lot (prefilled by the effect above) so
+    // a cheap coin is never traded at an absurdly small size; other categories
+    // are forced to the fixed lot while the system is ON.
+    let execQty = Number(qty);
+    if (!(execQty > 0)) execQty = tradeQtyFor(pendingCat, symbol, balance);
+    if (fixed && pendingCat !== 'crypto') execQty = fixed.qty;
     if (!(execQty > 0)) return;
     // Block opening when the market for this asset is closed (weekend/hours).
     // Crypto trades 24/7 and is always allowed.
@@ -888,19 +919,36 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
       return;
     }
 
-    // SL/TP fields hold USD amounts; convert back to limit prices for execution.
+    // SL/TP fields hold USD amounts for forex/metals/stocks and PERCENTAGES for
+    // crypto. Convert both to actual limit prices for execution.
     // TP goes on the profit side (above for buy / below for sell), SL on the
     // loss side (below for buy / above for sell).
     const cat = detectCategory(symbol);
     const isBuy = side === 'buy';
-    const tpAmount = fixed ? fixed.tpUsd : parseFloat(tpPrice);
-    const slAmount = fixed ? fixed.slUsd : parseFloat(slPrice);
     let tpVal: number | null = null;
     let slVal: number | null = null;
-    if (tpAmount > 0) tpVal = usdToPrice(symbol, tpAmount, livePrice, isBuy, execQty, cat);
-    else tpVal = matchedSignal?.takeProfit || null;
-    if (slAmount > 0) slVal = usdToPrice(symbol, slAmount, livePrice, !isBuy, execQty, cat);
-    else slVal = matchedSignal?.stopLoss || null;
+    if (cat === 'crypto') {
+      const typedSl = parseFloat(slPrice);
+      const typedTp = parseFloat(tpPrice);
+      // Percent fields: clamp to a sane 0.1 % – 25 % range so a stray large
+      // number can never place the stop below zero.
+      const slPct = Number.isFinite(typedSl) && typedSl > 0
+        ? Math.min(25, Math.max(0.1, typedSl))
+        : (fixed?.slPct ?? CRYPTO_SL_PCT);
+      const tpPct = Number.isFinite(typedTp) && typedTp > 0
+        ? Math.min(25, Math.max(0.1, typedTp))
+        : (fixed?.tpPct ?? CRYPTO_TP_PCT);
+      const lv = cryptoPctLevels(livePrice, isBuy, slPct, tpPct, execQty);
+      slVal = lv.slPrice;
+      tpVal = lv.tpPrice;
+    } else {
+      const tpAmount = fixed ? fixed.tpUsd : parseFloat(tpPrice);
+      const slAmount = fixed ? fixed.slUsd : parseFloat(slPrice);
+      if (tpAmount > 0) tpVal = usdToPrice(symbol, tpAmount, livePrice, isBuy, execQty, cat);
+      else tpVal = matchedSignal?.takeProfit || null;
+      if (slAmount > 0) slVal = usdToPrice(symbol, slAmount, livePrice, !isBuy, execQty, cat);
+      else slVal = matchedSignal?.stopLoss || null;
+    }
     const tradeData = { symbol, category: cat, side, qty: execQty, entryPrice: livePrice, status: 'open' as const, tp: tpVal, sl: slVal, openedAt: Date.now(), source: 'manual' as const };
 
     // ── REAL execution via self-hosted MT5 bridge (opt-in) ──────────────
@@ -1066,12 +1114,14 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     return () => clearTimeout(t);
   }, [symbolsCollapsed, ticketCollapsed, chartCollapsed]);
 
-  // Manually adjust a TP/SL USD amount by $0.50 steps (up or down)
+  // Manually adjust a TP/SL amount: $0.50 steps for USD categories, 0.1 % steps
+  // for crypto (whose fields hold percentages).
   const adjustPrice = (kind: 'tp' | 'sl', dir: number) => {
     const raw = kind === 'tp' ? tpPrice : slPrice;
     const base = parseFloat(raw);
     const val = isNaN(base) ? 0 : base;
-    const next = Math.max(0, +(val + dir * 0.5).toFixed(2));
+    const step = detectCategory(symbol) === 'crypto' ? 0.1 : 0.5;
+    const next = Math.max(0, Number((val + dir * step).toFixed(2)));
     if (kind === 'tp') setTpPrice(String(next)); else setSlPrice(String(next));
   };
 
@@ -1597,15 +1647,15 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
               </div>
             </div>
 
-            {/* TP/SL dollar amounts */}
+            {/* TP/SL: USD amounts for forex/metals/stocks, percentages for crypto */}
             <div className="grid grid-cols-2 gap-2 items-start">
               <div className="min-w-0">
-                <label className="block text-xs font-black uppercase text-emerald-400/90 tracking-wider truncate">{isAr ? 'جني الأرباح ($)' : 'Take Profit ($)'}</label>
+                <label className="block text-xs font-black uppercase text-emerald-400/90 tracking-wider truncate">{isAr ? `جني الأرباح (${isCryptoTicket ? '%' : '$'})` : `Take Profit (${isCryptoTicket ? '%' : '$'})`}</label>
                 <div className="flex items-stretch gap-1.5 mt-1 min-w-0">
                   <button onClick={() => { ticketTouchedRef.current.tp = true; adjustPrice('tp', -1); }} className="w-11 h-11 shrink-0 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">−</button>
                   <input
                     type="text" inputMode="decimal" lang="en" dir="ltr"
-                    placeholder="$"
+                    placeholder={isCryptoTicket ? '%' : '$'}
                     value={tpPrice}
                     onChange={(e) => { ticketTouchedRef.current.tp = true; setTpPrice(e.target.value.replace(/[^0-9.]/g, '')); }}
                     className="flex-1 w-full min-w-0 h-11 rounded-xl bg-black/40 border border-white/15 text-center text-base font-bold text-brand-text outline-none focus:border-emerald-500 placeholder:text-brand-text/25 placeholder:text-sm"
@@ -1615,12 +1665,12 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
                 </div>
               </div>
               <div className="min-w-0">
-                <label className="block text-xs font-black uppercase text-red-400/90 tracking-wider truncate">{isAr ? 'وقف الخسارة ($)' : 'Stop Loss ($)'}</label>
+                <label className="block text-xs font-black uppercase text-red-400/90 tracking-wider truncate">{isAr ? `وقف الخسارة (${isCryptoTicket ? '%' : '$'})` : `Stop Loss (${isCryptoTicket ? '%' : '$'})`}</label>
                 <div className="flex items-stretch gap-1.5 mt-1 min-w-0">
                   <button onClick={() => { ticketTouchedRef.current.sl = true; adjustPrice('sl', -1); }} className="w-11 h-11 shrink-0 rounded-xl bg-white/10 text-brand-text text-lg font-black hover:bg-white/20">−</button>
                   <input
                     type="text" inputMode="decimal" lang="en" dir="ltr"
-                    placeholder="$"
+                    placeholder={isCryptoTicket ? '%' : '$'}
                     value={slPrice}
                     onChange={(e) => { ticketTouchedRef.current.sl = true; setSlPrice(e.target.value.replace(/[^0-9.]/g, '')); }}
                     className="flex-1 w-full min-w-0 h-11 rounded-xl bg-black/40 border border-white/15 text-center text-base font-bold text-brand-text outline-none focus:border-red-500 placeholder:text-brand-text/25 placeholder:text-sm"
@@ -1631,11 +1681,15 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
               </div>
             </div>
 
-            {/* Ticket auto-note: values come from the same balance-scaled logic — editable anytime */}
+            {/* Ticket auto-note: values come from the same system logic — editable anytime */}
             <div className="text-[11px] md:text-xs text-center text-brand-text/40 font-bold">
-              {isAr
-                ? `القيم معبأة تلقائيًا حسب الرصيد (لوت ${qty} · وقف $${slPrice || '—'} · هدف $${tpPrice || '—'}) — عدّل أي قيمة يدويًا قبل الفتح كما تشاء`
-                : `Auto-filled from balance (lot ${qty} · SL $${slPrice || '—'} · TP $${tpPrice || '—'}) — edit any value manually before opening`}
+              {isCryptoTicket
+                ? (isAr
+                  ? `قيم الكريبتو تلقائية: لوت ${qty} حسب سيولة العملة والرصيد · وقف ${slPrice || '—'}% · هدف ${tpPrice || '—'}% — عدّل أي قيمة يدويًا قبل الفتح`
+                  : `Crypto auto-values: lot ${qty} by coin liquidity + balance · SL ${slPrice || '—'}% · TP ${tpPrice || '—'}% — edit any value before opening`)
+                : (isAr
+                  ? `القيم معبأة تلقائيًا حسب الرصيد (لوت ${qty} · وقف $${slPrice || '—'} · هدف $${tpPrice || '—'}) — عدّل أي قيمة يدويًا قبل الفتح كما تشاء`
+                  : `Auto-filled from balance (lot ${qty} · SL $${slPrice || '—'} · TP $${tpPrice || '—'}) — edit any value manually before opening`)}
             </div>
 
             {/* Buy/Sell */}
@@ -1724,7 +1778,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
                       const tfFixed = getTradingValuesOverride(activeTrade.category || detectCategory(activeTrade.symbol));
                       const trail = calcTrailingStop({
                         qty: activeTrade.qty, openPnlUSD: pnl,
-                        baseUnit: baseQtyPerCategory(activeTrade.category || detectCategory(activeTrade.symbol)),
+                        baseUnit: baseUnitForTrade(activeTrade.category || detectCategory(activeTrade.symbol), activeTrade.symbol),
                         baseActivationUSD: tfFixed?.trailingActivationUSD,
                         baseStepUSD: tfFixed?.trailingStepUSD,
                         activationLotStep: tfFixed ? 0 : undefined,

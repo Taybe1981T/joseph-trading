@@ -36,6 +36,30 @@ const FIELDS: Array<{ key: FieldKey; ar: string; en: string; hintAr: string; hin
   { key: 'trailingStepUSD', ar: 'خطوة الترينلغ ($)', en: 'Trailing Step ($)', hintAr: 'خطوة تثبيت الربح الثابتة', hintEn: 'Fixed profit-lock step' },
 ];
 
+// Crypto has its own meaning for these fields: the lot is the HIGH-liquidity
+// base (BTC/ETH → 0.1, medium ×10, low ×100) and SL/TP are PERCENTAGES.
+function fieldLabel(f: { key: FieldKey; ar: string; en: string }, isCrypto: boolean, isAr: boolean): string {
+  if (isCrypto && f.key === 'stopLossUSD') return isAr ? 'وقف الخسارة (%)' : 'Stop Loss (%)';
+  if (isCrypto && f.key === 'takeProfitUSD') return isAr ? 'أخذ الربح (%)' : 'Take Profit (%)';
+  return isAr ? f.ar : f.en;
+}
+
+function fieldHint(f: { key: FieldKey; hintAr: string; hintEn: string }, isCrypto: boolean, isAr: boolean): string {
+  if (!isCrypto) return isAr ? f.hintAr : f.hintEn;
+  if (f.key === 'lotSize') {
+    return isAr
+      ? 'أساس الفئة العليا: بيتكوين/إيثيريوم 0.1 · متوسطة ×10 · منخفضة ×100 (يتغيّر مع الرصيد)'
+      : 'High-tier base: BTC/ETH 0.1 · medium ×10 · low ×100 (scales with balance)';
+  }
+  if (f.key === 'stopLossUSD') {
+    return isAr ? 'نسبة الوقف من سعر الدخول — افتراضي 1.5%' : 'Stop as % of entry price — default 1.5%';
+  }
+  if (f.key === 'takeProfitUSD') {
+    return isAr ? 'نسبة الهدف من سعر الدخول — افتراضي 3%' : 'Target as % of entry price — default 3%';
+  }
+  return isAr ? f.hintAr : f.hintEn;
+}
+
 // Numbers are always written AND displayed as Western (Latin) digits — e.g.
 // 1.2 , 0.01 , 60 — never ٠٫٠١ / ۱٫۲ / ٦٠. Arabic-Indic and Persian numerals
 // (typed by an Arabic keyboard) plus Arabic decimal/thousands separators are
@@ -223,7 +247,7 @@ export default function TradingValuesPanel({ lang }: Props) {
             <RotateCcw size={20} /> {isAr ? 'إعادة كل القيم للافتراضي الحالي' : 'Reset all to current defaults'}
           </button>
           <span className="text-base md:text-[20px] text-slate-500 self-center font-bold">
-            {isAr ? 'الافتراضي: لوت الفئة الأساسي · وقف $60 · هدف $120 · ترينلغ $5/$2' : 'Defaults: category base lot · SL $60 · TP $120 · trailing $5/$2'}
+            {isAr ? 'الافتراضي: لوت الفئة الأساسي · وقف/هدف 60$/120$ · كريبتو: لوت 0.1 (×10/×100) ووقف 1.5% وهدف 3% · ترينلغ 5$/2$' : 'Defaults: category base lot · SL/TP $60/$120 · crypto: lot 0.1 (×10/×100), SL 1.5%, TP 3% · trailing $5/$2'}
           </span>
         </div>
       </div>
@@ -251,8 +275,8 @@ export default function TradingValuesPanel({ lang }: Props) {
                   return (
                     <div key={f.key} className="grid grid-cols-[1fr_150px_46px] md:grid-cols-[1fr_180px_46px] items-center gap-3">
                       <div className="min-w-0">
-                        <div className="text-lg md:text-[22px] font-black text-brand-text/90 truncate">{isAr ? f.ar : f.en}</div>
-                        <div className="text-base md:text-[19px] text-slate-500 truncate">{isAr ? f.hintAr : f.hintEn}</div>
+                        <div className="text-lg md:text-[22px] font-black text-brand-text/90 truncate">{fieldLabel(f, cat === 'crypto', isAr)}</div>
+                        <div className="text-base md:text-[19px] text-slate-500 truncate">{fieldHint(f, cat === 'crypto', isAr)}</div>
                       </div>
                       {/* text + inputMode=decimal instead of type=number: a native
                           number input may render Arabic-Indic digits depending on

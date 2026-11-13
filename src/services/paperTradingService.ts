@@ -4,6 +4,7 @@ import { User } from 'firebase/auth';
 import { SYMBOL_CATEGORIES } from '../constants';
 import { isExchangeOpen } from '../lib/marketHours';
 import { STOCK_CONTRACT_SIZE, currencyToUsdFactor } from '../lib/positionMath';
+import { cryptoBaseQty } from '../lib/cryptoTiers';
 
 export interface PaperTrade {
   id: string;
@@ -96,10 +97,19 @@ export function balanceThousands(balance: number): number {
   return Math.max(1, Math.floor(b / 1000));
 }
 
+// Base lot for a specific symbol: crypto is tiered per coin (BTC 0.1 · SOL 1 ·
+// DOGE 10 per $1,000), every other category uses its single category base.
+// `cryptoTierBase` lets the developer's fixed-values panel drive the high tier.
+export function baseQtyForSymbol(category: string, symbol?: string, cryptoTierBase = 0.1): number {
+  if ((category || '') === 'crypto' && symbol) return cryptoBaseQty(symbol, cryptoTierBase);
+  return baseQtyPerCategory(category);
+}
+
 // Lot size that scales with the account balance: base × thousands.
 // $1,000 -> 0.01 (forex), $3,000 -> 0.03, $7,000 -> 0.07, $10,000 -> 0.10.
-export function getDefaultQty(category: string, balance: number = START_BALANCE): number {
-  const base = baseQtyPerCategory(category);
+// Crypto: the symbol's tier base is used, so DOGE at $10,000 = 10 × 10 = 100.
+export function getDefaultQty(category: string, balance: number = START_BALANCE, symbol?: string, cryptoTierBase = 0.1): number {
+  const base = baseQtyForSymbol(category, symbol, cryptoTierBase);
   const scaled = base * balanceThousands(balance);
   // Keep lot precision tidy (avoid 0.070000000001 style values).
   return Math.round(scaled * 1000) / 1000;

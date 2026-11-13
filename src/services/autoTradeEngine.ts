@@ -10,9 +10,6 @@ import {
   usdToPrice,
 } from '../lib/positionMath';
 import {
-  getDefaultQty,
-  baseQtyPerCategory,
-  calcRiskUSD,
   calcPnl,
   isMarketOpen,
   getLivePrice,
@@ -20,7 +17,12 @@ import {
   type PaperTrade,
 } from './paperTradingService';
 import { calcTrailingStop } from '../lib/trailingStop';
-import { getTradingValuesOverride } from './tradingValues';
+import {
+  getTradingValuesOverride,
+  tradeQtyFor,
+  resolveRiskLevels,
+  baseUnitForTrade,
+} from './tradingValues';
 import { isOpened, markOpened, markClosed, clearOpened, lastClosedAt } from './autoGuard';
 import { broadcastMirrorEvent, openEventFor, closeEventFor } from './tradeMirror';
 import { SYMBOL_CATEGORIES } from '../constants';
@@ -222,9 +224,13 @@ export class AutoTradeEngine {
           const fixed = getTradingValuesOverride(t.category || detectCategory(t.symbol));
           if (fixed || ts.enabled) {
             const pnlUSD = calcPnl(t, price);
+            const trailCat = t.category || detectCategory(t.symbol);
             const trail = calcTrailingStop({
               qty: t.qty, openPnlUSD: pnlUSD,
-              baseUnit: baseQtyPerCategory(t.category || detectCategory(t.symbol)),
+              // Symbol-aware base unit: crypto must use the COIN's tier base
+              // (0.1 / 1 / 10), otherwise a 100-unit DOGE lot looks like 1000
+              // “lots” to the trailing rule and activation/step explode.
+              baseUnit: baseUnitForTrade(trailCat, t.symbol),
               baseActivationUSD: fixed ? fixed.trailingActivationUSD : ts.baseActivationUSD,
               baseStepUSD: fixed ? fixed.trailingStepUSD : ts.baseStepUSD,
               activationLotStep: fixed ? 0 : ts.activationLotStep,
@@ -316,9 +322,6 @@ export class AutoTradeEngine {
         if (lastClose && Date.now() - lastClose < REOPEN_COOLDOWN_MS) { console.warn(`[AutoTradeEngine] skip ${sym}: reopen cooldown`); continue; }
 
         const cat = detectCategory(sym);
-        // Developer "Trading Values" system: when ON, its fixed lot/SL/TP are
-        // imposed on this auto trade (balance scaling and signal risk ignored).
-        const fixedOpen = getTradingValuesOverride(cat);
         const marketOpen = isMarketOpen(cat, sym);
         // ── WEEKEND PENDING QUEUE ──
         // A fresh analysis (metals/forex/stocks) routinely lands while the
@@ -349,17 +352,22 @@ export class AutoTradeEngine {
           continue;
         }
 
-        const q = fixedOpen ? fixedOpen.qty : getDefaultQty(cat, balance);
+        // Sizing + risk levels come from the single shared helper so this engine
+        // behaves EXACTLY like the manual ticket and the clients' mirror:
+        //   • crypto → tiered balance-scaled lot (BTC 0.1 / SOL 1 / DOGE 10 per
+        //     $1,000) and stop/target as a PERCENTAGE of price (1.5% / 3%),
+        //     never a tiny USD distance that is meaningless across coins.
+        //   • other categories → the developer's fixed values when the system is
+        //     ON, otherwise the usual balance-scaled lot + $ risk.
+        const q = tradeQtyFor(cat, sym, balance);
         const requiredMargin = notionalInUSD(cat, sym, price, q) / leverage;
         if (requiredMargin > balance) { console.warn(`[AutoTradeEngine] skip ${sym}: insufficient margin (need ${requiredMargin.toFixed(2)} > balance ${balance})`); continue; }
 
-        const { slUsd, tpUsd } = fixedOpen
-          ? { slUsd: fixedOpen.slUsd, tpUsd: fixedOpen.tpUsd }
-          : calcRiskUSD(balance);
         const side: 'buy' | 'sell' = isBuy ? 'buy' : 'sell';
         const entryPrice = price;
-        const slPrice = usdToPrice(sym, slUsd, entryPrice, side === 'sell', q, cat);
-        const tpPrice = usdToPrice(sym, tpUsd, entryPrice, side === 'buy', q, cat);
+        const { slPrice, tpPrice } = resolveRiskLevels({
+          category: cat, symbol: sym, entry: entryPrice, isBuy, qty: q, balance,
+        });
 
         const tradeData: Omit<PaperTrade, 'id'> = {
           symbol: sym, category: cat, side, qty: q, entryPrice,
