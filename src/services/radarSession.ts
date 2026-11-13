@@ -18,6 +18,10 @@ const SESSION_KEY = 'finalyze_radar_session_v1';
 
 let sessionFresh: boolean | null = null;
 let manualStartPending = false;
+// Armed = the client turned auto-analysis ON in THIS page session. A refresh or
+// a fresh app open reloads the module, so it always starts unarmed: the client
+// must press ON again, then the interval loop continues on its own.
+let autoArmed = false;
 
 /** Computes (once) whether this is the first page load of the session. */
 function ensureSession(): boolean {
@@ -45,6 +49,18 @@ export function isFreshRadarSession(): boolean {
 /** Call from the exact user action (button/switch) that turns auto ON. */
 export function flagManualRadarStart(): void {
   manualStartPending = true;
+  autoArmed = true;
+}
+
+/** True once auto-analysis was explicitly turned ON in this page session. */
+export function isRadarArmed(): boolean {
+  return autoArmed;
+}
+
+/** Used when the signed-in account changes/logs out within one page session. */
+export function disarmRadar(): void {
+  autoArmed = false;
+  manualStartPending = false;
 }
 
 /**

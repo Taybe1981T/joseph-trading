@@ -30,7 +30,7 @@ import { fetchUserGrants, activateClientPlan, revokeClientPlanGrants, toMillis a
 import { MobileAnalysis } from './MobileAnalysis';
 import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar, getMobileRadarProgress } from '../../services/mobileAnalysisEngine';
 import { detectMobileType } from '../../services/mobileAnalysisEngine';
-import { flagManualRadarStart, takeRadarStartNow, isFreshRadarSession } from '../../services/radarSession';
+import { flagManualRadarStart, takeRadarStartNow, isFreshRadarSession, isRadarArmed } from '../../services/radarSession';
 import { MobileManualSheet } from './MobileManualSheet';
 import { MobileClientMonitor } from './MobileClientMonitor';
 import TransactionsPage from '../TransactionsPage';
@@ -110,6 +110,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       localStorage.setItem('auto_settings', JSON.stringify({ ...s, isEnabled: v }));
       setAutoAnalysisOn(v);
       if (v) {
+        // This is the manual ON that arms the session: only from here may the
+        // interval loop run after the client leaves the screen.
+        flagManualRadarStart();
         setRadarProgress(null);
         // Read the signed-in identity from storage instead of the component's
         // state: this callback has an empty dependency list, and the old code
@@ -484,6 +487,19 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         if (!isDev && !isPlanClient) return;
         const s = readMobileAuto();
         if (!s.isEnabled) return;
+        // Clients: opening/refreshing the app must never resume auto-analysis
+        // from storage. They turn it ON manually (that arms this session), then
+        // the interval loop keeps re-analysing on its own. The developer account
+        // keeps resuming (unlimited), detected synchronously from storage so the
+        // first render cannot mistake a developer for a client.
+        const devNow = isDev || detectMobileMode().mode === 'developer';
+        if (!devNow && !isRadarArmed()) {
+          const off = { ...s, isEnabled: false };
+          try { localStorage.setItem('auto_settings', JSON.stringify(off)); } catch {}
+          setAutoAnalysisOn(false);
+          try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
+          return;
+        }
         if (isMobileRadarOn()) {
           const p = getMobileRadarProgress();
           if (p) setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category });
@@ -491,7 +507,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         }
         const uid = (user?.uid || 'anonymous');
         const emailVal = (user?.email || email || '');
-const immediate = takeRadarStartNow();
+        const immediate = takeRadarStartNow();
         startMobileRadar(uid, emailVal, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
           setRadarProgress(null);
         }, { immediate });

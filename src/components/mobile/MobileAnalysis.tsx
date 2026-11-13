@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Zap, Loader2, Settings } from 'lucide-react';
 import { MobileProgress, readMobileAuto, startMobileRadar, stopMobileRadar, getMobileRadarProgress, isMobileRadarOn } from '../../services/mobileAnalysisEngine';
-import { takeRadarStartNow } from '../../services/radarSession';
+import { takeRadarStartNow, isRadarArmed, flagManualRadarStart } from '../../services/radarSession';
 import { MobileRadarSettings } from './MobileRadarSettings';
 import { Language } from '../../lib/i18n';
-import { mobileT } from '../../lib/mobileMode';
+import { mobileT, detectMobileMode } from '../../lib/mobileMode';
 
 interface Props {
   lang: Language;
@@ -34,13 +34,23 @@ export function MobileAnalysis({ lang }: Props) {
     const iv = setInterval(sync, 5000);
     // Reconnect progress callback if radar is already running
     if (readMobileAuto().isEnabled && !isMobileRadarOn()) {
-      const { uid, email } = uidEmail();
-      startMobileRadar(uid, email, (p) => setProg(p), (r) => {
-        setProg(null);
-        setLastRun(new Date().toLocaleTimeString());
-        setDoneMsg(mobileT(lang, `Done: ${r.scanned} scanned, ${r.fresh} fresh`, `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد`));
-        setTimeout(() => setDoneMsg(null), 15000);
-      }, { immediate: takeRadarStartNow() });
+      const isDev = detectMobileMode().mode === 'developer';
+      if (!isDev && !isRadarArmed()) {
+        // Opening/refreshing must not resume a client's auto-analysis: only a
+        // manual ON in THIS session arms it (flagManualRadarStart).
+        try {
+          localStorage.setItem('auto_settings', JSON.stringify({ ...readMobileAuto(), isEnabled: false }));
+        } catch {}
+        setAutoOn(false);
+      } else {
+        const { uid, email } = uidEmail();
+        startMobileRadar(uid, email, (p) => setProg(p), (r) => {
+          setProg(null);
+          setLastRun(new Date().toLocaleTimeString());
+          setDoneMsg(mobileT(lang, `Done: ${r.scanned} scanned, ${r.fresh} fresh`, `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد`));
+          setTimeout(() => setDoneMsg(null), 15000);
+        }, { immediate: takeRadarStartNow() });
+      }
     }
     return () => {
       window.removeEventListener('storage', sync);
@@ -65,8 +75,10 @@ export function MobileAnalysis({ lang }: Props) {
       localStorage.setItem('auto_settings', JSON.stringify({ ...s, isEnabled: v }));
     } catch {}
     setAutoOn(v);
-    // Manual ON: start right away (desktop parity). OFF: stop the engine.
+    // Manual ON: arm this session and start right away (desktop parity).
+    // OFF: stop the engine.
     if (v) {
+      flagManualRadarStart();
       const { uid, email } = uidEmail();
       startMobileRadar(uid, email, (p) => setProg(p), (r) => {
         setProg(null);

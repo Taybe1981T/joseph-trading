@@ -32,7 +32,7 @@ import ApiKeyModal from './components/ApiKeyModal';
 import SubscriptionModal from './components/SubscriptionModal';
 import PaymentModal from './components/PaymentModal';
 import { stackedPlanExpiry } from './lib/planPeriod';
-import { isFreshRadarSession, takeRadarStartNow, flagManualRadarStart } from './services/radarSession';
+import { isFreshRadarSession, takeRadarStartNow, flagManualRadarStart, isRadarArmed, disarmRadar } from './services/radarSession';
 import AuthModal from './components/AuthModal';
 import { getUnreadDevNotificationCount, getUnreadSiteRequestCount, fetchUserGrants, fetchUserGrantsForEmails, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from './services/paymentRequests';
 import ProfilePage from './components/ProfilePage';
@@ -274,6 +274,14 @@ export default function App() {
           console.log('[EXPIRY] Plan reached expiry time at', sub.expiryDate, '- removing active subscription');
           localStorage.removeItem('active_subscription');
           setActiveSubscription(null);
+          // Persist the expiry for THIS account only, so a refresh cannot put an
+          // expired plan back into paid mode.
+          try {
+            if (myEmail) {
+              localStorage.setItem(clientScopeKey(myEmail, 'paid_mode'), 'false');
+              localStorage.setItem(clientScopeKey(myEmail, 'free_mode'), 'true');
+            }
+          } catch {}
           setPaidMode(false);
           setFreeModeChosen(true);
         }
@@ -298,40 +306,65 @@ const isDeveloperSession = () => {
   const cxnCustomKey = `${cxn}__custom_symbols`;
   const cxnHiddenKey = `${cxn}__hidden_symbols`;
   const cxnAutoKey = `${cxn}__auto_settings`;
-  const cxnPaidKey = `${cxn}__paid_mode`;
   // freeModeChosen: the client explicitly chose "Return to Free Plan". It is a
   // PERSISTED opt-out, so the grants poll below stops re-activating paid mode
   // (that is exactly why the button used to do nothing). Cleared when the plan
   // is activated again or a new payment arrives.
-  const cxnFreeKey = `${cxn}__free_mode`;
-  const [freeModeChosen, setFreeModeChosen] = useState<boolean>(() => {
-    try { return localStorage.getItem(cxnFreeKey) === 'true'; } catch { return false; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem(cxnFreeKey, freeModeChosen ? 'true' : 'false'); } catch {}
-  }, [cxnFreeKey, freeModeChosen]);
-  const freeModeOverride = () => {
-    try { return localStorage.getItem(cxnFreeKey) === 'true'; } catch { return false; }
+  const [freeModeChosen, setFreeModeChosen] = useState(false);
+  // paidMode: whether the client currently USES the paid plan features. Owned plan
+  // stays stored (activeSubscription) even in free mode until its period ends.
+  const [paidMode, setPaidMode] = useState(true);
+
+  // ── Paid / free mode ownership ────────────────────────────────────────────
+  // The mode is stored PER ACCOUNT and written ONLY when the client changes it.
+  // The old code initialised from — and persisted to — whatever scope existed
+  // before Firebase restored `user` (the guest `cxn_anon__…` keys). On the next
+  // load that guest value was read back, so a paying client dropped to free
+  // after a refresh. The default is PAID: a client who owns a running plan is
+  // always in plan mode after opening/refreshing, unless they explicitly chose
+  // "Return to Free Plan" (free_mode === 'true').
+  const accountEmail = () => (user?.email || currentUserEmail() || '').toLowerCase().trim();
+  const persistAccountFlag = (base: 'paid_mode' | 'free_mode', value: boolean) => {
+    try {
+      const em = accountEmail();
+      if (!em) return;
+      localStorage.setItem(clientScopeKey(em, base), value ? 'true' : 'false');
+    } catch {}
   };
+  const choosePaidMode = (v: boolean) => { setPaidMode(v); persistAccountFlag('paid_mode', v); };
+  const chooseFreeMode = (v: boolean) => { setFreeModeChosen(v); persistAccountFlag('free_mode', v); };
+  const freeModeOverride = () => {
+    try {
+      const em = accountEmail();
+      if (em) return localStorage.getItem(clientScopeKey(em, 'free_mode')) === 'true';
+      return freeModeChosen;
+    } catch { return freeModeChosen; }
+  };
+  // Hydrate for the signed-in account. Guests keep the safe paid default; the
+  // explicit per-account opt-out is the ONLY thing that opens in free mode.
+  useEffect(() => {
+    const em = (user?.email || '').toLowerCase().trim();
+    if (!em) return;
+    let free = false;
+    try { free = localStorage.getItem(clientScopeKey(em, 'free_mode')) === 'true'; } catch {}
+    setFreeModeChosen(free);
+    setPaidMode(!free);
+  }, [user?.email]);
   // Keep the signed-in identity in sync. When the account actually changes, the
   // previous email's leftover key is deleted so a stale browser key can never be
-  // reused on the new account.
+  // reused on the new account. Auto-analysis also starts DISARMED for the new
+  // identity: only an explicit ON by this account may start scanning.
   const lastSignedInEmail = useRef<string | null>(null);
   useEffect(() => {
     const cur = (user?.email || '').toLowerCase().trim();
     const prev = lastSignedInEmail.current;
-    if (prev && prev !== cur) forgetClientOwnKey(prev);
+    if (prev && prev !== cur) {
+      forgetClientOwnKey(prev);
+      disarmRadar();
+    }
     lastSignedInEmail.current = cur || null;
     setCurrentUserEmail(cur);
   }, [user?.email]);
-  // paidMode: whether the client currently USES the paid plan features. Owned plan
-  // stays stored (activeSubscription) even in free mode until its period ends.
-  const [paidMode, setPaidMode] = useState<boolean>(() => {
-    try { return localStorage.getItem(cxnPaidKey) !== 'false'; } catch { return true; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem(cxnPaidKey, paidMode ? 'true' : 'false'); } catch {}
-  }, [cxnPaidKey, paidMode]);
   // ownsPaidPlan: the account OWNS a paid plan, whether or not it is currently in
   // use. Storage scoping keys off this so returning to free never orphans data.
   const ownsPaidPlan = !isDeveloperSession() && !!activeSubscription;
@@ -366,8 +399,8 @@ const isDeveloperSession = () => {
   }, [myPlans, activeSubscription, isAr]);
   const returnToFreePlan = () => {
     // Persist the opt-out first: the grants poll must not switch paid mode back on.
-    setFreeModeChosen(true);
-    setPaidMode(false);
+    chooseFreeMode(true);
+    choosePaidMode(false);
     setShowMyPlan(false);
     try {
       const saved = JSON.parse(localStorage.getItem('finalyze_client_signals') || '[]');
@@ -381,8 +414,8 @@ const isDeveloperSession = () => {
     // Guard on OWNERSHIP, not on current mode: while in free mode isPlanClient is
     // false by design, and guarding on it made re-activation a silent no-op.
     if (!ownsPaidPlan) return;
-    setFreeModeChosen(false);
-    setPaidMode(true);
+    chooseFreeMode(false);
+    choosePaidMode(true);
     setShowMyPlan(false);
     try {
       const saved = JSON.parse(localStorage.getItem(cxnSigKey) || '[]');
@@ -411,8 +444,8 @@ const isDeveloperSession = () => {
       if (owner && (owner === myEmail || isDeveloperSession())) localStorage.removeItem('active_subscription');
     } catch {}
     setActiveSubscription(null);
-    setFreeModeChosen(false);
-    setPaidMode(false);
+    chooseFreeMode(false);
+    choosePaidMode(false);
     setShowMyPlan(false);
     navigateTo('main');
   };
@@ -920,21 +953,23 @@ const isDeveloperSession = () => {
 
   // ── Auto-analysis start policy (desktop + mobile share this gate) ─────────
   // A scan may start ONLY from a manual ON or when the re-analysis interval is
-  // due. Opening/refreshing the page merely resumes the timer.
+  // due. Opening/refreshing the page keeps auto-analysis OFF until the client
+  // turns it ON; after that the interval loop re-analyses on its own.
+  // The flag is raised by the USER ACTION, never by a settings restore — the
+  // state updaters below must stay pure (React may call them twice).
+  const autoEnabledRef = useRef(autoSettings.isEnabled);
+  useEffect(() => { autoEnabledRef.current = autoSettings.isEnabled; }, [autoSettings.isEnabled]);
+
   const handleAutoSettingsChange = useCallback((next: AutoAnalysisSettings) => {
-    setAutoSettings((prev) => {
-      if (!prev.isEnabled && next.isEnabled) flagManualRadarStart();
-      return next;
-    });
+    if (next.isEnabled && !autoEnabledRef.current) flagManualRadarStart();
+    setAutoSettings(next);
   }, []);
 
   const toggleAutoAnalysisManually = useCallback(() => {
     try { initAudio(); } catch {}
-    setAutoSettings((prev) => {
-      const next = { ...prev, isEnabled: !prev.isEnabled };
-      if (next.isEnabled) flagManualRadarStart();
-      return next;
-    });
+    const turningOn = !autoEnabledRef.current;
+    if (turningOn) flagManualRadarStart();
+    setAutoSettings((prev) => ({ ...prev, isEnabled: !prev.isEnabled }));
   }, []);
 
   const [cardColor, setCardColor] = useState<string>(() => {
@@ -952,7 +987,12 @@ const isDeveloperSession = () => {
 
   useEffect(() => {
     localStorage.setItem('auto_settings', JSON.stringify(autoSettings));
-  }, [autoSettings]);
+    // Keep the paid client's per-account copy in step with the live value, so a
+    // later plan/mode transition restores exactly what the client last chose.
+    if (ownsPaidPlan) {
+      try { localStorage.setItem(cxnAutoKey, JSON.stringify(autoSettings)); } catch {}
+    }
+  }, [autoSettings, ownsPaidPlan, cxnAutoKey]);
   const autoSettingsRef = useRef(autoSettings);
   useEffect(() => {
     autoSettingsRef.current = autoSettings;
@@ -1952,6 +1992,22 @@ const isDeveloperSession = () => {
       return;
     }
 
+    // Clients: auto-analysis never resumes from storage after a page load or
+    // refresh. They turn it ON manually; from then on the interval loop runs.
+    if (!isDeveloperSession() && !isRadarArmed()) {
+      setAutoSettings((prev) => {
+        if (!prev.isEnabled) return prev;
+        const next = { ...prev, isEnabled: false };
+        try {
+          localStorage.setItem('auto_settings', JSON.stringify(next));
+          if (ownsPaidPlan) localStorage.setItem(cxnAutoKey, JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+      prevRadarEnabledRef.current = false;
+      return;
+    }
+
     const wasOn = prevRadarEnabledRef.current;
     prevRadarEnabledRef.current = true;
 
@@ -2758,7 +2814,10 @@ const started = planGrants
             ? { ...subs, expiryDate: prev.expiryDate, label: prev.label || subs.label, firstReleasedAt: subs.firstReleasedAt || prev.firstReleasedAt }
             : subs;
           try { localStorage.setItem('active_subscription', JSON.stringify({ ...merged, email: (user?.email || '').toLowerCase().trim() })); } catch {}
-          if (!freeModeOverride()) setPaidMode(true);
+          if (!freeModeOverride()) {
+            persistAccountFlag('paid_mode', true);
+            setPaidMode(true);
+          }
           return merged;
         });
       } catch {}
@@ -3201,8 +3260,8 @@ const started = planGrants
                   localStorage.setItem('active_subscription', JSON.stringify({ ...sub, email: (user?.email || '').toLowerCase().trim() }));
                   setActiveSubscription(sub);
                   // A new payment reopens paid mode immediately.
-                  setPaidMode(true);
-                  setFreeModeChosen(false);
+                  choosePaidMode(true);
+                  chooseFreeMode(false);
                   setResumeSessionId(null);
                   setPaymentPlan(null);
                   navigateTo('main');
@@ -3375,9 +3434,9 @@ const started = planGrants
                 customerPlan={activeSubscription}
                 planKeyEntered={planKeyed}
                 paidMode={paidMode}
-                onCustomerEnterKey={() => { setPaidMode(true); }}
-                onCustomerUseFree={() => setPaidMode(false)}
-                onCustomerUsePaid={() => { setPaidMode(true); }}
+                onCustomerEnterKey={() => { choosePaidMode(true); }}
+                onCustomerUseFree={() => { chooseFreeMode(true); choosePaidMode(false); }}
+                onCustomerUsePaid={() => { chooseFreeMode(false); choosePaidMode(true); }}
                 onCustomerDeletePlan={() => { deleteClientPlan(); }}
                 onRequireAuth={(kind) =>
                   openAuthModal(

@@ -83,7 +83,11 @@ function planEmail(email?: string | null): string {
  */
 export function mobilePaidMode(email?: string | null): boolean {
   try {
-    return localStorage.getItem(clientScopeKey(planEmail(email), 'paid_mode')) !== 'false';
+    // The explicit "Return to Free Plan" opt-out (free_mode) is the ONLY thing
+    // that opens a client in free mode. Default = paid (plan mode), so a client
+    // who owns a running plan never drops to free just because the page/app was
+    // refreshed. Desktop hydration uses exactly the same rule.
+    return !mobileFreeModeChosen(email);
   } catch {
     return true;
   }
