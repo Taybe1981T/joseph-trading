@@ -2285,8 +2285,8 @@ Return ONLY valid JSON:
     // Runs LAST, after every other entry condition (entry gates, candle
     // match, volume guard, golden window). It only engages for a live
     // BUY/SELL signal and only when its category switch is ON (default OFF).
-    //   • retrace found  → promote to STRONG (final confirmation)
-    //   • retrace absent → keep as regular BUY/SELL (no STRONG promotion) — soft gate
+    //   • retrace found  → signal allowed (strength stays as confidence decides)
+    //   • retrace absent → hide the signal (neutral) — final blocking gate
     // Doji candles are never counted (and do not break the run).
     var retraceFound = 0;
     var retraceConfirmed = false;
@@ -2307,24 +2307,20 @@ Return ONLY valid JSON:
           check: 'Retrace Filter',
           value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji ignored: ${count.dojiSkipped})`,
           status: 'positive',
-          impact: `FINAL CONFIRMATION: ${count.required} retrace candles found on ${tfLabel} → promoted to STRONG`,
+          impact: `Retrace confirmed on ${tfLabel} — signal allowed (strength unchanged, set by confidence)`,
         });
-        finalSignal = retraceSide === 'buy' ? SignalType.STRONG_BUY : SignalType.STRONG_SELL;
+        // No promotion: STRONG/BUY is already decided by confidence percentage.
       } else {
-        // Relaxed mode (user request): a missing retrace no longer hides the
-        // signal — it only prevents the STRONG promotion. Regular BUY/SELL
-        // signals are still surfaced so good opportunities are not lost.
         detailedReasons.push({
           check: 'Retrace Filter',
           value: retraceCandles
             ? `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji ignored: ${count.dojiSkipped})`
             : `no candle data on ${tfLabel}`,
           status: 'negative',
-          impact: `Retrace not confirmed (${count.found}/${count.required}) — kept as regular ${retraceSide === 'buy' ? 'BUY' : 'SELL'} (no STRONG promotion)`,
+          impact: `BLOCKED: needs ${count.required} ${candleWordEn} (${candleWord}) consecutive candles on ${tfLabel} before entry — signal hidden`,
         });
-        // Downgrade a STRONG signal to a regular one, keep regular signals.
-        if (retraceSide === 'buy' && finalSignal === SignalType.STRONG_BUY) finalSignal = SignalType.BUY;
-        if (retraceSide === 'sell' && finalSignal === SignalType.STRONG_SELL) finalSignal = SignalType.SELL;
+        finalSignal = SignalType.NEUTRAL;
+        finalConfidence = Math.min(finalConfidence, 30);
       }
     }
 

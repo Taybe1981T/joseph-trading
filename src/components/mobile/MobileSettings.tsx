@@ -111,7 +111,7 @@ export function MobileSettings({
           <div style={{ fontSize: 12, color: '#888', fontWeight: 700, padding: '0 4px' }}>
             {isAr ? 'اختر النظام الذي تريد تعديله — كل نظام في صفحة مستقلة.' : 'Choose a system to edit — each one opens on its own page.'}
           </div>
-          {visibleSystems.map((s) => (
+          {visibleSystems.map((s, idx) => (
             <button
               key={s.id}
               type="button"
@@ -120,6 +120,8 @@ export function MobileSettings({
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 gap: 12, padding: '16px', cursor: 'pointer',
+                background: idx % 2 === 0 ? '#1a1f2e' : '#0f131a',
+                borderLeft: `4px solid ${idx % 2 === 0 ? '#3b82f6' : '#10b981'}`,
               }}
             >
               <span style={{ fontSize: 15, fontWeight: 900, color: '#fff' }}>{isAr ? s.ar : s.en}</span>
@@ -161,8 +163,8 @@ export function MobileSettings({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
                   {isAr
-                    ? 'آخر بوابة بعد استيفاء كل الشروط: تعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. تحقّق العدد ← ترقية إلى STRONG. غيابه ← تبقى إشارة عادية (BUY/SELL) (لا إخفاء). الدوجي لا تُحتسب. كل الفئات معطّلة افتراضيًا.'
-                    : 'Final gate after all conditions: counts consecutive candles moving against the trade on the chosen timeframe. Count reached → promoted to STRONG. Missing → kept as regular BUY/SELL (not hidden). Doji never counted. All categories OFF by default.'}
+                    ? 'آخر بوابة بعد استيفاء كل الشروط: تعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. تحقّق العدد ← الإشارة مسموحة (قوتها تحدّدها الثقة). غيابه ← إخفاء الإشارة (مانع final). الدوجي لا تُحتسب. كل الفئات معطّلة افتراضيًا.'
+                    : 'Final gate after all conditions: counts consecutive candles moving against the trade on the chosen timeframe. Count reached → signal allowed (strength set by confidence). Missing → signal hidden (final blocker). Doji never counted. All categories OFF by default.'}
                 </div>
 
                 {retraceRows.map((row) => {

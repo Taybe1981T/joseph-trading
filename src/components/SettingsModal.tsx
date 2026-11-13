@@ -403,7 +403,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
           <p className="text-base md:text-[20px] text-brand-text/50 font-bold">
             {isAr ? 'اختر النظام الذي تريد تعديله — كل نظام في صفحة مستقلة.' : 'Choose a system to edit — each one opens on its own page.'}
           </p>
-          {visibleSystems.map((s) => (
+          {visibleSystems.map((s, idx) => (
             <button
               key={s.id}
               type="button"
@@ -411,7 +411,9 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
               className={`w-full flex items-center justify-between gap-3 px-5 py-4 rounded-2xl border transition-all text-right ${
                 s.danger
                   ? 'bg-red-500/5 border-red-500/20 hover:bg-red-500/10 text-red-300'
-                  : 'bg-white/5 border-white/10 hover:bg-white/10 text-brand-text'
+                  : (idx % 2 === 0
+                      ? 'bg-slate-800/50 border-slate-700/50 hover:bg-slate-700/60 text-brand-text'
+                      : 'bg-white/5 border-white/10 hover:bg-white/10 text-brand-text')
               }`}
             >
               <span className="text-xl md:text-[26px] font-black leading-tight">{isAr ? s.ar : s.en}</span>
@@ -554,8 +556,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
         <div className="bg-white/5 border border-white/5 rounded-2xl p-5 md:p-6 space-y-4">
           <p className="text-sm md:text-[17px] text-brand-text/55 leading-relaxed">
             {isAr
-              ? 'يعمل كآخر بوابة بعد استيفاء كل الشروط: يعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. عند تحقّق العدد → ترقية إلى إشارة قوية (STRONG). عند غيابه → تبقى إشارة عادية (BUY/SELL) (لا إخفاء، لكي لا تُفقد فرص جيدة). شموع الدوجي لا تُحتسب ولا تقطع التسلسل. كل الفئات معطّلة افتراضيًا.'
-              : 'Runs as the very last gate after every other condition: it counts consecutive candles moving AGAINST the trade on the chosen timeframe. Count reached → promoted to STRONG. Missing → kept as a regular BUY/SELL (not hidden, so good opportunities are not lost). Doji candles are never counted and never break the run. All categories are OFF by default.'}
+              ? 'يعمل كآخر بوابة بعد استيفاء كل الشروط: يعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. عند تحقّق العدد → الإشارة مسموحة (قوتها تحدّدها نسبة الثقة). عند غيابه → إخفاء الإشارة (مانع final). شموع الدوجي لا تُحتسب ولا تقطع التسلسل. كل الفئات معطّلة افتراضيًا.'
+              : 'Runs as the very last gate after every other condition: it counts consecutive candles moving AGAINST the trade on the chosen timeframe. Count reached → signal allowed (strength set by confidence). Missing → signal hidden (final blocker). Doji candles are never counted and never break the run. All categories are OFF by default.'}
           </p>
           <div className="bg-black/30 rounded-xl p-3 text-xs md:text-sm text-amber-300/80 leading-relaxed">
             {isAr
