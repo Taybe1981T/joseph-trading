@@ -336,9 +336,10 @@ export async function startMobileRadar(uid: string, email: string, onProg?: (p: 
   const ms = (auto.interval || 15) * 60000;
   const last = Number(auto.lastFinishedAt || 0);
   const elapsed = last ? Date.now() - last : Infinity;
-  // Refresh semantics: on a plain refresh `immediate` is false, so we only
-  // scan when the interval is actually due; otherwise we wait for it.
-  const immediate = opts?.immediate === false ? (elapsed >= ms) : true;
+  // Opening the app/refreshing only resumes the timer. A scan starts when the
+  // caller explicitly asks for it (manual ON) or when the re-analysis interval
+  // is actually due — never merely because the page loaded.
+  const immediate = opts?.immediate === true || elapsed >= ms;
   if (immediate) {
     await loop();
   } else {

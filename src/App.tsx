@@ -919,8 +919,8 @@ const isDeveloperSession = () => {
   });
 
   // ── Auto-analysis start policy (desktop + mobile share this gate) ─────────
-  // A scan may start ONLY from a manual ON, a due re-analysis interval, or a
-  // fresh open of the site. A plain refresh must keep waiting for the interval.
+  // A scan may start ONLY from a manual ON or when the re-analysis interval is
+  // due. Opening/refreshing the page merely resumes the timer.
   const handleAutoSettingsChange = useCallback((next: AutoAnalysisSettings) => {
     setAutoSettings((prev) => {
       if (!prev.isEnabled && next.isEnabled) flagManualRadarStart();
@@ -1010,7 +1010,7 @@ const isDeveloperSession = () => {
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, [user]);
+  }, [user, isPlanClient]);
 
   const [progress, setProgress] = useState<{ current: string, total: number, index: number, failed?: number, exchange?: string } | null>(null);
   // Radar (auto-analysis) progress is tracked SEPARATELY from manual-analysis
@@ -2025,9 +2025,9 @@ const isDeveloperSession = () => {
       }
     };
 
-    // Only a MANUAL ON, a due interval, or the first open of a session may scan
-    // immediately. A plain page refresh (sessionStorage still has the marker)
-    // must NOT restart the scan; it waits for the remaining interval.
+    // Only a MANUAL ON may scan immediately. Opening/refreshing the page never
+    // starts a scan: `scheduleNext(false)` runs it only when the re-analysis
+    // interval is actually due, otherwise it waits for the remaining time.
     const startNow = wasOn ? false : takeRadarStartNow();
     if (startNow) setIsScanningFinished(false);
     scheduleNext(startNow);

@@ -65,6 +65,19 @@ export function MobileAnalysis({ lang }: Props) {
       localStorage.setItem('auto_settings', JSON.stringify({ ...s, isEnabled: v }));
     } catch {}
     setAutoOn(v);
+    // Manual ON: start right away (desktop parity). OFF: stop the engine.
+    if (v) {
+      const { uid, email } = uidEmail();
+      startMobileRadar(uid, email, (p) => setProg(p), (r) => {
+        setProg(null);
+        setLastRun(new Date().toLocaleTimeString());
+        setDoneMsg(mobileT(lang, `Done: ${r.scanned} scanned, ${r.fresh} fresh`, `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد`));
+        setTimeout(() => setDoneMsg(null), 15000);
+      }, { immediate: true });
+    } else {
+      stopMobileRadar();
+      setProg(null);
+    }
     window.dispatchEvent(new CustomEvent('mobile-radar-settings'));
   };
 

@@ -2,23 +2,21 @@
  * Auto-analysis start gate — shared by the desktop site and the mobile app.
  *
  * Rule requested by the owner: a client with an active plan must NOT start a
- * scan merely because the page was refreshed. Auto-analysis may start ONLY:
+ * scan merely because the page was refreshed or the app was reopened.
+ * Auto-analysis may start ONLY:
  *
- *   1. when the client turns it ON manually,
- *   2. when the periodic re-analysis interval is due, or
- *   3. when the site/app is opened fresh after it had been closed.
+ *   1. when the client turns it ON manually, or
+ *   2. when the periodic re-analysis interval is actually due.
  *
- * A browser refresh keeps `sessionStorage`, while closing the tab / the phone
- * app clears it. That is exactly how "refresh" and "reopened after close" are
- * told apart here. The decision is cached for the page session, so the desktop
- * App and the mobile layout can never disagree (and React StrictMode's double
- * effect run cannot consume it twice).
+ * Opening/refreshing therefore only resumes the interval timer: a scan runs
+ * when `lastFinishedAt + interval` has passed, never just because the page
+ * loaded. `flagManualRadarStart()` is called from the exact user action that
+ * switches auto-analysis ON.
  */
 
 const SESSION_KEY = 'finalyze_radar_session_v1';
 
 let sessionFresh: boolean | null = null;
-let freshStartUsed = false;
 let manualStartPending = false;
 
 /** Computes (once) whether this is the first page load of the session. */
@@ -50,16 +48,13 @@ export function flagManualRadarStart(): void {
 }
 
 /**
- * True when the scan may start right now for a non-interval reason:
- * a manual ON, or the first open of a session. Consumed once per page session.
+ * True only when the scan may start right now because the client just turned
+ * auto-analysis ON. Opening or refreshing the page never qualifies; in that
+ * case the normal interval timer decides when the next scan is due.
  */
 export function takeRadarStartNow(): boolean {
   if (manualStartPending) {
     manualStartPending = false;
-    return true;
-  }
-  if (ensureSession() && !freshStartUsed) {
-    freshStartUsed = true;
     return true;
   }
   return false;
