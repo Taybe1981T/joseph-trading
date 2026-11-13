@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Zap, Layers, Sparkles, Clock, Music } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT, useMobileMode, isMobilePlanClient } from '../../lib/mobileMode';
@@ -36,6 +36,8 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
   const { isDev } = useMobileMode();
   const isPaidClient = !isDev && isMobilePlanClient();
   const intervalOptions = isPaidClient ? [240] : INTERVALS;
+  // Clients (free OR paid) may use Day Trading only — desktop parity.
+  const styleOptions = isDev ? STYLES : STYLES.filter((st) => st.id === 'day_trading');
   const [s, setS] = useState<AutoSettings>(readAuto);
   const [groups, setGroups] = useState(getMobileSymbolGroups);
   const commit = (patch: Partial<AutoSettings>) => {
@@ -43,6 +45,11 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
     if (!s.isEnabled && patch.isEnabled) flagManualRadarStart();
     try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
   };
+  // A stored scalping/swing value is normalized back to Day Trading for clients.
+  useEffect(() => {
+    if (!isDev && s.tradingStyle !== 'day_trading') commit({ tradingStyle: 'day_trading' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDev, s.tradingStyle]);
   const selectedList = useMemo(() => s.category === 'all' ? groups.map((g) => g.id) : s.category.split(',').filter(Boolean), [s.category, groups]);
   const toggleCat = (id: string) => {
     let list = [...selectedList];
@@ -107,9 +114,14 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
           </select>
         </Row>
         <Row icon={<Sparkles size={15} style={{ color: '#F59E0B' }} />} label={mobileT(lang, 'Strategy', 'الأسلوب')}>
-          <select value={s.tradingStyle} onChange={(e) => { e.stopPropagation(); commit({ tradingStyle: e.target.value }); }} style={{ width: '100%', background: '#0a0a0a', border: '1px solid #333', color: '#fff', borderRadius: 10, padding: '10px 12px', fontSize: 14, fontWeight: 700 }}>
-            {STYLES.map((st) => <option key={st.id} value={st.id}>{isAr ? st.ar : st.en}</option>)}
+          <select value={isDev ? s.tradingStyle : 'day_trading'} onChange={(e) => { e.stopPropagation(); commit({ tradingStyle: e.target.value }); }} style={{ width: '100%', background: '#0a0a0a', border: '1px solid #333', color: '#fff', borderRadius: 10, padding: '10px 12px', fontSize: 14, fontWeight: 700 }}>
+            {styleOptions.map((st) => <option key={st.id} value={st.id}>{isAr ? st.ar : st.en}</option>)}
           </select>
+          {!isDev && (
+            <div style={{ marginTop: 6, fontSize: 11, color: '#F59E0B', fontWeight: 700 }}>
+              {mobileT(lang, 'Day Trading strategy only', 'استراتيجية التداول اليومي متاحة فقط')}
+            </div>
+          )}
         </Row>
       </div>
 

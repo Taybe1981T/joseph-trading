@@ -948,6 +948,11 @@ const isDeveloperSession = () => {
       );
       base = { ...base, category: [...new Set(normalized)].join(',') };
     }
+    // Clients (free OR paid) may use Day Trading only. Scalping/Swing are
+    // developer-only, so an old stored value is normalized on load.
+    if (!isDeveloperSession() && base.tradingStyle && base.tradingStyle !== TradingStyle.DAY_TRADING) {
+      base = { ...base, tradingStyle: TradingStyle.DAY_TRADING };
+    }
     return base;
   });
 

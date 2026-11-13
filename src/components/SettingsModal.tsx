@@ -6,6 +6,7 @@ import { DEFAULT_STRATEGY_SETTINGS } from '../constants';
 import { User } from 'firebase/auth';
 import { Language } from '../lib/i18n';
 import { isDeveloperEmail, DEVELOPER_EMAILS } from '../lib/clientIds';
+import TradingValuesPanel from './TradingValuesPanel';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -797,6 +798,11 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
         </div>
       )}
 
+
+      {/* Developer-only: Fixed Trading Values system (lot / SL / TP / trailing per category) */}
+      {user && isDeveloperEmail(user.email) && (
+        <TradingValuesPanel lang={lang} />
+      )}
 
       {/* Section 6: Factory Reset */}
       <div className="space-y-4 pt-6 border-t border-red-500/20">

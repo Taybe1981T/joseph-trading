@@ -17,7 +17,19 @@ export interface MobileProgress {
 export function readMobileAuto(): AutoAnalysisSettings {
   try {
     const raw = localStorage.getItem('auto_settings');
-    if (raw) return { ...(JSON.parse(raw)) };
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Clients (free OR paid) may use Day Trading only — desktop parity.
+      // An old stored scalping/swing value is normalized on load.
+      try {
+        const u = JSON.parse(localStorage.getItem('finalyze_user') || '{}');
+        const email = String(u?.email || '').toLowerCase().trim();
+        if (!isDeveloperEmail(email) && parsed?.tradingStyle && parsed.tradingStyle !== TradingStyle.DAY_TRADING) {
+          parsed.tradingStyle = TradingStyle.DAY_TRADING;
+        }
+      } catch {}
+      return { ...parsed };
+    }
   } catch {}
   return { isEnabled: false, interval: 15, timeframe: '1d', category: 'all', tradingStyle: TradingStyle.DAY_TRADING, volume: 0.8, showAllSignals: false } as AutoAnalysisSettings;
 }

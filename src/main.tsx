@@ -5,6 +5,7 @@ import { auth } from './lib/firebase';
 import App from './App.tsx';
 import ErrorBoundary from './components/ErrorBoundary';
 import { MobileLayout } from './components/mobile/MobileLayout';
+import { subscribeTradingValues } from './services/tradingValues';
 import { Language } from './lib/i18n';
 import './index.css';
 import './styles/mobile_pt1.css';
@@ -40,6 +41,12 @@ function AppWrapper() {
       } catch {}
     });
     return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    // Developer "Trading Values": live shared settings for desktop AND mobile.
+    // Read-only for clients; a developer change reaches every device instantly.
+    return subscribeTradingValues();
   }, []);
 
   useEffect(() => {

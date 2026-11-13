@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Zap, Activity, Layers, Sparkles, Clock, Music, Volume2, CheckCircle, Crown, Star, X } from 'lucide-react';
 import { AutoAnalysisSettings } from '../types';
@@ -31,6 +31,15 @@ export default function RadarSettingsPage({ autoSettings, onAutoSettingsChange, 
   const selectedList = autoSettings.category === 'all'
     ? ['forex', 'crypto', 'stocks', 'metals']
     : (autoSettings.category || 'all').split(',');
+
+  // Clients (free OR paid) may use Day Trading only. The rest of the strategies
+  // are developer-only, so a stored scalping/swing value is normalized back.
+  useEffect(() => {
+    if (!isDeveloper && autoSettings.tradingStyle !== 'day_trading') {
+      onAutoSettingsChange({ ...autoSettings, tradingStyle: 'day_trading' as any });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDeveloper, autoSettings.tradingStyle]);
 
   const handleStrategyChange = (value: string) => {
     if (!hasActivePlan && value !== 'day_trading') {
@@ -238,19 +247,27 @@ export default function RadarSettingsPage({ autoSettings, onAutoSettingsChange, 
             </span>
           </div>
           <select
-            value={autoSettings.tradingStyle}
+            value={!isDeveloper ? 'day_trading' : autoSettings.tradingStyle}
             onChange={(e) => handleStrategyChange(e.target.value)}
             className={cn(
               "w-full bg-brand-bg border-2 rounded-2xl px-4 py-3 text-sm font-black text-brand-text focus:border-primary outline-none appearance-none cursor-pointer",
               !hasActivePlan ? "border-amber-500/40" : "border-brand-text/10"
             )}
           >
-            <option value="scalping">{lang === 'ar' ? 'سكالبينج' : 'Scalping'}</option>
-            <option value="day_trading">{lang === 'ar' ? 'تداول يومي' : 'Day Trading'}</option>
-            <option value="swing_trading">{lang === 'ar' ? 'سوينغ' : 'Swing Trading'}</option>
+            {!isDeveloper ? (
+              <option value="day_trading">{lang === 'ar' ? 'تداول يومي' : 'Day Trading'}</option>
+            ) : (
+              <>
+                <option value="scalping">{lang === 'ar' ? 'سكالبينج' : 'Scalping'}</option>
+                <option value="day_trading">{lang === 'ar' ? 'تداول يومي' : 'Day Trading'}</option>
+                <option value="swing_trading">{lang === 'ar' ? 'سوينغ' : 'Swing Trading'}</option>
+              </>
+            )}
           </select>
-          {!hasActivePlan && (
-            <p className="text-[10px] text-amber-400 font-bold">{lang === 'ar' ? 'المجاني: تداول يومي فقط' : 'Free: Day Trading only'}</p>
+          {!isDeveloper && (
+            <p className="text-[10px] text-amber-400 font-bold">
+              {lang === 'ar' ? 'استراتيجية التداول اليومي متاحة فقط' : 'Day Trading strategy only'}
+            </p>
           )}
         </div>
       </div>

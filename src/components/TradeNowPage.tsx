@@ -15,6 +15,7 @@ import { playOpenSound, playCloseSound, playDragTick } from '../lib/tradeSounds'
 import { pricesToUsd, usdToPrice, slAmountUSD, notionalInUSD } from '../lib/positionMath';
 import { toTvSymbol as toTvSymbolShared } from '../lib/tvSymbol';
 import { calcTrailingStop } from '../lib/trailingStop';
+import { getTradingValuesOverride } from '../services/tradingValues';
 import { clearOpened as clearAutoOpened, resetGuard as resetAutoGuard } from '../services/autoGuard';
 import { openEventFor, broadcastMirrorEvent } from '../services/tradeMirror';
 import MT5ConnectModal from './MT5ConnectModal';
@@ -342,6 +343,22 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   useEffect(() => {
     if (!symbol) return;
     const cat = detectCategory(symbol);
+    // Developer "Trading Values" system ON → the ticket is forced to the fixed
+    // values for this category (lot + SL/TP in USD), overriding signals and
+    // typed values. OFF → the previous dynamic behaviour below.
+    const fixed = getTradingValuesOverride(cat);
+    if (fixed) {
+      setQty((prev) => (prev === fixed.qty ? prev : fixed.qty));
+      setSlPrice((prev) => {
+        const next = fixed.slUsd.toFixed(2);
+        return prev === next ? prev : next;
+      });
+      setTpPrice((prev) => {
+        const next = fixed.tpUsd.toFixed(2);
+        return prev === next ? prev : next;
+      });
+      return;
+    }
     if (!ticketTouchedRef.current.qty) {
       const autoQty = getDefaultQty(cat, balance);
       setQty((prev) => (prev === autoQty ? prev : autoQty));
@@ -502,10 +519,18 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
       if (typeof t.qty === 'number' && t.qty > 0 && typeof t.entryPrice === 'number') {
         const pnlUSD = calcPnl(t, price);
         const ts = loadTrailingSettings();
-        if (!ts.enabled) {
+        const fixed = getTradingValuesOverride(t.category || detectCategory(t.symbol));
+        if (!ts.enabled && !fixed) {
           // Trailing disabled by the owner → keep the original stop, skip trailing.
         } else {
-        const trail = calcTrailingStop({ qty: t.qty, openPnlUSD: pnlUSD, baseUnit: baseQtyPerCategory(t.category || detectCategory(t.symbol)), baseActivationUSD: ts.baseActivationUSD, baseStepUSD: ts.baseStepUSD, activationLotStep: ts.activationLotStep, stepLotStep: ts.stepLotStep });
+        const trail = calcTrailingStop({
+          qty: t.qty, openPnlUSD: pnlUSD,
+          baseUnit: baseQtyPerCategory(t.category || detectCategory(t.symbol)),
+          baseActivationUSD: fixed ? fixed.trailingActivationUSD : ts.baseActivationUSD,
+          baseStepUSD: fixed ? fixed.trailingStepUSD : ts.baseStepUSD,
+          activationLotStep: fixed ? 0 : ts.activationLotStep,
+          stepLotStep: fixed ? 0 : ts.stepLotStep,
+        });
         // active covers BOTH: first activation (offset 0 → stop to breakeven/entry)
         // and every subsequent step (offset > 0 → stop trails into profit).
         if (trail.active && trail.offsetUSD >= 0) {
@@ -833,8 +858,14 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   }
 
   async function openTrade(side: 'buy' | 'sell') {
-    if (!livePrice || busy || qty <= 0) return;
+    if (!livePrice || busy) return;
     const pendingCat = detectCategory(symbol);
+    // Developer "Trading Values" system: when ON, force the fixed lot + the
+    // fixed SL/TP for this category. Typed values and the matched signal risk
+    // plan are ignored (the system imposes its own numbers on every symbol).
+    const fixed = getTradingValuesOverride(pendingCat);
+    const execQty = fixed ? fixed.qty : qty;
+    if (!(execQty > 0)) return;
     // Block opening when the market for this asset is closed (weekend/hours).
     // Crypto trades 24/7 and is always allowed.
     if (!isMarketOpen(pendingCat, symbol)) {
@@ -847,7 +878,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     setBusy(true);
 
     // Check that the resulting trade's margin fits within the account balance
-    const requiredMargin = notionalInUSD(pendingCat, symbol, livePrice, qty) / leverage;
+    const requiredMargin = notionalInUSD(pendingCat, symbol, livePrice, execQty) / leverage;
     if (requiredMargin > balance) {
       setToast(isAr
         ? `هامش غير كافٍ (مطلوب $${requiredMargin.toFixed(0)} / الرصيد $${balance.toFixed(0)})`
@@ -862,15 +893,15 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     // loss side (below for buy / above for sell).
     const cat = detectCategory(symbol);
     const isBuy = side === 'buy';
-    const tpAmount = parseFloat(tpPrice);
-    const slAmount = parseFloat(slPrice);
+    const tpAmount = fixed ? fixed.tpUsd : parseFloat(tpPrice);
+    const slAmount = fixed ? fixed.slUsd : parseFloat(slPrice);
     let tpVal: number | null = null;
     let slVal: number | null = null;
-    if (tpAmount > 0) tpVal = usdToPrice(symbol, tpAmount, livePrice, isBuy, qty, cat);
+    if (tpAmount > 0) tpVal = usdToPrice(symbol, tpAmount, livePrice, isBuy, execQty, cat);
     else tpVal = matchedSignal?.takeProfit || null;
-    if (slAmount > 0) slVal = usdToPrice(symbol, slAmount, livePrice, !isBuy, qty, cat);
+    if (slAmount > 0) slVal = usdToPrice(symbol, slAmount, livePrice, !isBuy, execQty, cat);
     else slVal = matchedSignal?.stopLoss || null;
-    const tradeData = { symbol, category: cat, side, qty, entryPrice: livePrice, status: 'open' as const, tp: tpVal, sl: slVal, openedAt: Date.now(), source: 'manual' as const };
+    const tradeData = { symbol, category: cat, side, qty: execQty, entryPrice: livePrice, status: 'open' as const, tp: tpVal, sl: slVal, openedAt: Date.now(), source: 'manual' as const };
 
     // ── REAL execution via self-hosted MT5 bridge (opt-in) ──────────────
     // Runs ONLY when the user has connected a bridge AND flipped the switch
@@ -881,8 +912,8 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     if (execReal && mt5Conn) {
       try {
         const res = side === 'buy'
-          ? await mt5Bridge.buy(mt5Conn, { symbol, volume: qty, sl: slVal, tp: tpVal })
-          : await mt5Bridge.sell(mt5Conn, { symbol, volume: qty, sl: slVal, tp: tpVal });
+          ? await mt5Bridge.buy(mt5Conn, { symbol, volume: execQty, sl: slVal, tp: tpVal })
+          : await mt5Bridge.sell(mt5Conn, { symbol, volume: execQty, sl: slVal, tp: tpVal });
         if (!res.ok) throw new Error(res.comment || 'MT5 rejected the order');
         // Use the broker's real fill price as the local mirror's entry.
         if (res.price != null) tradeData.entryPrice = res.price;
@@ -1690,7 +1721,15 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
                     if (activeTrade && typeof activeTrade.qty === 'number' && activeTrade.qty > 0 && typeof activeTrade.entryPrice === 'number' && typeof activeTrade.sl === 'number') {
                       const live = (typeof livePrice === 'number' ? livePrice : activeTrade.entryPrice) as number;
                       const pnl = calcPnl(activeTrade, live);
-                      const trail = calcTrailingStop({ qty: activeTrade.qty, openPnlUSD: pnl, baseUnit: baseQtyPerCategory(activeTrade.category || detectCategory(activeTrade.symbol)) });
+                      const tfFixed = getTradingValuesOverride(activeTrade.category || detectCategory(activeTrade.symbol));
+                      const trail = calcTrailingStop({
+                        qty: activeTrade.qty, openPnlUSD: pnl,
+                        baseUnit: baseQtyPerCategory(activeTrade.category || detectCategory(activeTrade.symbol)),
+                        baseActivationUSD: tfFixed?.trailingActivationUSD,
+                        baseStepUSD: tfFixed?.trailingStepUSD,
+                        activationLotStep: tfFixed ? 0 : undefined,
+                        stepLotStep: tfFixed ? 0 : undefined,
+                      });
                       // Active once the trail has triggered AND the stop is at/into profit.
                       const intoProfit = activeTrade.side === 'buy'
                         ? activeTrade.sl >= activeTrade.entryPrice

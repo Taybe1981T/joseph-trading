@@ -20,6 +20,7 @@ import {
   type PaperTrade,
 } from './paperTradingService';
 import { calcTrailingStop } from '../lib/trailingStop';
+import { getTradingValuesOverride } from './tradingValues';
 import { isOpened, markOpened, markClosed, clearOpened, lastClosedAt } from './autoGuard';
 import { broadcastMirrorEvent, openEventFor, closeEventFor } from './tradeMirror';
 import { SYMBOL_CATEGORIES } from '../constants';
@@ -216,13 +217,18 @@ export class AutoTradeEngine {
         // ── DYNAMIC TRAILING STOP (same logic as the manual engine) ──
         if (typeof t.qty === 'number' && t.qty > 0 && typeof t.entryPrice === 'number') {
           const ts = loadTrailingSettings();
-          if (ts.enabled) {
+          // Developer "Trading Values" system ON → its fixed activation/step
+          // win over the global strategy values AND the lot-step scaling.
+          const fixed = getTradingValuesOverride(t.category || detectCategory(t.symbol));
+          if (fixed || ts.enabled) {
             const pnlUSD = calcPnl(t, price);
             const trail = calcTrailingStop({
               qty: t.qty, openPnlUSD: pnlUSD,
               baseUnit: baseQtyPerCategory(t.category || detectCategory(t.symbol)),
-              baseActivationUSD: ts.baseActivationUSD, baseStepUSD: ts.baseStepUSD,
-              activationLotStep: ts.activationLotStep, stepLotStep: ts.stepLotStep,
+              baseActivationUSD: fixed ? fixed.trailingActivationUSD : ts.baseActivationUSD,
+              baseStepUSD: fixed ? fixed.trailingStepUSD : ts.baseStepUSD,
+              activationLotStep: fixed ? 0 : ts.activationLotStep,
+              stepLotStep: fixed ? 0 : ts.stepLotStep,
             });
             if (trail.active && trail.offsetUSD >= 0) {
               const above = t.side === 'buy';
@@ -310,6 +316,9 @@ export class AutoTradeEngine {
         if (lastClose && Date.now() - lastClose < REOPEN_COOLDOWN_MS) { console.warn(`[AutoTradeEngine] skip ${sym}: reopen cooldown`); continue; }
 
         const cat = detectCategory(sym);
+        // Developer "Trading Values" system: when ON, its fixed lot/SL/TP are
+        // imposed on this auto trade (balance scaling and signal risk ignored).
+        const fixedOpen = getTradingValuesOverride(cat);
         const marketOpen = isMarketOpen(cat, sym);
         // ── WEEKEND PENDING QUEUE ──
         // A fresh analysis (metals/forex/stocks) routinely lands while the
@@ -340,11 +349,13 @@ export class AutoTradeEngine {
           continue;
         }
 
-        const q = getDefaultQty(cat, balance);
+        const q = fixedOpen ? fixedOpen.qty : getDefaultQty(cat, balance);
         const requiredMargin = notionalInUSD(cat, sym, price, q) / leverage;
         if (requiredMargin > balance) { console.warn(`[AutoTradeEngine] skip ${sym}: insufficient margin (need ${requiredMargin.toFixed(2)} > balance ${balance})`); continue; }
 
-        const { slUsd, tpUsd } = calcRiskUSD(balance);
+        const { slUsd, tpUsd } = fixedOpen
+          ? { slUsd: fixedOpen.slUsd, tpUsd: fixedOpen.tpUsd }
+          : calcRiskUSD(balance);
         const side: 'buy' | 'sell' = isBuy ? 'buy' : 'sell';
         const entryPrice = price;
         const slPrice = usdToPrice(sym, slUsd, entryPrice, side === 'sell', q, cat);

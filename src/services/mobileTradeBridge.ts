@@ -20,6 +20,8 @@ import {
 import { AutoTradeEngine } from './autoTradeEngine';
 import { SignalType, type AnalysisResult } from '../types';
 import { SYMBOL_CATEGORIES } from '../constants';
+import { usdToPrice } from '../lib/positionMath';
+import { getTradingValuesOverride } from './tradingValues';
 
 export const MOBILE_AUTO_TRADE_KEY = 'paper_trading_auto_trade';
 
@@ -80,23 +82,32 @@ export async function openMobileManualTrade(
   const price = await getLivePrice(sym);
   if (price == null || !isFinite(price) || price <= 0) throw new Error('no live price for ' + sym);
   const category = detectMobileTradeCategory(sym);
-  let qty = Number(volume);
+  // Developer "Trading Values" system ON → fixed lot + fixed SL/TP for this
+  // category, exactly like the desktop ticket. OFF → previous behaviour.
+  const fixed = getTradingValuesOverride(category);
+  let qty = fixed ? fixed.qty : Number(volume);
   if (!isFinite(qty) || qty <= 0) {
     try {
       const acc = await store.getAccount();
       qty = getDefaultQty(category, acc.balance);
     } catch { qty = getDefaultQty(category, 10000); }
   }
-  let sl: number | null = signal?.stopLoss ?? null;
-  let tp: number | null = signal?.takeProfit ?? null;
-  if (sl == null || tp == null) {
-    try {
-      const acc = await store.getAccount();
-      const risk = calcRiskUSD(acc.balance);
-      const q = Math.max(qty, 0.0001);
-      if (sl == null) sl = side === 'buy' ? price - risk.slUsd / q : price + risk.slUsd / q;
-      if (tp == null) tp = side === 'buy' ? price + risk.tpUsd / q : price - risk.tpUsd / q;
-    } catch {}
+  let sl: number | null = null;
+  let tp: number | null = null;
+  if (fixed) {
+    sl = usdToPrice(sym, fixed.slUsd, price, side === 'sell', qty, category);
+    tp = usdToPrice(sym, fixed.tpUsd, price, side === 'buy', qty, category);
+  } else {
+    sl = signal?.stopLoss ?? null;
+    tp = signal?.takeProfit ?? null;
+    if (sl == null || tp == null) {
+      try {
+        const acc = await store.getAccount();
+        const risk = calcRiskUSD(acc.balance);
+        if (sl == null) sl = usdToPrice(sym, risk.slUsd, price, side === 'sell', qty, category);
+        if (tp == null) tp = usdToPrice(sym, risk.tpUsd, price, side === 'buy', qty, category);
+      } catch {}
+    }
   }
   const row: Omit<PaperTrade, 'id'> = {
     symbol: sym, category, side, qty, entryPrice: price, status: 'open',
@@ -221,7 +232,10 @@ async function mobileManagePositions(): Promise<void> {
       continue;
     }
     // 2) Trailing stop — same rule as desktop (base unit per category).
-    if (!cfg.enabled) continue;
+    // Developer "Trading Values" system ON → fixed activation/step, no lot
+    // scaling, and per-position overrides are ignored (system takes priority).
+    const tfFixed = getTradingValuesOverride(t.category || detectMobileTradeCategory(t.symbol));
+    if (!cfg.enabled && !tfFixed) continue;
     try {
       const { baseQtyPerCategory } = await import('./paperTradingService');
       const { calcTrailingStop } = await import('../lib/trailingStop');
@@ -229,12 +243,17 @@ async function mobileManagePositions(): Promise<void> {
       const pnl = calcPnl(t, price);
       // Per-position trailing settings (edited via the pencil modal in USD)
       // take precedence over the global strategy_settings defaults.
-      const act = (t as any).trailingActivationUSD != null ? (t as any).trailingActivationUSD : cfg.baseActivationUSD;
-      const step = (t as any).trailingStepUSD != null ? (t as any).trailingStepUSD : cfg.baseStepUSD;
+      const act = tfFixed
+        ? tfFixed.trailingActivationUSD
+        : ((t as any).trailingActivationUSD != null ? (t as any).trailingActivationUSD : cfg.baseActivationUSD);
+      const step = tfFixed
+        ? tfFixed.trailingStepUSD
+        : ((t as any).trailingStepUSD != null ? (t as any).trailingStepUSD : cfg.baseStepUSD);
       const tr = calcTrailingStop({
         qty: t.qty, openPnlUSD: pnl, baseUnit: baseQtyPerCategory(t.category || detectMobileTradeCategory(t.symbol)),
         baseActivationUSD: act, baseStepUSD: step,
-        activationLotStep: cfg.activationLotStep, stepLotStep: cfg.stepLotStep,
+        activationLotStep: tfFixed ? 0 : cfg.activationLotStep,
+        stepLotStep: tfFixed ? 0 : cfg.stepLotStep,
       });
       if (tr.active) {
         const newSl = usdToPrice(t.symbol, tr.offsetUSD, t.entryPrice, isBuy, t.qty, t.category || detectMobileTradeCategory(t.symbol));

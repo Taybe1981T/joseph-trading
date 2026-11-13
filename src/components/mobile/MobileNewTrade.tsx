@@ -18,6 +18,7 @@ import { notionalInUSD, usdToPrice } from '../../lib/positionMath';
 import { calcTrailingStop } from '../../lib/trailingStop';
 import type { PaperTrade } from '../../services/paperTradingService';
 import { baseQtyPerCategory } from '../../services/paperTradingService';
+import { getTradingValuesOverride } from '../../services/tradingValues';
 import TradingViewEmbed from '../TradingViewEmbed';
 
 interface MobileNewTradeProps {
@@ -39,6 +40,12 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   });
   const [symbol, setSymbol] = useState(defaultSymbol || (groups[0]?.symbols[0] || quotes[0]?.symbol || ''));
   const [volume, setVolume] = useState(0.01);
+  // Developer "Trading Values" system ON → show the fixed lot for this
+  // symbol's category (the bridge imposes it on the order itself too).
+  useEffect(() => {
+    const fixed = getTradingValuesOverride(detectMobileTradeCategory(symbol));
+    if (fixed) setVolume((prev) => (prev === fixed.qty ? prev : fixed.qty));
+  }, [symbol]);
   const [busy, setBusy] = useState(false);
   const [autoTrade, setAutoTrade] = useState<boolean>(() => isMobileAutoTradeOn());
   // Custom symbol management (add/delete) - available for both developer and client
@@ -123,14 +130,15 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   if (openForSymbol && openForSymbol.qty > 0 && openForSymbol.entryPrice > 0) {
     const live = chartLivePrice ?? openForSymbol.entryPrice;
     const pnl = calcPnl(openForSymbol, live);
+    const tvFixed = getTradingValuesOverride(chartCategory);
     const tr = calcTrailingStop({
       qty: openForSymbol.qty,
       openPnlUSD: pnl,
       baseUnit: baseQtyPerCategory(chartCategory),
-      baseActivationUSD: (openForSymbol as any).trailingActivationUSD ?? 5,
-      baseStepUSD: (openForSymbol as any).trailingStepUSD ?? 2,
-      activationLotStep: 2,
-      stepLotStep: 1,
+      baseActivationUSD: tvFixed?.trailingActivationUSD ?? ((openForSymbol as any).trailingActivationUSD ?? 5),
+      baseStepUSD: tvFixed?.trailingStepUSD ?? ((openForSymbol as any).trailingStepUSD ?? 2),
+      activationLotStep: tvFixed ? 0 : 2,
+      stepLotStep: tvFixed ? 0 : 1,
     });
     if (tr.active) {
       const isBuy = openForSymbol.side === 'buy';

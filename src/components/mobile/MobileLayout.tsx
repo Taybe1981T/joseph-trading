@@ -44,6 +44,7 @@ import {
   syncMobileAutoEngine,
   closeMobileTrade,
   startMobilePositionManager,
+  openMobileManualTrade,
 } from '../../services/mobileTradeBridge';
 import { auth, db } from '../../lib/firebase';
 import { signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
@@ -855,6 +856,25 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     if (tab === 'trade') goTab('positions');
   };
 
+  // Quick-order dialog (quote list → Buy/Sell) must actually open the trade,
+  // not just show an alert. Same bridge as the full mobile ticket, so the
+  // developer fixed trading values are enforced here too.
+  const executeDialogTrade = async (sym: string, type: 'buy' | 'sell', vol: number) => {
+    const cat = String(detectMobileType(sym));
+    if (!isMarketOpen(cat, sym)) {
+      setAlert((lang === 'ar' ? 'السوق مغلق حالياً، لا يمكن فتح/إغلاق الصفقات حتى يفتح: ' : 'Market is currently closed; trades cannot be opened/closed until it opens: ') + sym);
+      setTimeout(() => setAlert(null), 4000);
+      return;
+    }
+    try {
+      await openMobileManualTrade(sym, type, vol, signalFor(sym) || null);
+      openTrade(sym, type, vol);
+    } catch (e: any) {
+      setAlert((lang === 'ar' ? 'فشل فتح الصفقة: ' : 'Failed to open trade: ') + (e?.message || String(e)));
+      setTimeout(() => setAlert(null), 4000);
+    }
+  };
+
   const closeTradeById = useCallback(async (id: string) => {
     try { await closeMobileTrade(id); } catch {}
     loadAll();
@@ -1185,7 +1205,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         hasPlan={canUseAnalysis}
         lang={lang}
       />
-      {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => openTrade(dialog.symbol, t, v)} onClose={() => setDialog(null)} />}
+      {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => { void executeDialogTrade(dialog.symbol, t, v); }} onClose={() => setDialog(null)} />}
       {detail && (isDev
         ? <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />
         : <AnalysisDetailPage result={detail} onBack={() => setDetail(null)} lang={lang} isClient compact />)}
