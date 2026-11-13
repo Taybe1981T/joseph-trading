@@ -163,8 +163,8 @@ export function MobileSettings({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
                   {isAr
-                    ? 'آخر بوابة بعد استيفاء كل الشروط: تعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. تحقّق العدد ← الإشارة مسموحة (قوتها تحدّدها الثقة). غيابه ← إخفاء الإشارة (مانع final). الدوجي لا تُحتسب. كل الفئات معطّلة افتراضيًا.'
-                    : 'Final gate after all conditions: counts consecutive candles moving against the trade on the chosen timeframe. Count reached → signal allowed (strength set by confidence). Missing → signal hidden (final blocker). Doji never counted. All categories OFF by default.'}
+                    ? 'آخر بوابة بعد استيفاء كل الشروط: تعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. تحقّق العدد + شمعة الإشارة مع الاتجاه ← الإشارة مسموحة. غيابه ← إخفاء (مانع final). الدوجي/المحايدة لا تُحتسب. كل الفئات معطّلة افتراضيًا.'
+                    : 'Final gate after all conditions: counts consecutive candles moving against the trade on the chosen timeframe. Count reached + signal candle aligned → signal allowed. Missing → hidden (final blocker). Neutral/doji never counted. All categories OFF by default.'}
                 </div>
 
                 {retraceRows.map((row) => {

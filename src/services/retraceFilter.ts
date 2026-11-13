@@ -165,6 +165,24 @@ export function isDojiCandle(candle: RetraceCandle): boolean {
  *
  * A neutral candle is skipped (not counted, does not break the run).
  */
+/**
+ * The signal candle (current/forming) must move WITH the trade direction.
+ * Buy → current candle must be bullish; Sell → bearish.
+ * Neutral/doji/unknown candles do not block (they don't oppose the trade).
+ */
+export function currentCandleAligns(
+  candles: RetraceCandle[] | null | undefined,
+  side: RetraceSide,
+): boolean {
+  const last = candles?.[candles.length - 1];
+  if (!last) return true; // no data → don't block
+  if (isDojiCandle(last)) return true; // neutral → don't block
+  const dir = last.close > last.open ? 'bullish' : last.close < last.open ? 'bearish' : 'neutral';
+  if (dir === 'neutral') return true;
+  const wanted = side === 'buy' ? 'bullish' : 'bearish';
+  return dir === wanted;
+}
+
 export function isNeutralRetraceCandle(
   candle: RetraceCandle,
   nextCandle: RetraceCandle | undefined,

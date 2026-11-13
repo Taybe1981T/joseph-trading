@@ -556,8 +556,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
         <div className="bg-white/5 border border-white/5 rounded-2xl p-5 md:p-6 space-y-4">
           <p className="text-sm md:text-[17px] text-brand-text/55 leading-relaxed">
             {isAr
-              ? 'يعمل كآخر بوابة بعد استيفاء كل الشروط: يعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. عند تحقّق العدد → الإشارة مسموحة (قوتها تحدّدها نسبة الثقة). عند غيابه → إخفاء الإشارة (مانع final). شموع الدوجي لا تُحتسب ولا تقطع التسلسل. كل الفئات معطّلة افتراضيًا.'
-              : 'Runs as the very last gate after every other condition: it counts consecutive candles moving AGAINST the trade on the chosen timeframe. Count reached → signal allowed (strength set by confidence). Missing → signal hidden (final blocker). Doji candles are never counted and never break the run. All categories are OFF by default.'}
+              ? 'يعمل كآخر بوابة بعد استيفاء كل الشروط: يعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. عند تحقّق العدد + شمعة الإشارة مع اتجاه الصفقة → الإشارة مسموحة (قوتها تحدّدها نسبة الثقة). عند غيابه → إخفاء الإشارة (مانع final). شموع الدوجي/المحايدة لا تُحتسب ولا تقطع التسلسل. كل الفئات معطّلة افتراضيًا.'
+              : 'Runs as the very last gate after every other condition: it counts consecutive candles moving AGAINST the trade on the chosen timeframe. Count reached AND the signal candle aligned with the trade → signal allowed (strength set by confidence). Missing → signal hidden (final blocker). Neutral/doji candles are never counted and never break the run. All categories are OFF by default.'}
           </p>
           <div className="bg-black/30 rounded-xl p-3 text-xs md:text-sm text-amber-300/80 leading-relaxed">
             {isAr

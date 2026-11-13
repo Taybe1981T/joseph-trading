@@ -11,6 +11,7 @@ import {
   extractRetraceCandles,
   isLastCandleForming,
   countRetraceCandles,
+  currentCandleAligns,
   type RetraceCandle,
 } from './retraceFilter';
 
@@ -2302,14 +2303,25 @@ Return ONLY valid JSON:
       const candleWord = retraceSide === 'buy' ? 'هابطة' : 'صاعدة';
       const candleWordEn = retraceSide === 'buy' ? 'bearish' : 'bullish';
 
-      if (retraceConfirmed) {
+      const candleAligned = currentCandleAligns(retraceCandles, retraceSide);
+      if (retraceConfirmed && candleAligned) {
         detailedReasons.push({
           check: 'Retrace Filter',
           value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji: ${count.dojiSkipped}, neutral: ${count.neutralSkipped})`,
           status: 'positive',
-          impact: `Retrace confirmed on ${tfLabel} — signal allowed (strength unchanged, set by confidence)`,
+          impact: `Retrace confirmed on ${tfLabel} — signal allowed (signal candle aligns with ${retraceSide})`,
         });
         // No promotion: STRONG/BUY is already decided by confidence percentage.
+      } else if (retraceConfirmed && !candleAligned) {
+        detailedReasons.push({
+          check: 'Retrace Filter',
+          value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji: ${count.dojiSkipped}, neutral: ${count.neutralSkipped})`,
+          status: 'negative',
+          impact: `BLOCKED: retrace confirmed but the signal candle is NOT aligned with ${retraceSide} — wait for the bounce`,
+        });
+        finalSignal = SignalType.NEUTRAL;
+        finalConfidence = Math.min(finalConfidence, 30);
+        retraceConfirmed = false;
       } else {
         detailedReasons.push({
           check: 'Retrace Filter',
