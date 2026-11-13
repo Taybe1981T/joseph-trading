@@ -61,6 +61,10 @@ export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   retraceTimeframeCrypto: '1d',
   retraceTimeframeStocks: '1d',
   retraceTimeframeMetals: '1d',
+  retraceStrictModeForex: true,
+  retraceStrictModeCrypto: true,
+  retraceStrictModeStocks: true,
+  retraceStrictModeMetals: true,
   // ── Golden confidence window (surface only the best-timed entries) ──
   goldenRangeEnabled: true, // only show signals whose confidence is inside the golden window
   goldenConfMin: 70,        // below this → neutral (too weak)

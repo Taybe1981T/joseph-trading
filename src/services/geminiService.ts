@@ -2295,7 +2295,7 @@ Return ONLY valid JSON:
     if (retraceCfg.enabled && isTradeSignalForRetrace) {
       const retraceSide = (finalSignal === SignalType.BUY || finalSignal === SignalType.STRONG_BUY) ? 'buy' : 'sell';
       const skipForming = isLastCandleForming(retraceCandles, retraceCfg.timeframe);
-      const count = countRetraceCandles(retraceCandles, retraceSide, retraceCfg.candles, { skipLast: skipForming });
+      const count = countRetraceCandles(retraceCandles, retraceSide, retraceCfg.candles, { skipLast: skipForming, strictMode: retraceCfg.strictMode });
       retraceFound = count.found;
       retraceConfirmed = count.confirmed;
       const tfLabel = retraceCfg.timeframe;
@@ -2305,7 +2305,7 @@ Return ONLY valid JSON:
       if (retraceConfirmed) {
         detailedReasons.push({
           check: 'Retrace Filter',
-          value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji ignored: ${count.dojiSkipped})`,
+          value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji: ${count.dojiSkipped}, neutral: ${count.neutralSkipped})`,
           status: 'positive',
           impact: `Retrace confirmed on ${tfLabel} — signal allowed (strength unchanged, set by confidence)`,
         });

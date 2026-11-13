@@ -145,6 +145,12 @@ export interface StrategySettings {
   retraceTimeframeCrypto?: string;
   retraceTimeframeStocks?: string;
   retraceTimeframeMetals?: string;
+  // Strict mode: also skip spinning tops, high-waves, inside bars and reversal
+  // candles (hammer / shooting star). When false, only doji is skipped.
+  retraceStrictModeForex?: boolean;
+  retraceStrictModeCrypto?: boolean;
+  retraceStrictModeStocks?: boolean;
+  retraceStrictModeMetals?: boolean;
   // ── Golden confidence window (surface only the best-timed entries) ──
   goldenRangeEnabled?: boolean;        // when true, only signals inside [goldenConfMin..goldenConfMax] are shown
   goldenConfMin?: number;              // lower edge of the golden window (default 70) — below → neutral

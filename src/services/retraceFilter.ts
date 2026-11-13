@@ -29,6 +29,7 @@ export interface RetraceConfig {
   enabled: boolean;
   candles: number;
   timeframe: string;
+  strictMode: boolean;
 }
 
 export interface RetraceCandle {
@@ -90,7 +91,9 @@ export function resolveRetraceConfig(
     ? storedTf
     : DEFAULT_RETRACE_TIMEFRAME;
 
-  return { category, enabled, candles, timeframe };
+  const strictMode = raw[`retraceStrictMode${suffix}`] !== false; // default ON
+
+  return { category, enabled, candles, timeframe, strictMode };
 }
 
 /** Extract a clean OHLC(+timestamp) series from any market-data response. */
@@ -147,44 +150,106 @@ export function isDojiCandle(candle: RetraceCandle): boolean {
   return body / range <= 0.1;
 }
 
+/**
+ * Neutral (non-retrace) candle detection.
+ *
+ * Always neutral:
+ *   - Doji (body ≤ 10% of range) and zero-range candles.
+ *
+ * Strict mode (default) additionally treats as neutral:
+ *   - Spinning top / high-wave (body < 30% of range) — indecision.
+ *   - Inside bar (range contained within the next (newer) candle's range) — consolidation.
+ *   - Reversal patterns: Hammer (small body on top + long lower wick) and
+ *     Shooting Star (small body on bottom + long upper wick) — these are
+ *     reversal signals, not pullback candles.
+ *
+ * A neutral candle is skipped (not counted, does not break the run).
+ */
+export function isNeutralRetraceCandle(
+  candle: RetraceCandle,
+  nextCandle: RetraceCandle | undefined,
+  strict: boolean,
+): boolean {
+  // Always: doji
+  if (isDojiCandle(candle)) return true;
+
+  const range = candle.high - candle.low;
+  const body = Math.abs(candle.close - candle.open);
+  if (!Number.isFinite(range) || range <= 0) return true;
+
+  const bodyRatio = body / range;
+
+  if (!strict) return false; // lenient: only doji is neutral
+
+  // Spinning top / high-wave: small body
+  if (bodyRatio < 0.3) return true;
+
+  // Inside bar: contained within the next (newer) candle's range
+  if (nextCandle && candle.high <= nextCandle.high + 1e-9 && candle.low >= nextCandle.low - 1e-9) {
+    return true;
+  }
+
+  // Reversal patterns: hammer (bullish) / shooting star (bearish)
+  const upperWick = candle.high - Math.max(candle.open, candle.close);
+  const lowerWick = Math.min(candle.open, candle.close) - candle.low;
+  // Hammer: small body near top, long lower wick
+  if (lowerWick >= 2 * body && upperWick <= body * 0.5 && bodyRatio <= 0.4) return true;
+  // Shooting star: small body near bottom, long upper wick
+  if (upperWick >= 2 * body && lowerWick <= body * 0.5 && bodyRatio <= 0.4) return true;
+
+  return false;
+}
+
 export interface RetraceCountResult {
   found: number;
   required: number;
   confirmed: boolean;
   dojiSkipped: number;
+  neutralSkipped: number;
   scanned: number;
   lastCandleSkipped: boolean;
+  strictMode: boolean;
 }
 
 /**
  * Count the consecutive retrace candles ending at the most recent CLOSED
- * candle. Doji candles are skipped (not counted, do not break the run).
- * The first candle that moves WITH the trade direction stops the count.
+ * candle. Neutral candles (doji, and in strict mode also spinning tops,
+ * high-waves, inside bars and reversal patterns) are skipped (not counted,
+ * do not break the run). The first candle that moves WITH the trade
+ * direction stops the count.
  */
 export function countRetraceCandles(
   candles: RetraceCandle[] | null | undefined,
   side: RetraceSide,
   required: number,
-  opts?: { skipLast?: boolean },
+  opts?: { skipLast?: boolean; strictMode?: boolean },
 ): RetraceCountResult {
   const req = Math.max(MIN_RETRACE_CANDLES, Math.round(Number(required) || DEFAULT_RETRACE_CANDLES));
   const list = candles || [];
   const skipLast = opts?.skipLast !== false;
+  const strict = opts?.strictMode !== false; // default ON
   let i = list.length - 1;
   if (skipLast && i >= 0) i -= 1;
 
   const wanted: 'bullish' | 'bearish' = side === 'buy' ? 'bearish' : 'bullish';
   let found = 0;
   let dojiSkipped = 0;
+  let neutralSkipped = 0;
   let scanned = 0;
 
   for (; i >= 0; i--) {
     const c = list[i];
     scanned++;
-    if (isDojiCandle(c)) {
-      dojiSkipped++;
+    const next = list[i + 1]; // newer candle (chronological)
+    const isDoji = isDojiCandle(c);
+    const isNeutral = isNeutralRetraceCandle(c, next, strict);
+
+    if (isNeutral) {
+      if (isDoji) dojiSkipped++;
+      else neutralSkipped++;
       continue;
     }
+
     const dir = c.close > c.open ? 'bullish' : c.close < c.open ? 'bearish' : 'doji';
     if (dir === 'doji') {
       dojiSkipped++;
@@ -200,7 +265,9 @@ export function countRetraceCandles(
     required: req,
     confirmed: found >= req,
     dojiSkipped,
+    neutralSkipped,
     scanned,
     lastCandleSkipped: skipLast && list.length > 0,
+    strictMode: strict,
   };
 }

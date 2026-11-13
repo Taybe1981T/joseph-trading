@@ -238,6 +238,34 @@ export function MobileSettings({
                           ))}
                         </select>
                       </div>
+
+                      {(() => {
+                        const strictKey = `retraceStrictMode${row.suffix}` as keyof StrategySettings;
+                        const strict = (strategy as any)[strictKey] !== false;
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => updateStrategy(strictKey, !strict)}
+                            style={{
+                              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              gap: 10, padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+                              background: strict ? 'rgba(16,185,129,0.12)' : '#151515',
+                              border: `2px solid ${strict ? 'rgba(16,185,129,0.5)' : '#2a2a2a'}`,
+                              color: strict ? '#10b981' : '#bbb', textAlign: 'right',
+                            }}
+                          >
+                            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <span style={{ fontSize: 14, fontWeight: 900 }}>{isAr ? 'وضع صارم (Strict)' : 'Strict mode'}</span>
+                              <span style={{ fontSize: 11, opacity: 0.75 }}>
+                                {isAr ? 'تجاهل Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star' : 'Skip Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star'}
+                              </span>
+                            </span>
+                            <span style={{ width: 44, height: 24, borderRadius: 99, background: strict ? '#10b981' : '#3a3a3a', display: 'flex', alignItems: 'center', padding: 2, flexShrink: 0 }}>
+                              <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', transform: `translateX(${strict ? 20 : 0}px)`, transition: 'transform .15s' }} />
+                            </span>
+                          </button>
+                        );
+                      })()}
                     </div>
                   );
                 })}
