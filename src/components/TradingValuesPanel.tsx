@@ -28,20 +28,36 @@ const CATEGORY_LABEL: Record<TradingCategory, { ar: string; en: string }> = {
   metals: { ar: 'معادن', en: 'Metals' },
 };
 
-const FIELDS: Array<{ key: FieldKey; ar: string; en: string; hintAr: string; hintEn: string; step: string }> = [
-  { key: 'lotSize', ar: 'حجم اللوت', en: 'Lot Size', hintAr: 'يُفرض بدل اللوت المتغيّر مع الرصيد', hintEn: 'Forced instead of the balance-scaled lot', step: 'any' },
-  { key: 'stopLossUSD', ar: 'وقف الخسارة ($)', en: 'Stop Loss ($)', hintAr: 'مسافة الوقف بالدولار', hintEn: 'Stop distance in USD', step: 'any' },
-  { key: 'takeProfitUSD', ar: 'أخذ الربح ($)', en: 'Take Profit ($)', hintAr: 'مسافة الهدف بالدولار', hintEn: 'Target distance in USD', step: 'any' },
-  { key: 'trailingActivationUSD', ar: 'تفعيل الترينلغ ($)', en: 'Trailing Activation ($)', hintAr: 'ربح التفعيل الثابت', hintEn: 'Fixed activation profit', step: 'any' },
-  { key: 'trailingStepUSD', ar: 'خطوة الترينلغ ($)', en: 'Trailing Step ($)', hintAr: 'خطوة تثبيت الربح الثابتة', hintEn: 'Fixed profit-lock step', step: 'any' },
+const FIELDS: Array<{ key: FieldKey; ar: string; en: string; hintAr: string; hintEn: string }> = [
+  { key: 'lotSize', ar: 'حجم اللوت', en: 'Lot Size', hintAr: 'يُفرض بدل اللوت المتغيّر مع الرصيد', hintEn: 'Forced instead of the balance-scaled lot' },
+  { key: 'stopLossUSD', ar: 'وقف الخسارة ($)', en: 'Stop Loss ($)', hintAr: 'مسافة الوقف بالدولار', hintEn: 'Stop distance in USD' },
+  { key: 'takeProfitUSD', ar: 'أخذ الربح ($)', en: 'Take Profit ($)', hintAr: 'مسافة الهدف بالدولار', hintEn: 'Target distance in USD' },
+  { key: 'trailingActivationUSD', ar: 'تفعيل الترينلغ ($)', en: 'Trailing Activation ($)', hintAr: 'ربح التفعيل الثابت', hintEn: 'Fixed activation profit' },
+  { key: 'trailingStepUSD', ar: 'خطوة الترينلغ ($)', en: 'Trailing Step ($)', hintAr: 'خطوة تثبيت الربح الثابتة', hintEn: 'Fixed profit-lock step' },
 ];
 
-// Always show/accept Western (Latin) digits 0-9, even if the browser/keyboard
-// produces Eastern Arabic (٠١٢…) or Persian (۰۱۲…) numerals.
-function toWesternDigits(raw: string): string {
-  return String(raw ?? '')
+// Numbers are always written AND displayed as Western (Latin) digits — e.g.
+// 1.2 , 0.01 , 60 — never ٠٫٠١ / ۱٫۲ / ٦٠. Arabic-Indic and Persian numerals
+// (typed by an Arabic keyboard) plus Arabic decimal/thousands separators are
+// converted to plain ASCII digits and a dot.
+function normalizeNumericInput(raw: string): string {
+  let s = String(raw ?? '')
     .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
-    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
+    .replace(/[\u066B\u060C,]/g, '.')   // ٫ / ، / , → .
+    .replace(/[\u066C\s]/g, '');        // ٬ / spaces → nothing
+  s = s.replace(/[^\d.]/g, '');         // digits + dot only
+  const firstDot = s.indexOf('.');
+  if (firstDot >= 0) {
+    s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, '');
+  }
+  return s;
+}
+
+// Display helper: 0.01 → "0.01", 1.2 → "1.2", 60 → "60" (no floats junk).
+function formatNumericValue(value: number): string {
+  if (!Number.isFinite(value)) return '0';
+  return String(Number(value.toFixed(6)));
 }
 
 export default function TradingValuesPanel({ lang }: Props) {
@@ -114,7 +130,7 @@ export default function TradingValuesPanel({ lang }: Props) {
 
   const handleInput = (cat: TradingCategory, field: FieldKey, raw: string) => {
     const key = `${cat}.${field}`;
-    const western = toWesternDigits(raw);
+    const western = normalizeNumericInput(raw);
     setDrafts((d) => ({ ...d, [key]: western }));
     const n = parseFloat(western);
     if (Number.isFinite(n) && n > 0) patchField(cat, field, n);
@@ -231,25 +247,29 @@ export default function TradingValuesPanel({ lang }: Props) {
               <div className="space-y-2.5">
                 {FIELDS.map((f) => {
                   const key = `${cat}.${f.key}`;
-                  const display = drafts[key] ?? String(values[f.key]);
+                  const display = drafts[key] ?? formatNumericValue(values[f.key]);
                   return (
-                    <div key={f.key} className="grid grid-cols-[1fr_150px_46px] items-center gap-3">
+                    <div key={f.key} className="grid grid-cols-[1fr_150px_46px] md:grid-cols-[1fr_180px_46px] items-center gap-3">
                       <div className="min-w-0">
                         <div className="text-lg md:text-[22px] font-black text-brand-text/90 truncate">{isAr ? f.ar : f.en}</div>
                         <div className="text-base md:text-[19px] text-slate-500 truncate">{isAr ? f.hintAr : f.hintEn}</div>
                       </div>
+                      {/* text + inputMode=decimal instead of type=number: a native
+                          number input may render Arabic-Indic digits depending on
+                          the device locale, while a plain ASCII string always
+                          shows Western digits: 1.2 , 0.01 , 60 */}
                       <input
-                        type="number"
+                        type="text"
                         inputMode="decimal"
-                        step={f.step}
-                        min="0"
+                        autoComplete="off"
+                        spellCheck={false}
                         dir="ltr"
-                        lang="en"
+                        lang="en-US"
                         value={display}
                         onChange={(e) => handleInput(cat, f.key, e.target.value)}
                         onBlur={() => clearDraft(cat, f.key)}
-                        className="w-full bg-brand-bg border border-white/15 rounded-xl px-3 py-3 text-lg md:text-[22px] font-black text-white text-left focus:outline-none focus:border-amber-500/60"
-                        style={{ fontVariantNumeric: 'tabular-nums lining-nums' }}
+                        className="w-full bg-brand-bg border border-white/15 rounded-xl px-3 py-3 text-lg md:text-[22px] font-black text-white text-left focus:outline-none focus:border-amber-500/60 tabular-nums"
+                        style={{ fontFamily: "'Inter', 'Segoe UI', ui-sans-serif, system-ui, sans-serif", fontVariantNumeric: 'lining-nums tabular-nums', letterSpacing: '0.01em' }}
                       />
                       <button
                         type="button"
