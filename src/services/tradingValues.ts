@@ -18,7 +18,7 @@
  *
  * When the master switch is OFF the resolvers return `null` and every caller
  * keeps its previous behaviour (balance-scaled lot, signal SL/TP, dynamic
- * trailing). The system is OFF by default.
+ * trailing). The system is ON by default and the developer can disable it.
  */
 
 import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
@@ -70,7 +70,9 @@ export function defaultCategoryTradingValues(category: string): CategoryTradingV
 export function defaultTradingValues(): TradingValuesConfig {
   const categories = {} as Record<TradingCategory, CategoryTradingValues>;
   for (const cat of TRADING_CATEGORIES) categories[cat] = defaultCategoryTradingValues(cat);
-  return { enabled: false, categories, updatedAt: 0 };
+  // Enabled by default: a fresh install (no shared document yet) starts with
+  // the developer's fixed values active. The developer can switch it OFF.
+  return { enabled: true, categories, updatedAt: 0 };
 }
 
 function positiveNumber(value: unknown, fallback: number): number {

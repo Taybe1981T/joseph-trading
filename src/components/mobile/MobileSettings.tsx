@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Bell, Volume2, Globe, Shield, LogOut, LogIn, Loader2, RefreshCw, User, Camera } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { useMobileMode } from '../../lib/mobileMode';
+import TradingValuesPanel from '../TradingValuesPanel';
 
 interface MobileSettingsProps {
   autoTradeEnabled: boolean;
@@ -41,6 +42,7 @@ export function MobileSettings({
   avatarUrl,
 }: MobileSettingsProps) {
   const isAr = language === 'ar';
+  const mode = useMobileMode();
   return (
     <div className="mt5-page-container">
       <div className="mt5-section-title">
@@ -74,6 +76,13 @@ export function MobileSettings({
         {devLoginError && <div style={{ color: 'red', fontSize: 12 }}>{devLoginError}</div>}
         <div style={{ fontSize: 12, color: '#888', textAlign: 'center' }}>v{version}</div>
       </div>
+
+      {/* Developer-only: Fixed Trading Values system — mobile parity with desktop */}
+      {mode.isDev && (
+        <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 16, marginTop: 12 }}>
+          <TradingValuesPanel lang={language} />
+        </div>
+      )}
     </div>
   );
 }

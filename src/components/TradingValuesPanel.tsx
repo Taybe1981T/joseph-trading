@@ -36,6 +36,14 @@ const FIELDS: Array<{ key: FieldKey; ar: string; en: string; hintAr: string; hin
   { key: 'trailingStepUSD', ar: 'خطوة الترينلغ ($)', en: 'Trailing Step ($)', hintAr: 'خطوة تثبيت الربح الثابتة', hintEn: 'Fixed profit-lock step', step: 'any' },
 ];
 
+// Always show/accept Western (Latin) digits 0-9, even if the browser/keyboard
+// produces Eastern Arabic (٠١٢…) or Persian (۰۱۲…) numerals.
+function toWesternDigits(raw: string): string {
+  return String(raw ?? '')
+    .replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, (d) => String(d.charCodeAt(0) - 0x06F0));
+}
+
 export default function TradingValuesPanel({ lang }: Props) {
   const isAr = lang === 'ar';
   const [config, setConfig] = useState<TradingValuesConfig>(() => readCachedTradingValues());
@@ -53,6 +61,13 @@ export default function TradingValuesPanel({ lang }: Props) {
       if (!alive) return;
       setConfig(shared);
       setDrafts({});
+      // The system is ON by default, but clients cannot create the shared
+      // document (write = developer only). Seeding it here — once, when it does
+      // not exist yet — makes the default reach every desktop and mobile device
+      // instead of relying on each device's local cache.
+      if (!(shared.updatedAt > 0)) {
+        saveSharedTradingValues(shared).catch(() => {});
+      }
     }).catch(() => {});
     return () => { alive = false; };
   }, []);
@@ -99,8 +114,9 @@ export default function TradingValuesPanel({ lang }: Props) {
 
   const handleInput = (cat: TradingCategory, field: FieldKey, raw: string) => {
     const key = `${cat}.${field}`;
-    setDrafts((d) => ({ ...d, [key]: raw }));
-    const n = parseFloat(raw);
+    const western = toWesternDigits(raw);
+    setDrafts((d) => ({ ...d, [key]: western }));
+    const n = parseFloat(western);
     if (Number.isFinite(n) && n > 0) patchField(cat, field, n);
   };
 
@@ -139,18 +155,18 @@ export default function TradingValuesPanel({ lang }: Props) {
   };
 
   const statusNode = status === 'saving'
-    ? <span className="inline-flex items-center gap-1.5 text-amber-400"><Loader2 size={14} className="animate-spin" />{isAr ? 'جارٍ الحفظ...' : 'Saving...'}</span>
+    ? <span className="inline-flex items-center gap-2 text-amber-400 text-lg md:text-[22px] font-black"><Loader2 size={22} className="animate-spin" />{isAr ? 'جارٍ الحفظ...' : 'Saving...'}</span>
     : status === 'saved'
-      ? <span className="inline-flex items-center gap-1.5 text-emerald-400"><CheckCircle size={14} />{isAr ? 'تم الحفظ والمزامنة ✓' : 'Saved & synced ✓'}</span>
+      ? <span className="inline-flex items-center gap-2 text-emerald-400 text-lg md:text-[22px] font-black"><CheckCircle size={22} />{isAr ? 'تم الحفظ والمزامنة ✓' : 'Saved & synced ✓'}</span>
       : status === 'error'
-        ? <span className="inline-flex items-center gap-1.5 text-red-400"><AlertTriangle size={14} />{isAr ? 'فشل الحفظ — تحقق من الاتصال' : 'Save failed — check connection'}</span>
-        : <span className="text-slate-500">{isAr ? 'التغييرات تُحفظ تلقائياً' : 'Changes save automatically'}</span>;
+        ? <span className="inline-flex items-center gap-2 text-red-400 text-lg md:text-[22px] font-black"><AlertTriangle size={22} />{isAr ? 'فشل الحفظ — تحقق من الاتصال' : 'Save failed — check connection'}</span>
+        : <span className="text-slate-500 text-lg md:text-[22px] font-bold">{isAr ? 'التغييرات تُحفظ تلقائياً' : 'Changes save automatically'}</span>;
 
   return (
     <div className="space-y-4 pt-6 border-t border-amber-500/25">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h3 className="text-sm font-bold text-amber-400 uppercase tracking-wider flex items-center gap-2">
-          <SlidersHorizontal size={16} /> {isAr ? '🎛️ نظام القيم الثابتة للتداول (للمطور فقط)' : '🎛️ Fixed Trading Values (Developer only)'}
+        <h3 className="text-2xl md:text-[30px] font-black text-amber-400 uppercase tracking-wider flex items-center gap-3 leading-tight">
+          <SlidersHorizontal size={28} /> {isAr ? '🎛️ نظام القيم الثابتة للتداول (للمطور فقط)' : '🎛️ Fixed Trading Values (Developer only)'}
         </h3>
         <span className="text-[11px] font-bold">{statusNode}</span>
       </div>
@@ -158,11 +174,11 @@ export default function TradingValuesPanel({ lang }: Props) {
       <div className={`rounded-2xl border p-5 space-y-4 ${config.enabled ? 'bg-amber-500/10 border-amber-500/40' : 'bg-white/[0.02] border-white/10'}`}>
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2 text-sm font-black text-brand-text">
-              {config.enabled ? <Zap size={16} className="text-amber-400" /> : <Lock size={16} className="text-slate-400" />}
+            <div className="flex items-center gap-2 text-xl md:text-[26px] font-black text-brand-text">
+              {config.enabled ? <Zap size={26} className="text-amber-400" /> : <Lock size={26} className="text-slate-400" />}
               {isAr ? 'تفعيل / تعطيل النظام' : 'Enable / Disable System'}
             </div>
-            <p className={`text-[12px] leading-relaxed font-semibold ${config.enabled ? 'text-amber-300' : 'text-slate-400'}`}>
+            <p className={`text-lg md:text-[22px] leading-relaxed font-semibold ${config.enabled ? 'text-amber-300' : 'text-slate-400'}`}>
               {config.enabled
                 ? (isAr
                   ? '⚠️ النظام مفعّل: القيم الثابتة أدناه تُفرض على كل صفقة تُفتح تلقائياً أو يدوياً، على الموقع والموبايل، ويتجاهل النظام قيم الإشارة واللوت المتغيّر مع الرصيد.'
@@ -175,10 +191,10 @@ export default function TradingValuesPanel({ lang }: Props) {
           <button
             type="button"
             onClick={() => persist({ ...config, enabled: !config.enabled })}
-            className={`w-16 h-9 rounded-full transition-all shrink-0 flex items-center px-1 ${config.enabled ? 'bg-[#F59E0B]' : 'bg-white/15'}`}
+            className={`w-20 h-11 rounded-full transition-all shrink-0 flex items-center px-1 ${config.enabled ? 'bg-[#F59E0B]' : 'bg-white/15'}`}
             aria-pressed={config.enabled}
           >
-            <div className={`w-7 h-7 bg-white rounded-full shadow transition-transform ${config.enabled ? 'translate-x-7' : 'translate-x-0'}`} />
+            <div className={`w-9 h-9 bg-white rounded-full shadow transition-transform ${config.enabled ? 'translate-x-9' : 'translate-x-0'}`} />
           </button>
         </div>
 
@@ -186,11 +202,11 @@ export default function TradingValuesPanel({ lang }: Props) {
           <button
             type="button"
             onClick={resetAll}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-[11px] font-black text-brand-text/80 transition-all"
+            className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-lg md:text-[22px] font-black text-brand-text/80 transition-all"
           >
-            <RotateCcw size={13} /> {isAr ? 'إعادة كل القيم للافتراضي الحالي' : 'Reset all to current defaults'}
+            <RotateCcw size={20} /> {isAr ? 'إعادة كل القيم للافتراضي الحالي' : 'Reset all to current defaults'}
           </button>
-          <span className="text-[10px] text-slate-500 self-center">
+          <span className="text-base md:text-[20px] text-slate-500 self-center font-bold">
             {isAr ? 'الافتراضي: لوت الفئة الأساسي · وقف $60 · هدف $120 · ترينلغ $5/$2' : 'Defaults: category base lot · SL $60 · TP $120 · trailing $5/$2'}
           </span>
         </div>
@@ -202,13 +218,13 @@ export default function TradingValuesPanel({ lang }: Props) {
           return (
             <div key={cat} className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-sm font-black text-brand-text">{isAr ? CATEGORY_LABEL[cat].ar : CATEGORY_LABEL[cat].en}</div>
+                <div className="text-xl md:text-[26px] font-black text-brand-text">{isAr ? CATEGORY_LABEL[cat].ar : CATEGORY_LABEL[cat].en}</div>
                 <button
                   type="button"
                   onClick={() => resetCategory(cat)}
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-black text-brand-text/70 transition-all"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-base md:text-[19px] font-black text-brand-text/70 transition-all"
                 >
-                  <RotateCcw size={11} /> {isAr ? 'افتراضي الفئة' : 'Category default'}
+                  <RotateCcw size={16} /> {isAr ? 'افتراضي الفئة' : 'Category default'}
                 </button>
               </div>
 
@@ -217,10 +233,10 @@ export default function TradingValuesPanel({ lang }: Props) {
                   const key = `${cat}.${f.key}`;
                   const display = drafts[key] ?? String(values[f.key]);
                   return (
-                    <div key={f.key} className="grid grid-cols-[1fr_110px_32px] items-center gap-2">
+                    <div key={f.key} className="grid grid-cols-[1fr_150px_46px] items-center gap-3">
                       <div className="min-w-0">
-                        <div className="text-[12px] font-black text-brand-text/90 truncate">{isAr ? f.ar : f.en}</div>
-                        <div className="text-[10px] text-slate-500 truncate">{isAr ? f.hintAr : f.hintEn}</div>
+                        <div className="text-lg md:text-[22px] font-black text-brand-text/90 truncate">{isAr ? f.ar : f.en}</div>
+                        <div className="text-base md:text-[19px] text-slate-500 truncate">{isAr ? f.hintAr : f.hintEn}</div>
                       </div>
                       <input
                         type="number"
@@ -228,18 +244,20 @@ export default function TradingValuesPanel({ lang }: Props) {
                         step={f.step}
                         min="0"
                         dir="ltr"
+                        lang="en"
                         value={display}
                         onChange={(e) => handleInput(cat, f.key, e.target.value)}
                         onBlur={() => clearDraft(cat, f.key)}
-                        className="w-full bg-brand-bg border border-white/15 rounded-xl px-3 py-2 text-sm font-bold text-white text-left focus:outline-none focus:border-amber-500/60"
+                        className="w-full bg-brand-bg border border-white/15 rounded-xl px-3 py-3 text-lg md:text-[22px] font-black text-white text-left focus:outline-none focus:border-amber-500/60"
+                        style={{ fontVariantNumeric: 'tabular-nums lining-nums' }}
                       />
                       <button
                         type="button"
                         onClick={() => resetField(cat, f.key)}
                         title={isAr ? 'إعادة هذه القيمة للافتراضي' : 'Reset this value to default'}
-                        className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-brand-text/60 hover:text-amber-400 flex items-center justify-center transition-all"
+                        className="w-11 h-11 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-brand-text/60 hover:text-amber-400 flex items-center justify-center transition-all"
                       >
-                        <RotateCcw size={13} />
+                        <RotateCcw size={18} />
                       </button>
                     </div>
                   );
@@ -250,7 +268,7 @@ export default function TradingValuesPanel({ lang }: Props) {
         })}
       </div>
 
-      <p className="text-[11px] text-slate-500 leading-relaxed font-semibold">
+      <p className="text-lg md:text-[21px] text-slate-500 leading-relaxed font-semibold">
         {isAr
           ? 'ملاحظة: عند التفعيل تُطبَّق القيم على فتح الصفقات وعلى إدارة الترينلغ للصفقات المفتوحة. تغيير أي قيمة يُزامَن فوراً مع كل أجهزة الموقع والموبايل. عند التعطيل تعود المنصة لقيمها الديناميكية السابقة.'
           : 'Note: when enabled, values apply to new trades and to trailing management of open positions. Any change syncs instantly to every desktop and mobile device. Disabling restores the previous dynamic behaviour.'}
