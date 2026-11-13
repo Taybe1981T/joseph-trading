@@ -76,19 +76,19 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
   const [activeSystem, setActiveSystem] = useState<SettingsSystem | null>(null);
 
   const developer = !!user && isDeveloperEmail(user.email);
-  const SYSTEMS: Array<{ id: SettingsSystem; ar: string; en: string; devOnly?: boolean; clientOnly?: boolean; danger?: boolean }> = [
-    { id: 'plan', ar: 'معلومات الخطة والتحليل', en: 'Plan & Analysis', clientOnly: true },
-    { id: 'thresholds', ar: 'عتبات الثقة والنطاق الذهبي', en: 'Confidence & Golden Window' },
-    { id: 'trailing', ar: 'الوقف المتحرك (Trailing Stop)', en: 'Trailing Stop' },
-    { id: 'primary', ar: 'الشروط الأساسية (أبواب الدخول)', en: 'Primary Conditions (Entry Gates)' },
-    { id: 'retrace', ar: 'فلتر التراجع (شموع الارتداد) — التأكيد الأخير', en: 'Retrace Filter (Pullback Candles) — Final Confirmation' },
-    { id: 'support', ar: 'الشروط الداعمة (تعزيز الإشارة)', en: 'Supporting Conditions (Signal Boost)' },
-    { id: 'toggles', ar: 'مفاتيح التفعيل', en: 'Feature Toggles' },
-    { id: 'volumeGuard', ar: 'حارس الحجم (Volume Guard)', en: 'Volume Guard' },
-    { id: 'trendZones', ar: 'مناطق عمر الاتجاه والارتداد (مطور)', en: 'Trend Age & Pullback Zones (Dev)', devOnly: true },
-    { id: 'tradingValues', ar: 'نظام القيم الثابتة للتداول (مطور)', en: 'Fixed Trading Values (Dev)', devOnly: true },
-    { id: 'security', ar: 'حماية المطور والتحقق الثنائي (مطور)', en: 'Developer Security & 2FA (Dev)', devOnly: true },
-    { id: 'factoryReset', ar: 'إعادة تعيين المصنع', en: 'Factory Reset', danger: true },
+  const SYSTEMS: Array<{ id: SettingsSystem; ar: string; en: string; devOnly?: boolean; clientOnly?: boolean; danger?: boolean; color: string }> = [
+    { id: 'plan', ar: 'معلومات الخطة والتحليل', en: 'Plan & Analysis', clientOnly: true, color: '#3b82f6' },
+    { id: 'thresholds', ar: 'عتبات الثقة والنطاق الذهبي', en: 'Confidence & Golden Window', color: '#8b5cf6' },
+    { id: 'trailing', ar: 'الوقف المتحرك (Trailing Stop)', en: 'Trailing Stop', color: '#10b981' },
+    { id: 'primary', ar: 'الشروط الأساسية (أبواب الدخول)', en: 'Primary Conditions (Entry Gates)', color: '#f59e0b' },
+    { id: 'retrace', ar: 'فلتر التراجع (شموع الارتداد) — التأكيد الأخير', en: 'Retrace Filter (Pullback Candles) — Final Confirmation', color: '#ef4444' },
+    { id: 'support', ar: 'الشروط الداعمة (تعزيز الإشارة)', en: 'Supporting Conditions (Signal Boost)', color: '#06b6d4' },
+    { id: 'toggles', ar: 'مفاتيح التفعيل', en: 'Feature Toggles', color: '#ec4899' },
+    { id: 'volumeGuard', ar: 'حارس الحجم (Volume Guard)', en: 'Volume Guard', color: '#84cc16' },
+    { id: 'trendZones', ar: 'مناطق عمر الاتجاه والارتداد (مطور)', en: 'Trend Age & Pullback Zones (Dev)', devOnly: true, color: '#f97316' },
+    { id: 'tradingValues', ar: 'نظام القيم الثابتة للتداول (مطور)', en: 'Fixed Trading Values (Dev)', devOnly: true, color: '#14b8a6' },
+    { id: 'security', ar: 'حماية المطور والتحقق الثنائي (مطور)', en: 'Developer Security & 2FA (Dev)', devOnly: true, color: '#a855f7' },
+    { id: 'factoryReset', ar: 'إعادة تعيين المصنع', en: 'Factory Reset', danger: true, color: '#dc2626' },
   ];
   const visibleSystems = SYSTEMS.filter((s) => (!s.devOnly || developer) && (!s.clientOnly || planClient));
   const activeSystemInfo = activeSystem ? SYSTEMS.find((s) => s.id === activeSystem) : null;
@@ -403,18 +403,17 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
           <p className="text-base md:text-[20px] text-brand-text/50 font-bold">
             {isAr ? 'اختر النظام الذي تريد تعديله — كل نظام في صفحة مستقلة.' : 'Choose a system to edit — each one opens on its own page.'}
           </p>
-          {visibleSystems.map((s, idx) => (
+          {visibleSystems.map((s) => (
             <button
               key={s.id}
               type="button"
               onClick={() => setActiveSystem(s.id)}
-              className={`w-full flex items-center justify-between gap-3 px-5 py-4 rounded-2xl border transition-all text-right ${
-                s.danger
-                  ? 'bg-red-500/5 border-red-500/20 hover:bg-red-500/10 text-red-300'
-                  : (idx % 2 === 0
-                      ? 'bg-slate-800/50 border-slate-700/50 hover:bg-slate-700/60 text-brand-text'
-                      : 'bg-white/5 border-white/10 hover:bg-white/10 text-brand-text')
-              }`}
+              className={`w-full flex items-center justify-between gap-3 px-5 py-4 rounded-2xl border transition-all text-right ${s.danger ? 'text-red-300' : 'text-brand-text'}`}
+              style={{
+                background: s.danger ? 'rgba(239,68,68,0.06)' : `${s.color}1a`,
+                borderColor: s.danger ? 'rgba(239,68,68,0.3)' : `${s.color}55`,
+                borderLeft: `5px solid ${s.color}`,
+              }}
             >
               <span className="text-xl md:text-[26px] font-black leading-tight">{isAr ? s.ar : s.en}</span>
               <ChevronLeft size={26} className="shrink-0 opacity-50" />

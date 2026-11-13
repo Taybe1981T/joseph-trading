@@ -84,8 +84,8 @@ export function MobileSettings({
     { suffix: 'Metals', ar: 'المعادن', en: 'Metals' },
   ];
 
-  const systems: Array<{ id: MobileSystem; ar: string; en: string; devOnly?: boolean }> = [
-    { id: 'autoTrade', ar: 'التداول التلقائي', en: 'Auto Trade' },
+  const systems: Array<{ id: MobileSystem; ar: string; en: string; devOnly?: boolean; color: string }> = [
+    { id: 'autoTrade', ar: 'التداول التلقائي', en: 'Auto Trade', color: '#3b82f6' },
     { id: 'retrace', ar: 'فلتر التراجع (شموع الارتداد) — التأكيد الأخير', en: 'Retrace Filter (Pullback Candles)' },
     { id: 'sound', ar: 'الصوت والتنبيهات', en: 'Sound & Alerts' },
     { id: 'language', ar: 'اللغة', en: 'Language' },
