@@ -86,11 +86,11 @@ export function MobileSettings({
 
   const systems: Array<{ id: MobileSystem; ar: string; en: string; devOnly?: boolean; color: string }> = [
     { id: 'autoTrade', ar: 'التداول التلقائي', en: 'Auto Trade', color: '#3b82f6' },
-    { id: 'retrace', ar: 'فلتر التراجع (شموع الارتداد) — التأكيد الأخير', en: 'Retrace Filter (Pullback Candles)' },
-    { id: 'sound', ar: 'الصوت والتنبيهات', en: 'Sound & Alerts' },
-    { id: 'language', ar: 'اللغة', en: 'Language' },
-    { id: 'devLogin', ar: 'تسجيل دخول المطور', en: 'Developer Login', devOnly: true },
-    { id: 'tradingValues', ar: 'نظام القيم الثابتة للتداول (مطور)', en: 'Fixed Trading Values (Dev)', devOnly: true },
+    { id: 'retrace', ar: 'فلتر التراجع (شموع الارتداد) — التأكيد الأخير', en: 'Retrace Filter (Pullback Candles)', color: '#ef4444' },
+    { id: 'sound', ar: 'الصوت والتنبيهات', en: 'Sound & Alerts', color: '#10b981' },
+    { id: 'language', ar: 'اللغة', en: 'Language', color: '#8b5cf6' },
+    { id: 'devLogin', ar: 'تسجيل دخول المطور', en: 'Developer Login', devOnly: true, color: '#f59e0b' },
+    { id: 'tradingValues', ar: 'نظام القيم الثابتة للتداول (مطور)', en: 'Fixed Trading Values (Dev)', devOnly: true, color: '#14b8a6' },
   ];
   const visibleSystems = systems.filter((s) => {
     if (s.id === 'devLogin') return !!onDeveloperLogin;
@@ -124,7 +124,7 @@ export function MobileSettings({
                 borderLeft: `4px solid ${idx % 2 === 0 ? '#3b82f6' : '#10b981'}`,
               }}
             >
-              <span style={{ fontSize: 15, fontWeight: 900, color: '#fff' }}>{isAr ? s.ar : s.en}</span>
+              <span style={{ fontSize: 15, fontWeight: 900, color: s.color }}>{isAr ? s.ar : s.en}</span>
               <ChevronLeft size={20} style={{ opacity: 0.5, transform: 'rotate(180deg)', flexShrink: 0 }} />
             </button>
           ))}

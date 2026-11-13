@@ -415,7 +415,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                 borderLeft: `5px solid ${s.color}`,
               }}
             >
-              <span className="text-xl md:text-[26px] font-black leading-tight">{isAr ? s.ar : s.en}</span>
+              <span className="text-xl md:text-[26px] font-black leading-tight" style={{ color: s.danger ? '#f87171' : s.color }}>{isAr ? s.ar : s.en}</span>
               <ChevronLeft size={26} className="shrink-0 opacity-50" />
             </button>
           ))}
