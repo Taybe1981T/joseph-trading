@@ -3,6 +3,16 @@ import { Bell, Volume2, Globe, Shield, LogOut, LogIn, Loader2, RefreshCw, User, 
 import { Language } from '../../lib/i18n';
 import { useMobileMode } from '../../lib/mobileMode';
 import TradingValuesPanel from '../TradingValuesPanel';
+import { StrategySettings } from '../../types';
+import { DEFAULT_STRATEGY_SETTINGS } from '../../constants';
+import { RETRACE_TIMEFRAMES } from '../../services/retraceFilter';
+
+// Western digits only in numeric fields (Arabic-Indic digits → ASCII).
+function toWesternDigits(raw: string): string {
+  return String(raw || '')
+    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
+}
 
 interface MobileSettingsProps {
   autoTradeEnabled: boolean;
@@ -25,7 +35,7 @@ interface MobileSettingsProps {
 
 // Mobile parity with desktop: Settings shows ONLY the system names (one per
 // line). Tapping a name opens that system's own page with its controls.
-type MobileSystem = 'autoTrade' | 'sound' | 'language' | 'devLogin' | 'tradingValues';
+type MobileSystem = 'autoTrade' | 'retrace' | 'sound' | 'language' | 'devLogin' | 'tradingValues';
 
 export function MobileSettings({
   autoTradeEnabled,
@@ -49,8 +59,34 @@ export function MobileSettings({
   const mode = useMobileMode();
   const [activeSystem, setActiveSystem] = useState<MobileSystem | null>(null);
 
+  // Mobile reads/writes the SAME strategy settings store used by the shared
+  // analysis engine, so this filter behaves exactly like the desktop one.
+  const [strategy, setStrategy] = useState<StrategySettings>(() => {
+    try {
+      const raw = localStorage.getItem('strategy_settings');
+      if (raw) return { ...DEFAULT_STRATEGY_SETTINGS, ...JSON.parse(raw) };
+    } catch {}
+    return DEFAULT_STRATEGY_SETTINGS;
+  });
+  const updateStrategy = (key: keyof StrategySettings, value: any) => {
+    setStrategy((prev) => {
+      const next = { ...prev, [key]: value };
+      try { localStorage.setItem('strategy_settings', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  const [retraceDrafts, setRetraceDrafts] = useState<Record<string, string>>({});
+
+  const retraceRows: Array<{ suffix: 'Forex' | 'Crypto' | 'Stocks' | 'Metals'; ar: string; en: string }> = [
+    { suffix: 'Forex', ar: 'الفوركس', en: 'Forex' },
+    { suffix: 'Crypto', ar: 'العملات الرقمية', en: 'Crypto' },
+    { suffix: 'Stocks', ar: 'الأسهم', en: 'Stocks' },
+    { suffix: 'Metals', ar: 'المعادن', en: 'Metals' },
+  ];
+
   const systems: Array<{ id: MobileSystem; ar: string; en: string; devOnly?: boolean }> = [
     { id: 'autoTrade', ar: 'التداول التلقائي', en: 'Auto Trade' },
+    { id: 'retrace', ar: 'فلتر التراجع (شموع الارتداد) — التأكيد الأخير', en: 'Retrace Filter (Pullback Candles)' },
     { id: 'sound', ar: 'الصوت والتنبيهات', en: 'Sound & Alerts' },
     { id: 'language', ar: 'اللغة', en: 'Language' },
     { id: 'devLogin', ar: 'تسجيل دخول المطور', en: 'Developer Login', devOnly: true },
@@ -118,6 +154,91 @@ export function MobileSettings({
                 <button className="mt5-btn mt5-btn-secondary" onClick={() => onAutoTradeToggle(!autoTradeEnabled)}>
                   {autoTradeEnabled ? (isAr ? 'مفعّل' : 'On') : (isAr ? 'معطّل' : 'Off')}
                 </button>
+              </div>
+            )}
+
+            {activeSystem === 'retrace' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
+                  {isAr
+                    ? 'آخر بوابة بعد استيفاء كل الشروط: تعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. تحقّق العدد ← إشارة قوية، وغيابه ← إخفاء الإشارة. الدوجي لا تُحتسب. كل الفئات معطّلة افتراضيًا.'
+                    : 'Final gate after all conditions: counts consecutive candles moving against the trade on the chosen timeframe. Count reached → STRONG; missing → signal hidden. Doji never counted. All categories OFF by default.'}
+                </div>
+
+                {retraceRows.map((row) => {
+                  const enableKey = `retraceFilterEnabled${row.suffix}` as keyof StrategySettings;
+                  const countKey = `retraceCandles${row.suffix}` as keyof StrategySettings;
+                  const tfKey = `retraceTimeframe${row.suffix}` as keyof StrategySettings;
+                  const enabled = (strategy as any)[enableKey] === true;
+                  const count = Number((strategy as any)[countKey] ?? 3);
+                  const tf = String((strategy as any)[tfKey] || '1d');
+                  const draft = retraceDrafts[row.suffix];
+                  return (
+                    <div key={row.suffix} style={{ border: '1px solid #333', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, background: '#0b0b0b' }}>
+                      <button
+                        type="button"
+                        onClick={() => updateStrategy(enableKey, !enabled)}
+                        style={{
+                          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          gap: 10, padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+                          background: enabled ? 'rgba(16,185,129,0.12)' : '#151515',
+                          border: `2px solid ${enabled ? 'rgba(16,185,129,0.5)' : '#2a2a2a'}`,
+                          color: enabled ? '#10b981' : '#bbb', textAlign: 'right',
+                        }}
+                      >
+                        <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <span style={{ fontSize: 15, fontWeight: 900 }}>{isAr ? row.ar : row.en}</span>
+                          <span style={{ fontSize: 11, opacity: 0.75 }}>
+                            {enabled ? (isAr ? 'مفعّل — تأكيد أخير' : 'Enabled — final gate') : (isAr ? 'معطّل (افتراضي)' : 'Disabled (default)')}
+                          </span>
+                        </span>
+                        <span style={{ width: 44, height: 24, borderRadius: 99, background: enabled ? '#10b981' : '#3a3a3a', display: 'flex', alignItems: 'center', padding: 2, flexShrink: 0 }}>
+                          <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', transform: `translateX(${enabled ? 20 : 0}px)`, transition: 'transform .15s' }} />
+                        </span>
+                      </button>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: '#ddd' }}>
+                          {isAr ? 'عدد شموع التراجع' : 'Retrace candles'}
+                        </span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          dir="ltr"
+                          value={draft !== undefined ? draft : String(count)}
+                          onChange={(e) => {
+                            const digits = toWesternDigits(e.target.value).replace(/[^0-9]/g, '').slice(0, 2);
+                            setRetraceDrafts((prev) => ({ ...prev, [row.suffix]: digits }));
+                          }}
+                          onBlur={() => {
+                            const n = parseInt(retraceDrafts[row.suffix] ?? '', 10);
+                            if (Number.isFinite(n)) updateStrategy(countKey, Math.max(1, Math.min(10, n)));
+                            setRetraceDrafts((prev) => {
+                              const next = { ...prev };
+                              delete next[row.suffix];
+                              return next;
+                            });
+                          }}
+                          style={{ width: 64, textAlign: 'center', padding: '8px 10px', borderRadius: 8, border: '1px solid #3a3a3a', background: '#111', color: '#fff', fontWeight: 900, fontSize: 15 }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: '#ddd' }}>{isAr ? 'الفريم' : 'Timeframe'}</span>
+                        <select
+                          value={(RETRACE_TIMEFRAMES as readonly string[]).includes(tf) ? tf : '1d'}
+                          onChange={(e) => updateStrategy(tfKey, e.target.value)}
+                          dir="ltr"
+                          style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid #3a3a3a', background: '#111', color: '#fff', fontWeight: 900, fontSize: 14 }}
+                        >
+                          {RETRACE_TIMEFRAMES.map((t) => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
 

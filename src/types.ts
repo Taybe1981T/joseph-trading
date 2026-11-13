@@ -58,6 +58,12 @@ export interface AnalysisResult {
   volumeQualityThreshold?: number;
   volumeQualityMaxThreshold?: number;
   volumeAbsorbed?: boolean;
+  // ── Retrace (pullback) final-confirmation filter output ──
+  retraceFilterEnabled?: boolean;
+  retraceTimeframe?: string;
+  retraceCandlesRequired?: number;
+  retraceCandlesFound?: number;
+  retraceConfirmed?: boolean;
 }
 
 export interface UserPreference {
@@ -119,6 +125,26 @@ export interface StrategySettings {
   stopAtrMultiplier?: number;          // ATR multiple for the stop-loss (default 3)
   minPullbackAtr?: number;             // pullback-zone depth in ATR (default 0.5)
   pullbackRsiConfirm?: boolean;        // deepen the zone to 1 ATR when RSI is stretched
+  // ── Retrace (pullback) final-confirmation filter ──
+  // After ALL other entry conditions are met, the engine counts the last
+  // consecutive candles that move AGAINST the intended trade direction on a
+  // chosen timeframe (doji candles are ignored, never counted). When the
+  // category is enabled and the required count is found, the signal is
+  // promoted to STRONG; when it is missing, the signal is hidden (neutral).
+  // Each category has its own switch / count / timeframe and all are OFF by
+  // default.
+  retraceFilterEnabledForex?: boolean;
+  retraceFilterEnabledCrypto?: boolean;
+  retraceFilterEnabledStocks?: boolean;
+  retraceFilterEnabledMetals?: boolean;
+  retraceCandlesForex?: number;        // required opposite candles (default 3)
+  retraceCandlesCrypto?: number;
+  retraceCandlesStocks?: number;
+  retraceCandlesMetals?: number;
+  retraceTimeframeForex?: string;      // timeframe used for the retrace count (default '1d')
+  retraceTimeframeCrypto?: string;
+  retraceTimeframeStocks?: string;
+  retraceTimeframeMetals?: string;
   // ── Golden confidence window (surface only the best-timed entries) ──
   goldenRangeEnabled?: boolean;        // when true, only signals inside [goldenConfMin..goldenConfMax] are shown
   goldenConfMin?: number;              // lower edge of the golden window (default 70) — below → neutral

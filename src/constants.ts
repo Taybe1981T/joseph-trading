@@ -48,6 +48,19 @@ export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   stopAtrMultiplier: 3,    // wider, breathable stop (crypto always 3×)
   minPullbackAtr: 0.5,     // entry zone depth in ATR
   pullbackRsiConfirm: true, // deepen the zone to 1 ATR when RSI is stretched
+  // ── Retrace (pullback) final-confirmation filter — all categories OFF ──
+  retraceFilterEnabledForex: false,
+  retraceFilterEnabledCrypto: false,
+  retraceFilterEnabledStocks: false,
+  retraceFilterEnabledMetals: false,
+  retraceCandlesForex: 3,
+  retraceCandlesCrypto: 3,
+  retraceCandlesStocks: 3,
+  retraceCandlesMetals: 3,
+  retraceTimeframeForex: '1d',
+  retraceTimeframeCrypto: '1d',
+  retraceTimeframeStocks: '1d',
+  retraceTimeframeMetals: '1d',
   // ── Golden confidence window (surface only the best-timed entries) ──
   goldenRangeEnabled: true, // only show signals whose confidence is inside the golden window
   goldenConfMin: 70,        // below this → neutral (too weak)

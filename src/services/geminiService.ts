@@ -6,6 +6,13 @@ import { fetchMarketDataDirect } from './apiDirect';
 import { callAIServer } from './aiPool';
 import { getCorrelationGroup } from "./portfolioRiskService";
 import { readClientOwnKeyForEmails, clientEmailsFor, currentUserEmail, isDeveloperKeyAllowed } from '../lib/clientScope';
+import {
+  resolveRetraceConfig,
+  extractRetraceCandles,
+  isLastCandleForming,
+  countRetraceCandles,
+  type RetraceCandle,
+} from './retraceFilter';
 
 // Result cache: same symbol+timeframe+style returns same result for 5 minutes
 const _resultCache = new Map<string, { result: AnalysisResult; ts: number }>();
@@ -1002,6 +1009,10 @@ export async function analyzeMarket(params: {
 }): Promise<AnalysisResult> {
   const { symbol, type, timeframe, tradingStyle, settings = DEFAULT_STRATEGY_SETTINGS, lang = 'en' } = params;
 
+  // Per-category retrace (pullback) final-confirmation configuration.
+  // Resolved early so its candle data can be fetched alongside the rest.
+  const retraceCfg = resolveRetraceConfig(settings, type);
+
   // Check result cache first
   const cacheKey = `${symbol}_${timeframe}_${tradingStyle}_${JSON.stringify(settings)}`;
   const cached = _resultCache.get(cacheKey);
@@ -1092,6 +1103,33 @@ export async function analyzeMarket(params: {
         fetchMarketDataDirect(symbol, '1M').catch((e) => { console.warn(`[Engine] ${symbol} monthly fetch fail:`, e.message); return { chart: { result: [{ indicators: { quote: [{}] } }] } }; }),
       ]);
       candleMatchData = { daily: dailyRaw, weekly: weeklyRaw, monthly: monthlyRaw };
+    }
+
+    // ── Retrace filter data (only when the category is enabled) ──
+    // Reuses the daily/weekly/monthly fetch above when the chosen timeframe
+    // matches; otherwise fetches that timeframe once. Default = disabled.
+    let retraceCandles: RetraceCandle[] | null = null;
+    if (retraceCfg.enabled) {
+      try {
+        const tfKey = retraceCfg.timeframe === '1d' ? 'daily'
+          : retraceCfg.timeframe === '1w' ? 'weekly'
+          : retraceCfg.timeframe === '1M' ? 'monthly'
+          : null;
+        let retraceRaw = tfKey && candleMatchData
+          ? candleMatchData[tfKey as 'daily' | 'weekly' | 'monthly']
+          : null;
+        if (!retraceRaw) {
+          retraceRaw = await fetchMarketDataDirect(symbol, retraceCfg.timeframe)
+            .catch((e) => {
+              console.warn(`[Engine] ${symbol} retrace fetch fail (${retraceCfg.timeframe}):`, e.message);
+              return { chart: { result: [{ indicators: { quote: [{}] } }] } };
+            });
+        }
+        retraceCandles = extractRetraceCandles(retraceRaw);
+        console.log(`[Engine] ${symbol} retrace data (${retraceCfg.timeframe}): ${retraceCandles?.length ?? 0} candles`);
+      } catch (e: any) {
+        console.warn(`[Engine] ${symbol} retrace data failed:`, e?.message);
+      }
     }
 
     console.log(`[Engine] ${symbol} data fetched in ${Date.now() - fetchT0}ms`);
@@ -2241,6 +2279,51 @@ Return ONLY valid JSON:
       }
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // FINAL GATE — Retrace (pullback) confirmation filter (per category)
+    // ═══════════════════════════════════════════════════════════════════
+    // Runs LAST, after every other entry condition (entry gates, candle
+    // match, volume guard, golden window). It only engages for a live
+    // BUY/SELL signal and only when its category switch is ON (default OFF).
+    //   • retrace found  → promote to STRONG (final confirmation)
+    //   • retrace absent → hide the signal (neutral) — blocking gate
+    // Doji candles are never counted (and do not break the run).
+    var retraceFound = 0;
+    var retraceConfirmed = false;
+    const isTradeSignalForRetrace = finalSignal === SignalType.BUY || finalSignal === SignalType.STRONG_BUY ||
+                                    finalSignal === SignalType.SELL || finalSignal === SignalType.STRONG_SELL;
+    if (retraceCfg.enabled && isTradeSignalForRetrace) {
+      const retraceSide = (finalSignal === SignalType.BUY || finalSignal === SignalType.STRONG_BUY) ? 'buy' : 'sell';
+      const skipForming = isLastCandleForming(retraceCandles, retraceCfg.timeframe);
+      const count = countRetraceCandles(retraceCandles, retraceSide, retraceCfg.candles, { skipLast: skipForming });
+      retraceFound = count.found;
+      retraceConfirmed = count.confirmed;
+      const tfLabel = retraceCfg.timeframe;
+      const candleWord = retraceSide === 'buy' ? 'هابطة' : 'صاعدة';
+      const candleWordEn = retraceSide === 'buy' ? 'bearish' : 'bullish';
+
+      if (retraceConfirmed) {
+        detailedReasons.push({
+          check: 'Retrace Filter',
+          value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji ignored: ${count.dojiSkipped})`,
+          status: 'positive',
+          impact: `FINAL CONFIRMATION: ${count.required} retrace candles found on ${tfLabel} → promoted to STRONG`,
+        });
+        finalSignal = retraceSide === 'buy' ? SignalType.STRONG_BUY : SignalType.STRONG_SELL;
+      } else {
+        detailedReasons.push({
+          check: 'Retrace Filter',
+          value: retraceCandles
+            ? `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji ignored: ${count.dojiSkipped})`
+            : `no candle data on ${tfLabel}`,
+          status: 'negative',
+          impact: `BLOCKED: needs ${count.required} ${candleWordEn} (${candleWord}) consecutive candles on ${tfLabel} before entry — signal hidden`,
+        });
+        finalSignal = SignalType.NEUTRAL;
+        finalConfidence = Math.min(finalConfidence, 30);
+      }
+    }
+
     // ΓöÇΓöÇ Generate STABLE summary from metrics (not AI text) ΓöÇΓöÇ
     const trendText = metrics?.direction === 'uptrend' ? 'صاعد' : metrics?.direction === 'downtrend' ? 'هابط' : 'عرضي';
     const zoneText = totalAge < infantAgeThreshold ? 'طفولي' : totalAge < matureAgeThreshold ? 'شاب' : totalAge <= oldAgeThreshold ? 'نضج' : 'كهل';
@@ -2290,6 +2373,11 @@ Return ONLY valid JSON:
       volumeQualityThreshold: volThreshold,
       volumeQualityMaxThreshold: volMaxThreshold,
       volumeAbsorbed: volumeQuality.absorbed,
+      retraceFilterEnabled: retraceCfg.enabled,
+      retraceTimeframe: retraceCfg.timeframe,
+      retraceCandlesRequired: retraceCfg.enabled ? retraceCfg.candles : undefined,
+      retraceCandlesFound: retraceCfg.enabled ? retraceFound : undefined,
+      retraceConfirmed: retraceCfg.enabled ? retraceConfirmed : undefined,
     };
 
     // Cache the result

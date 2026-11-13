@@ -7,6 +7,7 @@ import { User } from 'firebase/auth';
 import { Language } from '../lib/i18n';
 import { isDeveloperEmail, DEVELOPER_EMAILS } from '../lib/clientIds';
 import TradingValuesPanel from './TradingValuesPanel';
+import { RETRACE_TIMEFRAMES } from '../services/retraceFilter';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -69,7 +70,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
   // The settings page shows ONLY the names of the systems (one per line).
   // Tapping a name opens that system's dedicated page. `null` = index view.
   type SettingsSystem =
-    | 'plan' | 'thresholds' | 'trailing' | 'primary' | 'support'
+    | 'plan' | 'thresholds' | 'trailing' | 'primary' | 'retrace' | 'support'
     | 'toggles' | 'volumeGuard' | 'trendZones' | 'tradingValues'
     | 'security' | 'factoryReset';
   const [activeSystem, setActiveSystem] = useState<SettingsSystem | null>(null);
@@ -80,6 +81,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
     { id: 'thresholds', ar: 'عتبات الثقة والنطاق الذهبي', en: 'Confidence & Golden Window' },
     { id: 'trailing', ar: 'الوقف المتحرك (Trailing Stop)', en: 'Trailing Stop' },
     { id: 'primary', ar: 'الشروط الأساسية (أبواب الدخول)', en: 'Primary Conditions (Entry Gates)' },
+    { id: 'retrace', ar: 'فلتر التراجع (شموع الارتداد) — التأكيد الأخير', en: 'Retrace Filter (Pullback Candles) — Final Confirmation' },
     { id: 'support', ar: 'الشروط الداعمة (تعزيز الإشارة)', en: 'Supporting Conditions (Signal Boost)' },
     { id: 'toggles', ar: 'مفاتيح التفعيل', en: 'Feature Toggles' },
     { id: 'volumeGuard', ar: 'حارس الحجم (Volume Guard)', en: 'Volume Guard' },
@@ -90,6 +92,14 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
   ];
   const visibleSystems = SYSTEMS.filter((s) => (!s.devOnly || developer) && (!s.clientOnly || planClient));
   const activeSystemInfo = activeSystem ? SYSTEMS.find((s) => s.id === activeSystem) : null;
+
+  // Per-category rows for the Retrace Filter system page.
+  const RETRACE_ROWS: Array<{ suffix: 'Forex' | 'Crypto' | 'Stocks' | 'Metals'; ar: string; en: string }> = [
+    { suffix: 'Forex', ar: 'الفوركس', en: 'Forex' },
+    { suffix: 'Crypto', ar: 'العملات الرقمية', en: 'Crypto' },
+    { suffix: 'Stocks', ar: 'الأسهم', en: 'Stocks' },
+    { suffix: 'Metals', ar: 'المعادن', en: 'Metals' },
+  ];
 
   // Stable version info
   const [stableVersion, setStableVersion] = useState<{ version: string; date: string; commit: string } | null>(null);
@@ -531,6 +541,96 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
           <NumberInput label={isAr ? '③ Trend Age — عمر الاتجاه' : '③ Trend Age'} value={settings.primaryAgeWeight} onChange={(v) => handleChange('primaryAgeWeight', v)} color="text-[#F59E0B]" desc={isAr ? 'ناضج (25-50) = كامل / رضيع أو قديم = تخفيف' : 'Mature (25-50)=full / Infant or Old=reduced'} />
           <NumberInput label={isAr ? '④ Pre-Pullback Age — عمر الاتجاه قبل السحب' : '④ Pre-Pullback Age'} value={settings.primaryPrePullbackAgeWeight} onChange={(v) => handleChange('primaryPrePullbackAgeWeight', v)} color="text-[#F59E0B]" desc={isAr ? '15-50 شمعة = مسموح / أقل أو أكثر = محايد' : '15-50 candles=allowed / less or more=neutral'} />
           <NumberInput label={isAr ? '⑤ News — أخبار اقتصادية وسياسية' : '⑤ News Sentiment'} value={settings.primaryNewsWeight} onChange={(v) => handleChange('primaryNewsWeight', v)} color="text-[#F59E0B]" desc={isAr ? 'أخبار سلبية = حظر / لا أخبار = مسموح' : 'Negative news=block / No news=allowed'} />
+        </div>
+      </div>
+      )}
+
+      {/* System: Retrace (Pullback) Final-Confirmation Filter */}
+      {activeSystem === 'retrace' && (
+      <div className="space-y-4">
+        <h3 className="text-xl md:text-[26px] font-black text-brand-text/70 uppercase tracking-widest flex items-center gap-3 leading-tight">
+          <span className="text-[#F59E0B] text-2xl">◆</span> {isAr ? 'فلتر التراجع (شموع الارتداد)' : 'Retrace Filter (Pullback Candles)'}
+        </h3>
+        <div className="bg-white/5 border border-white/5 rounded-2xl p-5 md:p-6 space-y-4">
+          <p className="text-sm md:text-[17px] text-brand-text/55 leading-relaxed">
+            {isAr
+              ? 'يعمل كآخر بوابة بعد استيفاء كل الشروط: يعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. عند تحقّق العدد → إشارة قوية، وعند غيابه → تُخفى الإشارة. شموع الدوجي لا تُحتسب ولا تقطع التسلسل. كل الفئات معطّلة افتراضيًا.'
+              : 'Runs as the very last gate after every other condition: it counts consecutive candles moving AGAINST the trade on the chosen timeframe. Count reached → STRONG signal; missing → signal hidden. Doji candles are never counted and never break the run. All categories are OFF by default.'}
+          </p>
+          <div className="bg-black/30 rounded-xl p-3 text-xs md:text-sm text-amber-300/80 leading-relaxed">
+            {isAr
+              ? 'مثال شراء: 3 شموع هابطة متتالية (ويمكن أن تتخللها دوجي) ← تأكيد قوي. مثال بيع: 3 شموع صاعدة متتالية ← تأكيد قوي.'
+              : 'Buy example: 3 consecutive bearish candles (doji may sit between them) → strong confirmation. Sell example: 3 consecutive bullish candles → strong confirmation.'}
+          </div>
+
+          {RETRACE_ROWS.map((row) => {
+            const enableKey = `retraceFilterEnabled${row.suffix}` as keyof StrategySettings;
+            const countKey = `retraceCandles${row.suffix}` as keyof StrategySettings;
+            const tfKey = `retraceTimeframe${row.suffix}` as keyof StrategySettings;
+            const enabled = (settings as any)[enableKey] === true;
+            const count = Number((settings as any)[countKey] ?? 3);
+            const tf = String((settings as any)[tfKey] || '1d');
+            return (
+              <div key={row.suffix} className="rounded-2xl border border-white/10 bg-black/20 p-4 space-y-3">
+                <button
+                  type="button"
+                  onClick={() => handleChange(enableKey, !enabled)}
+                  className={`w-full flex items-center justify-between p-3 rounded-xl border-2 transition-all text-right gap-4 ${
+                    enabled
+                      ? 'bg-emerald-400/10 border-emerald-400/40 text-emerald-300'
+                      : 'bg-white/5 border-white/5 text-brand-muted'
+                  }`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-lg md:text-xl font-black leading-tight">
+                      {isAr ? row.ar : row.en}
+                    </div>
+                    <div className="text-xs md:text-sm opacity-70 mt-1">
+                      {enabled
+                        ? (isAr ? 'مفعّل — بوابة تأكيد أخيرة' : 'Enabled — final confirmation gate')
+                        : (isAr ? 'معطّل (افتراضي)' : 'Disabled (default)')}
+                    </div>
+                  </div>
+                  <div className={`w-14 h-8 rounded-full transition-colors flex items-center px-1 shrink-0 ${
+                    enabled ? 'bg-emerald-400' : 'bg-white/20'
+                  }`}>
+                    <div className={`w-6 h-6 bg-white rounded-full transition-transform shadow ${
+                      enabled ? 'translate-x-6' : 'translate-x-0'
+                    }`} />
+                  </div>
+                </button>
+
+                <NumberInput
+                  label={isAr ? 'عدد شموع التراجع المطلوبة' : 'Required Retrace Candles'}
+                  value={Number.isFinite(count) && count > 0 ? count : 3}
+                  onChange={(v) => handleChange(countKey, Math.max(1, Math.min(10, Math.round(v))))}
+                  min={1}
+                  max={10}
+                  suffix=""
+                  color="text-amber-300"
+                  desc={isAr
+                    ? 'شموع معاكسة لاتجاه الصفقة قبل الدخول (الدوجي لا تُحتسب ولا تقطع التسلسل)'
+                    : 'Candles opposite to the trade before entry (doji never counted, never breaks the run)'}
+                />
+
+                <div className="flex items-center justify-between gap-3 py-1">
+                  <span className="text-sm md:text-base font-bold text-brand-text/70">
+                    {isAr ? 'الفريم المستخدم' : 'Timeframe'}
+                  </span>
+                  <select
+                    value={RETRACE_TIMEFRAMES.includes(tf as any) ? tf : '1d'}
+                    onChange={(e) => handleChange(tfKey, e.target.value)}
+                    className="bg-brand-bg border border-white/15 rounded-xl px-3 py-2 text-sm md:text-base font-black text-brand-text outline-none"
+                    dir="ltr"
+                  >
+                    {RETRACE_TIMEFRAMES.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
       )}
