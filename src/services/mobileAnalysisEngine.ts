@@ -14,6 +14,18 @@ export interface MobileProgress {
   current: string; total: number; index: number; failed: number; exchange?: string; category?: string;
 }
 
+/** Scoped per-account signal storage key (mobile parity with desktop scoping). */
+export function mobileSignalsStorageKey(): string {
+  try {
+    let email = '';
+    try { const u = JSON.parse(localStorage.getItem('finalyze_user') || '{}'); email = String(u?.email || '').toLowerCase().trim(); } catch {}
+    if (!email) { try { email = String(localStorage.getItem('finalyze_current_user_email') || '').toLowerCase().trim(); } catch {} }
+    const e = email || 'guest';
+    const safe = String(e).replace(/[^a-z0-9@._-]/g, '_');
+    return `top_signals_persistent__${safe}`;
+  } catch { return 'top_signals_persistent__guest'; }
+}
+
 export function readMobileAuto(): AutoAnalysisSettings {
   try {
     const raw = localStorage.getItem('auto_settings');
@@ -167,12 +179,13 @@ export function mergeMobileTopSignals(all: AnalysisResult[], showAll: boolean): 
     return sig !== 'neutral' && sig !== 'no_entry' && !s.isSideways;
   });
   try {
-    const raw = localStorage.getItem('top_signals_persistent');
+    const key = mobileSignalsStorageKey();
+    const raw = localStorage.getItem(key);
     const prev: any[] = raw ? JSON.parse(raw) : [];
     const seen = new Set(prev.map((p: any) => `${p.symbol}_${p.timeframe}_${p.signal}`));
     const fresh = filtered.filter((s) => !seen.has(`${s.symbol}_${(s as any).timeframe || '1d'}_${s.signal}`));
     if (fresh.length > 0) {
-      localStorage.setItem('top_signals_persistent', JSON.stringify([...fresh, ...prev].slice(0, 100)));
+      localStorage.setItem(key, JSON.stringify([...fresh, ...prev].slice(0, 100)));
       return fresh.length;
     }
   } catch {}

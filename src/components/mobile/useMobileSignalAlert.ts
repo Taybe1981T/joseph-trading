@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { playChampagnePop } from '../../lib/tradeSounds';
 import { initAudio } from '../../lib/audioEngine';
+import { mobileSignalsStorageKey } from '../../services/mobileAnalysisEngine';
 
 export function useMobileSignalAlert(onFresh: (count: number) => void) {
   const prevRef = useRef<Set<string>>(new Set());
@@ -8,7 +9,7 @@ export function useMobileSignalAlert(onFresh: (count: number) => void) {
   useEffect(() => {
     const snapshot = () => {
       try {
-        const raw = localStorage.getItem('top_signals_persistent');
+        const raw = localStorage.getItem(mobileSignalsStorageKey());
         const arr = raw ? JSON.parse(raw) : [];
         const keys = new Set<string>((Array.isArray(arr) ? arr : []).map((s: any) => `${s.symbol}_${s.timeframe || '1d'}_${s.signal}`));
         if (firstRef.current) {

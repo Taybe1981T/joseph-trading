@@ -1587,6 +1587,28 @@ const isDeveloperSession = () => {
     } catch (e) { console.warn('[updateTopSignals] Error:', e); }
   };
 
+  // Delete a signal from EVERY scoped account signal store (developer / client
+  // / guest) so a developer deletion also reaches the free-account view.
+  const purgeSignalAcrossScopedKeys = (sym?: string, all?: boolean) => {
+    try {
+      const keys: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('top_signals_persistent__')) keys.push(k);
+      }
+      for (const k of keys) {
+        const raw = localStorage.getItem(k);
+        if (!raw) continue;
+        let arr: any[] = [];
+        try { arr = JSON.parse(raw); } catch { continue; }
+        let next: any[] = Array.isArray(arr) ? arr : [];
+        const before = JSON.stringify(next);
+        if (all) next = []; else next = next.filter((s: any) => String(s.symbol) !== sym);
+        if (JSON.stringify(next) !== before) { try { localStorage.setItem(k, JSON.stringify(next)); } catch {} }
+      }
+    } catch {}
+  };
+
   const removeSignal = async (symbol: string) => {
     const updated = signalsRef.current.filter(s => s.symbol !== symbol);
     setTopSignals(updated);
@@ -1598,6 +1620,7 @@ const isDeveloperSession = () => {
           developerEmail: user?.email || '',
         }));
       } catch (e) { console.warn('[removeSignal] Firestore sync failed:', e); }
+      purgeSignalAcrossScopedKeys(symbol);
     }
   };
 
@@ -1616,6 +1639,7 @@ const isDeveloperSession = () => {
       } catch (e) {
         console.warn('Failed to clear Firestore shared_results:', e);
       }
+      purgeSignalAcrossScopedKeys(undefined, true);
     }
   };
 

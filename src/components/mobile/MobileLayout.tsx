@@ -28,7 +28,7 @@ import {
 } from '../../lib/mobileMode';
 import { fetchUserGrants, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from '../../services/paymentRequests';
 import { MobileAnalysis } from './MobileAnalysis';
-import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar, getMobileRadarProgress } from '../../services/mobileAnalysisEngine';
+import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar, getMobileRadarProgress, mobileSignalsStorageKey } from '../../services/mobileAnalysisEngine';
 import { detectMobileType } from '../../services/mobileAnalysisEngine';
 import { flagManualRadarStart, takeRadarStartNow, isFreshRadarSession, isRadarArmed } from '../../services/radarSession';
 import { MobileManualSheet } from './MobileManualSheet';
@@ -610,7 +610,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       // reached the home feed (and therefore neither did the analysis reasons).
       if (isDev || isPlanClient) {
         try {
-          const raw = localStorage.getItem('top_signals_persistent');
+          const raw = localStorage.getItem(mobileSignalsStorageKey());
           const auto = raw ? JSON.parse(raw) : [];
           if (Array.isArray(auto)) {
             merged.push(...auto.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).map((s: any) => ({ ...s, source: s.source || 'auto' })));
@@ -1036,10 +1036,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
 
   const removeSignal = (sym: string) => {
     try {
-      const raw = localStorage.getItem('top_signals_persistent');
+      const raw = localStorage.getItem(mobileSignalsStorageKey());
       const arr = raw ? JSON.parse(raw) : [];
       const next = (Array.isArray(arr) ? arr : []).filter((s: any) => String(s.symbol) !== sym);
-      localStorage.setItem('top_signals_persistent', JSON.stringify(next));
+      localStorage.setItem(mobileSignalsStorageKey(), JSON.stringify(next));
     } catch {}
     try {
       const raw = localStorage.getItem('manual_results');

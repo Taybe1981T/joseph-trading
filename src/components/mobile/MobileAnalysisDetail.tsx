@@ -3,6 +3,7 @@ import { User, Shield, Check, X, AlertTriangle, Clock, BarChart3 } from 'lucide-
 import { AnalysisResult } from '../../types';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
+import { mobileSignalsStorageKey } from '../../services/mobileAnalysisEngine';
 
 interface Props {
   symbol: string;
@@ -16,7 +17,7 @@ export function MobileAnalysisDetail({ symbol, lang, onClose }: Props) {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem('top_signals_persistent');
+      const raw = localStorage.getItem(mobileSignalsStorageKey());
       if (raw) {
         const all: any[] = JSON.parse(raw);
         const s = all.find((r: any) => r.symbol === symbol);

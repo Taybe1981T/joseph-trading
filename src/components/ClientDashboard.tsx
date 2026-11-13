@@ -224,7 +224,7 @@ export default function ClientDashboard({ results, lang, hasActivePlan = false, 
           {isAr ? 'أفضل فرص التداول' : 'Top Trading Opportunities'}
           <span className="text-[10px] text-white/40 font-mono">({allFiltered.length})</span>
         </span>
-        {onClearAll && (
+        {onClearAll && hasActivePlan && (
           <button 
             onClick={onClearAll}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-xl text-red-400 hover:text-red-300 text-[11px] font-black uppercase tracking-wider transition-all active:scale-95"
@@ -331,7 +331,7 @@ function ClientSignalCard({ res, isAr, lang, selectedSymbol, onSelect, onDetail,
       )}
 
       {/* Remove button (X) */}
-      {onRemove && (
+      {onRemove && hasActivePlan && (
         <button
           onClick={(e) => { e.stopPropagation(); onRemove(res.symbol); }}
           className="absolute top-1 left-1 p-1 hover:bg-red-500/20 rounded-md text-white/30 hover:text-red-400 transition-colors z-20"
@@ -399,7 +399,7 @@ function ClientSignalCard({ res, isAr, lang, selectedSymbol, onSelect, onDetail,
             <span className="bg-black/20 px-1.5 py-0.5 rounded-full text-[9px] md:text-[10px]">{res.detailedReasons.length}</span>
           </button>
         )}
-        {onTrade && (
+        {onTrade && hasActivePlan && (
           <button onClick={(e) => { e.stopPropagation(); onTrade(res.symbol); }} className="flex-1 md:flex-none md:w-full py-1.5 md:py-2 bg-[#F59E0B]/20 hover:bg-[#F59E0B]/40 transition-all text-[#F59E0B] text-[10px] md:text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5 rounded-md md:rounded-none border-t-0 md:border-t md:border-[#F59E0B]/30" title={isAr ? `تداول ${res.symbol}` : `Trade ${res.symbol}`}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 17l6-6 4 4 8-8" />
