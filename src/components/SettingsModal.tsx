@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Settings2, Activity, LayoutTemplate, Layers, ShieldCheck, Mail, MessageSquare, CheckCircle, RotateCcw, AlertTriangle, Loader2, Lock, Trash2 } from 'lucide-react';
+import { X, Settings2, Activity, LayoutTemplate, Layers, ShieldCheck, Mail, MessageSquare, CheckCircle, RotateCcw, AlertTriangle, Loader2, Lock, Trash2, ChevronLeft } from 'lucide-react';
 import { StrategySettings } from '../types';
 import { DEFAULT_STRATEGY_SETTINGS } from '../constants';
 import { User } from 'firebase/auth';
@@ -64,6 +64,32 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
   const [otpSuccess, setOtpSuccess] = useState('');
   const [notification, setNotification] = useState<{ type: 'sms' | 'email'; title: string; body: string } | null>(null);
   const [saved, setSaved] = useState(false);
+
+  // ── Settings systems index ──
+  // The settings page shows ONLY the names of the systems (one per line).
+  // Tapping a name opens that system's dedicated page. `null` = index view.
+  type SettingsSystem =
+    | 'plan' | 'thresholds' | 'trailing' | 'primary' | 'support'
+    | 'toggles' | 'volumeGuard' | 'trendZones' | 'tradingValues'
+    | 'security' | 'factoryReset';
+  const [activeSystem, setActiveSystem] = useState<SettingsSystem | null>(null);
+
+  const developer = !!user && isDeveloperEmail(user.email);
+  const SYSTEMS: Array<{ id: SettingsSystem; ar: string; en: string; devOnly?: boolean; clientOnly?: boolean; danger?: boolean }> = [
+    { id: 'plan', ar: 'معلومات الخطة والتحليل', en: 'Plan & Analysis', clientOnly: true },
+    { id: 'thresholds', ar: 'عتبات الثقة والنطاق الذهبي', en: 'Confidence & Golden Window' },
+    { id: 'trailing', ar: 'الوقف المتحرك (Trailing Stop)', en: 'Trailing Stop' },
+    { id: 'primary', ar: 'الشروط الأساسية (أبواب الدخول)', en: 'Primary Conditions (Entry Gates)' },
+    { id: 'support', ar: 'الشروط الداعمة (تعزيز الإشارة)', en: 'Supporting Conditions (Signal Boost)' },
+    { id: 'toggles', ar: 'مفاتيح التفعيل', en: 'Feature Toggles' },
+    { id: 'volumeGuard', ar: 'حارس الحجم (Volume Guard)', en: 'Volume Guard' },
+    { id: 'trendZones', ar: 'مناطق عمر الاتجاه والارتداد (مطور)', en: 'Trend Age & Pullback Zones (Dev)', devOnly: true },
+    { id: 'tradingValues', ar: 'نظام القيم الثابتة للتداول (مطور)', en: 'Fixed Trading Values (Dev)', devOnly: true },
+    { id: 'security', ar: 'حماية المطور والتحقق الثنائي (مطور)', en: 'Developer Security & 2FA (Dev)', devOnly: true },
+    { id: 'factoryReset', ar: 'إعادة تعيين المصنع', en: 'Factory Reset', danger: true },
+  ];
+  const visibleSystems = SYSTEMS.filter((s) => (!s.devOnly || developer) && (!s.clientOnly || planClient));
+  const activeSystemInfo = activeSystem ? SYSTEMS.find((s) => s.id === activeSystem) : null;
 
   // Stable version info
   const [stableVersion, setStableVersion] = useState<{ version: string; date: string; commit: string } | null>(null);
@@ -308,8 +334,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
           <Settings2 size={42} />
         </div>
         <div>
-          <h2 className="text-3xl md:text-[38px] font-black text-brand-text leading-tight">{isAr ? 'إعدادات التحليل الذكي' : 'Smart Analysis Settings'}</h2>
-          <p className="text-lg md:text-[22px] text-brand-text/50 leading-snug mt-1">{isAr ? 'قم بضبط معايير الذكاء الاصطناعي بدقة' : 'Fine-tune AI analysis parameters precisely'}</p>
+          <h2 className="text-3xl md:text-[38px] font-black text-brand-text leading-tight">{isAr ? 'الإعدادات' : 'Settings'}</h2>
+          <p className="text-lg md:text-[22px] text-brand-text/50 leading-snug mt-1">{activeSystemInfo ? (isAr ? activeSystemInfo.ar : activeSystemInfo.en) : (isAr ? 'اختر نظاماً لعرضه وتعديله' : 'Pick a system to view and edit')}</p>
         </div>
       </div>
       <button onClick={onClose} className="p-3 text-brand-text/50 hover:text-red-500 hover:bg-white/5 rounded-xl transition-colors">
@@ -360,7 +386,50 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
   const modalBody = (
     <div className="p-6 overflow-y-auto space-y-6 flex-1 custom-scrollbar" dir="rtl">
       
-      {planClient && (
+      {/* ── Systems index: names only, one per line ──
+          Nothing is expanded here; tapping a row opens that system alone. */}
+      {activeSystem === null && (
+        <div className="space-y-3">
+          <p className="text-base md:text-[20px] text-brand-text/50 font-bold">
+            {isAr ? 'اختر النظام الذي تريد تعديله — كل نظام في صفحة مستقلة.' : 'Choose a system to edit — each one opens on its own page.'}
+          </p>
+          {visibleSystems.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setActiveSystem(s.id)}
+              className={`w-full flex items-center justify-between gap-3 px-5 py-4 rounded-2xl border transition-all text-right ${
+                s.danger
+                  ? 'bg-red-500/5 border-red-500/20 hover:bg-red-500/10 text-red-300'
+                  : 'bg-white/5 border-white/10 hover:bg-white/10 text-brand-text'
+              }`}
+            >
+              <span className="text-xl md:text-[26px] font-black leading-tight">{isAr ? s.ar : s.en}</span>
+              <ChevronLeft size={26} className="shrink-0 opacity-50" />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Dedicated system page: back button + system name */}
+      {activeSystem !== null && activeSystemInfo && (
+        <div className="flex items-center gap-3 pb-3 border-b border-white/10">
+          <button
+            type="button"
+            onClick={() => setActiveSystem(null)}
+            className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-brand-text font-black text-lg md:text-[22px] shrink-0"
+          >
+            <ChevronLeft size={24} className="rotate-180" />
+            {isAr ? 'رجوع' : 'Back'}
+          </button>
+          <div className="text-xl md:text-[26px] font-black text-brand-text truncate">
+            {isAr ? activeSystemInfo.ar : activeSystemInfo.en}
+          </div>
+        </div>
+      )}
+      
+      {/* System: Plan & analysis info */}
+      {activeSystem === 'plan' && planClient && (
         <div className="space-y-4">
           <h3 className="text-xl md:text-[26px] font-black text-brand-text/70 uppercase tracking-widest flex items-center gap-3 leading-tight">
             <span className="text-[#F59E0B] text-2xl">◆</span> {isAr ? 'ANALYSIS' : 'Analysis'}
@@ -380,7 +449,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
         </div>
       )}
 
-      {/* Section 1: Confidence Thresholds */}
+      {/* System: Confidence Thresholds */}
+      {activeSystem === 'thresholds' && (
       <div className="space-y-4">
         <h3 className="text-xl md:text-[26px] font-black text-brand-text/70 uppercase tracking-widest flex items-center gap-3 leading-tight">
           <span className="text-[#F59E0B] text-2xl">◆</span> {isAr ? 'عتبات الثقة' : 'Confidence Thresholds'}
@@ -411,7 +481,17 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
           </button>
           <NumberInput label={isAr ? 'أدنى النطاق الذهبي' : 'Golden Min (%)'} value={settings.goldenConfMin ?? 70} onChange={(v) => handleChange('goldenConfMin', v)} color="text-amber-300" desc={isAr ? 'أقل من هذه النسبة → محايد (إشارة ضعيفة)' : 'Below this → neutral (weak signal)'} />
           <NumberInput label={isAr ? 'أقصى النطاق الذهبي' : 'Golden Max (%)'} value={settings.goldenConfMax ?? 85} onChange={(v) => handleChange('goldenConfMax', v)} color="text-amber-300" desc={isAr ? 'أعلى من هذه النسبة → محايد (دخول متأخر/مطاردة)' : 'Above this → neutral (late entry / chasing)'} />
-          <div className="h-px bg-white/10 my-3" />
+        </div>
+      </div>
+      )}
+
+      {/* System: Trailing Stop */}
+      {activeSystem === 'trailing' && (
+      <div className="space-y-4">
+        <h3 className="text-xl md:text-[26px] font-black text-brand-text/70 uppercase tracking-widest flex items-center gap-3 leading-tight">
+          <span className="text-[#F59E0B] text-2xl">◆</span> {isAr ? 'الوقف المتحرك (Trailing Stop)' : 'Trailing Stop'}
+        </h3>
+        <div className="bg-white/5 border border-white/5 rounded-2xl p-5 md:p-6">
           <button onClick={() => handleChange('trailingEnabled', settings.trailingEnabled === false)}
             className={`w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all text-right gap-4 ${
               settings.trailingEnabled !== false
@@ -436,8 +516,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
           <NumberInput label={isAr ? 'زيادة الخطوة لكل 0.01 لوت ($)' : 'Extra Step per +0.01 lot ($)'} value={settings.trailingStepLotStep ?? 1} onChange={(v) => handleChange('trailingStepLotStep', v)} color="text-emerald-300" suffix="$" min={0} max={10} desc={isAr ? 'يُضاف للخطوة مع كل وحدة لوت إضافية (افتراضي 1$)' : 'Added to the step per extra lot unit (default $1)'} />
         </div>
       </div>
+      )}
 
-      {/* Section 2: Primary Conditions (Entry Gates) */}
+      {/* System: Primary Conditions (Entry Gates) */}
+      {activeSystem === 'primary' && (
       <div className="space-y-4">
         <h3 className="text-xl md:text-[26px] font-black text-brand-text/70 uppercase tracking-widest flex items-center gap-3 leading-tight">
           <span className="text-[#F59E0B] text-2xl">◆</span> {isAr ? 'الشروط الأساسية (أبواب الدخول)' : 'Primary Conditions (Entry Gates)'}
@@ -451,8 +533,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
           <NumberInput label={isAr ? '⑤ News — أخبار اقتصادية وسياسية' : '⑤ News Sentiment'} value={settings.primaryNewsWeight} onChange={(v) => handleChange('primaryNewsWeight', v)} color="text-[#F59E0B]" desc={isAr ? 'أخبار سلبية = حظر / لا أخبار = مسموح' : 'Negative news=block / No news=allowed'} />
         </div>
       </div>
+      )}
 
-      {/* Section 3: Supporting Conditions (Signal Boost) */}
+      {/* System: Supporting Conditions (Signal Boost) */}
+      {activeSystem === 'support' && (
       <div className="space-y-4">
         <h3 className="text-xl md:text-[26px] font-black text-brand-text/70 uppercase tracking-widest flex items-center gap-3 leading-tight">
           <span className="text-[#F59E0B] text-2xl">◆</span> {isAr ? 'الشروط الداعمة (تعزيز الإشارة)' : 'Supporting Conditions (Signal Boost)'}
@@ -467,8 +551,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
           <NumberInput label={isAr ? 'Micro Alignment — توافق الإطارات' : 'Micro TF Alignment'} value={settings.supportMicroAlignWeight} onChange={(v) => handleChange('supportMicroAlignWeight', v)} color="text-primary" desc={isAr ? 'الإطار المصغر يتوافق مع الكبير' : 'Lower TF aligns with higher TF'} />
         </div>
       </div>
+      )}
 
-      {/* Section 4: Toggles */}
+      {/* System: Feature Toggles */}
+      {activeSystem === 'toggles' && (
       <div className="space-y-4">
         <h3 className="text-xl md:text-[26px] font-black text-brand-text/70 uppercase tracking-widest flex items-center gap-3 leading-tight">
           <span className="text-[#F59E0B] text-2xl">◆</span> {isAr ? 'مفاتيح التفعيل' : 'Feature Toggles'}
@@ -512,9 +598,10 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
           ))}
         </div>
       </div>
+      )}
 
-      {/* Volume Guard Threshold (Pro) */}
-      {settings?.useVolumeGuard !== false && (
+      {/* System: Volume Guard Threshold */}
+      {activeSystem === 'volumeGuard' && settings?.useVolumeGuard !== false && (
         <div className="space-y-2 pt-6 border-t border-white/10">
           <h3 className="text-2xl md:text-[28px] font-black text-amber-400/60 uppercase tracking-widest">
             {isAr ? 'عتبة حارس الحجم' : 'Volume Guard Threshold'}
@@ -549,8 +636,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
       )}
 
 
-      {/* Section 5: Developer Trend Age Zones */}
-        {user && isDeveloperEmail(user.email) && (
+      {/* System: Developer Trend Age Zones */}
+        {activeSystem === 'trendZones' && user && isDeveloperEmail(user.email) && (
         <div className="space-y-4 pt-6 border-t border-white/10">
           <h3 className="text-2xl md:text-[28px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-3">
             <span className="text-amber-400 text-3xl">◆</span> {isAr ? '🔧 مناطق عمر الاتجاه (مطور)' : '🔧 Trend Age Zones (Dev)'}
@@ -674,8 +761,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
         </div>
       )}
 
-      {/* Section 5: Developer Dynamic Credentials Security (Only visible to the developer) */}
-        {user && isDeveloperEmail(user.email) && (
+      {/* System: Developer Security Gateway & 2FA */}
+        {activeSystem === 'security' && user && isDeveloperEmail(user.email) && (
         <div className="space-y-4 pt-6 border-t border-white/10">
           <h3 className="text-sm font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
             <ShieldCheck size={16} /> {isAr ? '🔐 بوابة حماية المطور والتحقق الثنائي (2FA)' : '🔐 Developer Security Gateway & 2FA'}
@@ -799,12 +886,13 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
       )}
 
 
-      {/* Developer-only: Fixed Trading Values system (lot / SL / TP / trailing per category) */}
-      {user && isDeveloperEmail(user.email) && (
+      {/* System: Fixed Trading Values (developer) */}
+      {activeSystem === 'tradingValues' && user && isDeveloperEmail(user.email) && (
         <TradingValuesPanel lang={lang} />
       )}
 
-      {/* Section 6: Factory Reset */}
+      {/* System: Factory Reset */}
+      {activeSystem === 'factoryReset' && (
       <div className="space-y-4 pt-6 border-t border-red-500/20">
         <h3 className="text-sm font-bold text-red-400 uppercase tracking-wider flex items-center gap-2">
           <RotateCcw size={16} /> {isAr ? '🔴 إعادة تعيين المصنع (Factory Reset)' : '🔴 Factory Reset'}
@@ -826,11 +914,12 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
           </button>
         </div>
       </div>
+      )}
 
     </div>
   );
 
-  const modalFooter = (
+  const modalFooter = activeSystem === null ? null : (
     <div className="p-6 border-t border-white/10 bg-brand-bg flex items-center justify-between" dir="rtl">
       <button onClick={resetToDefault} className="px-6 py-3 text-xl md:text-[24px] text-brand-text/50 hover:text-brand-text font-black transition-colors">
         {isAr ? 'استعادة الافتراضي' : 'Restore Default'}
