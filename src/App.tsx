@@ -398,16 +398,12 @@ const isDeveloperSession = () => {
     return p ? planFeatures(p, isAr) : [];
   }, [myPlans, activeSubscription, isAr]);
   const returnToFreePlan = () => {
-    // Persist the opt-out first: the grants poll must not switch paid mode back on.
+    // Plan-exit must NOT wipe the account's signals (per user requirement):
+    // only clearing is allowed during plan execution or at the end of the
+    // analysis day. We simply opt out here and keep the existing signals.
     chooseFreeMode(true);
     choosePaidMode(false);
     setShowMyPlan(false);
-    try {
-      const saved = JSON.parse(localStorage.getItem('finalyze_client_signals') || '[]');
-      setClientSignals(Array.isArray(saved) ? saved.filter((s: any) => !s.isSideways) : []);
-    } catch {
-      setClientSignals([]);
-    }
     navigateTo('main');
   };
   const activatePaidPlan = () => {
