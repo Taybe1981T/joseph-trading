@@ -100,6 +100,15 @@ export function MobileClientMonitor({ lang, onClose }: Props) {
           {clients.map((c) => {
             const isBanned = c.status === 'banned' || bannedEmails.includes(c.email);
             const isPaid = c.plan === 'paid';
+            // A client whose paid plan is still running is ACTIVATED — a stale
+            // 'pending' row must not keep an activated customer in the waiting
+            // room, mirroring the desktop status sync.
+            const effStatus = isBanned
+              ? 'banned'
+              : (c.plan === 'paid' && c.planExpiry && new Date(c.planExpiry).getTime() > Date.now())
+                ? 'verified'
+                : c.status;
+            const chipStatus = isBanned ? 'banned' : effStatus === 'pending' ? 'pending' : 'verified';
             return (
               <div key={c.id} style={{ background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -112,8 +121,8 @@ export function MobileClientMonitor({ lang, onClose }: Props) {
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 999, background: isBanned ? 'rgba(255,51,51,0.15)' : 'rgba(16,185,129,0.15)', color: isBanned ? '#ff5555' : '#00ff88', border: '1px solid ' + (isBanned ? 'rgba(255,51,51,0.3)' : 'rgba(16,185,129,0.3)') }}>
-                    {isBanned ? mobileT(lang, 'Banned', 'محظور') : mobileT(lang, 'Active', 'نشط')}
+                  <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 8px', borderRadius: 999, background: chipStatus === 'banned' ? 'rgba(255,51,51,0.15)' : chipStatus === 'pending' ? 'rgba(245,158,11,0.15)' : 'rgba(16,185,129,0.15)', color: chipStatus === 'banned' ? '#ff5555' : chipStatus === 'pending' ? '#f59e0b' : '#00ff88', border: '1px solid ' + (chipStatus === 'banned' ? 'rgba(255,51,51,0.3)' : chipStatus === 'pending' ? 'rgba(245,158,11,0.3)' : 'rgba(16,185,129,0.3)') }}>
+                    {chipStatus === 'banned' ? mobileT(lang, 'Banned', 'محظور') : chipStatus === 'pending' ? mobileT(lang, 'Pending', 'قيد الانتظار') : mobileT(lang, 'Active', 'نشط')}
                   </span>
                   <button onClick={() => toggleBan(c)} disabled={busy === c.id}
                     style={{ padding: '6px 10px', borderRadius: 8, border: 'none', background: '#1a1a1a', color: '#e0e0e0', fontSize: 11, fontWeight: 800, cursor: busy === c.id ? 'wait' : 'pointer', opacity: busy === c.id ? 0.5 : 1 }}>

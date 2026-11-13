@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { Users, ShieldOff, Trash2, RefreshCw, RotateCcw, X, CheckCircle, Clock, Ban, Shield, Crown, Layers, Receipt, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Language } from '../lib/i18n';
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { clientDocId } from '../lib/clientIds';
 import { fetchAllPlanGrants, fetchClientTransactionsByEmail, deleteTransaction, PaymentGrant, PaymentRequest } from '../services/paymentRequests';
 
 interface ClientRecord {
@@ -156,6 +159,45 @@ export default function ClientMonitor({ clients, lang, onRefresh, onMergeDuplica
   // without buying anything, never gets the crown.
   const hasRunningPlan = (client: ClientRecord): boolean => planState(client).paid;
 
+  // ── Status sync ──────────────────────────────────────────────────────────
+  // A client whose paid plan is RUNNING right now is ACTIVATED — they paid, the
+  // developer released/approved the plan and the period started. If their row
+  // still carries a stale 'pending' flag (activation flow not synced yet), heal
+  // it here so the monitor stops showing them as awaiting activation.
+  const effectiveStatus = (client: ClientRecord): 'verified' | 'pending' | 'banned' => {
+    if (client.status === 'banned') return 'banned';
+    if (planState(client).paid) return 'verified';
+    return client.status;
+  };
+
+  // Persist the healed status to Firestore + the local cache so the fix sticks
+  // (the dev session is allowed to update any client row by design).
+  useEffect(() => {
+    if (!clients.length) return;
+    let alive = true;
+    const heal = async () => {
+      let healed = false;
+      for (const c of clients) {
+        const st = planState(c);
+        if (st.paid && c.status === 'pending') {
+          healed = true;
+          try {
+            await setDoc(doc(db, 'clients', clientDocId(c.email)), { status: 'verified' }, { merge: true });
+          } catch (e) { console.warn('[ClientMonitor] status heal failed for', c.email, e); }
+        }
+      }
+      if (healed && alive) {
+        // The parent owns the `clients` list — refetch so the healed rows (and the
+        // derived status) show up in the table immediately.
+        try { onRefresh(); } catch {}
+      }
+    };
+    void heal();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients, grants, onRefresh]);
+
+
   // Repairs rows written with a random id before the email-keyed ids: the same
   // customer used to appear twice in this table. Confirmation first — it deletes
   // the redundant copies after their data has been copied onto the real one.
@@ -227,7 +269,7 @@ export default function ClientMonitor({ clients, lang, onRefresh, onMergeDuplica
         {[
           { label: isAr ? 'إجمالي' : 'Total', value: clients.length, color: 'text-white' },
           { label: isAr ? 'مفعل' : 'Verified', value: clients.filter(c => c.status === 'verified').length, color: 'text-emerald-400' },
-          { label: isAr ? 'قيد الانتظار' : 'Pending', value: clients.filter(c => c.status === 'pending').length, color: 'text-amber-400' },
+          { label: isAr ? 'قيد الانتظار' : 'Pending', value: clients.filter((c) => effectiveStatus(c) === 'pending').length, color: 'text-amber-400' },
           { label: isAr ? 'محظور' : 'Banned', value: clients.filter(c => c.status === 'banned').length, color: 'text-red-400' },
         ].map((stat, i) => (
           <div key={i} className="bg-brand-alt rounded-2xl p-4 border border-white/10 text-center">
@@ -360,19 +402,22 @@ export default function ClientMonitor({ clients, lang, onRefresh, onMergeDuplica
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        {client.status === 'verified' ? (
-                          <CheckCircle size={14} className="text-emerald-400" />
-                        ) : client.status === 'banned' ? (
-                          <Ban size={14} className="text-red-400" />
-                        ) : (
-                          <Clock size={14} className="text-amber-400" />
-                        )}
+                        {(() => {
+                          const st = effectiveStatus(client);
+                          return st === 'verified' ? (
+                            <CheckCircle size={14} className="text-emerald-400" />
+                          ) : st === 'banned' ? (
+                            <Ban size={14} className="text-red-400" />
+                          ) : (
+                            <Clock size={14} className="text-amber-400" />
+                          );
+                        })()}
                         <span className={`text-xs font-bold ${
-                          client.status === 'verified' ? 'text-emerald-400' :
-                          client.status === 'banned' ? 'text-red-400' : 'text-amber-400'
+                          effectiveStatus(client) === 'verified' ? 'text-emerald-400' :
+                          effectiveStatus(client) === 'banned' ? 'text-red-400' : 'text-amber-400'
                         }`}>
-                          {client.status === 'verified' ? (isAr ? 'مفعل' : 'Verified') :
-                           client.status === 'banned' ? (isAr ? 'محظور' : 'Banned') :
+                          {effectiveStatus(client) === 'verified' ? (isAr ? 'مفعل' : 'Verified') :
+                           effectiveStatus(client) === 'banned' ? (isAr ? 'محظور' : 'Banned') :
                            (isAr ? 'قيد الانتظار' : 'Pending')}
                         </span>
                       </div>
