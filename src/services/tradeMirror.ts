@@ -72,7 +72,9 @@ export function writeMirrorSeen(s: Set<string>) {
  *  they explicitly switch it OFF ('0'). The developer can additionally gate
  *  free accounts off entirely via MIRROR_FREE_ALLOWED (default ON). */
 export function isMirrorEnabled(): boolean {
-  try { return localStorage.getItem(MIRROR_ENABLED_KEY) !== '0'; } catch { return true; }
+  // Default OFF: a client account only auto-trades from its OWN analysis.
+  // Copy-trading (mirror) requires explicit opt-in.
+  try { return localStorage.getItem(MIRROR_ENABLED_KEY) === '1'; } catch { return false; }
 }
 export function setMirrorEnabled(on: boolean): void {
   try { localStorage.setItem(MIRROR_ENABLED_KEY, on ? '1' : '0'); } catch {}

@@ -1063,13 +1063,23 @@ const isDeveloperSession = () => {
   // the "auto analysis" icon in the Header by mistake. The radar writes here;
   // the Header reads from here. Manual analysis keeps using `progress` only.
   const [radarProgress, setRadarProgress] = useState<{ current: string, total: number, index: number, failed?: number, exchange?: string } | null>(null);
-  const [topSignals, setTopSignals] = useState<AnalysisResult[]>(() => {
+  // Signal storage is SCOPED per user account so one account never sees
+  // another account's signals (signals stay "clean" per account).
+  const signalsStorageKey = () => {
     try {
-      const stored = JSON.parse(localStorage.getItem('top_signals_persistent') || '[]');
-      // Filter out neutral signals on page load
-      return stored.filter((s: AnalysisResult) => s.signal !== 'neutral' && s.signal !== 'no_entry');
-    } catch { return []; }
-  });
+      const e = (currentUserEmail() || 'guest').toLowerCase().replace(/[^a-z0-9@._-]/g, '_');
+      return `top_signals_persistent__${e}`;
+    } catch { return 'top_signals_persistent__guest'; }
+  };
+  const [topSignals, setTopSignals] = useState<AnalysisResult[]>([]);
+  // Load this account's own signals whenever the logged-in user changes.
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(signalsStorageKey()) || '[]');
+      setTopSignals(Array.isArray(stored) ? stored.filter((s: AnalysisResult) => s.signal !== 'neutral' && s.signal !== 'no_entry') : []);
+    } catch { setTopSignals([]); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, user?.email]);
   const [lastSyncStatus, setLastSyncStatus] = useState<{ ok: boolean; count?: number; error?: string; time: number } | null>(null);
 
   // Web Audio API ΓÇö no unlock needed
@@ -1164,7 +1174,7 @@ const isDeveloperSession = () => {
       autoEngineRef.current = new AutoTradeEngine({
         user,
         leverage: currentLeverage,
-        signals: topSignals.map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
+        signals: topSignals.filter((s: any) => !s?.isSideways).map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
         isDeveloper: isDeveloperSession(),
         origin: user?.uid || user?.email || '',
       });
@@ -1173,7 +1183,7 @@ const isDeveloperSession = () => {
       autoEngineRef.current.updateConfig({
         user,
         leverage: currentLeverage,
-        signals: topSignals.map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
+        signals: topSignals.filter((s: any) => !s?.isSideways).map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
         isDeveloper: isDeveloperSession(),
         origin: user?.uid || user?.email || '',
       });
@@ -1295,7 +1305,7 @@ const isDeveloperSession = () => {
 
   useEffect(() => {
     signalsRef.current = topSignals;
-    localStorage.setItem('top_signals_persistent', JSON.stringify(topSignals));
+    try { localStorage.setItem(signalsStorageKey(), JSON.stringify(topSignals)); } catch {}
 
     // Debounced synchronization to Firestore ΓÇö only the latest state wins
     if (isDeveloperSession()) {
@@ -1531,7 +1541,7 @@ const isDeveloperSession = () => {
       // would read a stale `signalsRef.current` and drop the earlier
       // categories' signals from the box.
       signalsRef.current = published;
-      try { localStorage.setItem('top_signals_persistent', JSON.stringify(published)); } catch {}
+      try { localStorage.setItem(signalsStorageKey(), JSON.stringify(published)); } catch {}
 
       if (hasBrandNewSymbol) {
         setNewSignalAlert(lang === 'ar' ? '✅ لقد تم رصد فرصة تداول قوية جديدة!' : '✅ New strong trading opportunity detected!');
@@ -1705,7 +1715,7 @@ const isDeveloperSession = () => {
 
       lastPurgeDateRef.current = today;
       localStorage.setItem('finalyze_last_purge_date', today);
-      localStorage.setItem('top_signals_persistent', JSON.stringify(filtered));
+      localStorage.setItem(signalsStorageKey(), JSON.stringify(filtered));
       setTopSignals(filtered);
 
       try {
@@ -2122,7 +2132,7 @@ const isDeveloperSession = () => {
         localStorage.removeItem('finalyze_client_signals');
         localStorage.removeItem('finalyze_client_results_date');
         localStorage.removeItem('finalyze_client_reset_token');
-        localStorage.removeItem('top_signals_persistent');
+        localStorage.removeItem(signalsStorageKey());
         localStorage.removeItem('finalyze_client_alerts');
         localStorage.removeItem('finalyze_custom_logo');
         // Save new version then hard reload
@@ -2928,7 +2938,7 @@ const started = planGrants
     localStorage.removeItem('finalyze_client_signals');
     localStorage.removeItem('finalyze_client_results_date');
     localStorage.removeItem('finalyze_client_reset_token');
-    localStorage.removeItem('top_signals_persistent');
+    localStorage.removeItem(signalsStorageKey());
     localStorage.removeItem('finalyze_client_alerts');
     localStorage.removeItem('active_subscription');
     // Await sign-out BEFORE navigating: firing it without waiting let the
