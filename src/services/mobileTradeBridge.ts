@@ -102,15 +102,13 @@ export async function openMobileManualTrade(
 
   const levels = resolveRiskLevels({
     category, symbol: sym, entry: price, isBuy: side === 'buy', qty, balance,
+    signalSl: signal?.stopLoss, signalTp: signal?.takeProfit,
   });
-  let sl: number | null = levels.slPrice;
-  let tp: number | null = levels.tpPrice;
-  // Non-crypto keeps the displayed signal's own risk plan when the developer
-  // system is OFF (desktop parity); crypto always follows the % system.
-  if (category !== 'crypto' && !fixed && signal?.stopLoss && signal?.takeProfit) {
-    sl = signal.stopLoss;
-    tp = signal.takeProfit;
-  }
+  // resolveRiskLevels now applies the analysed signal's own automatic levels for
+  // EVERY category when the developer fixed-values system is OFF (crypto
+  // included) and only falls back to percentages when no usable signal exists.
+  const sl: number | null = levels.slPrice;
+  const tp: number | null = levels.tpPrice;
   const row: Omit<PaperTrade, 'id'> = {
     symbol: sym, category, side, qty, entryPrice: price, status: 'open',
     sl: sl ?? null, tp: tp ?? null, openedAt: Date.now(), source: 'manual',

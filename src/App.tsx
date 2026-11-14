@@ -1537,6 +1537,9 @@ const isDeveloperSession = () => {
   };
 
   const handleClearAll = async () => {
+    // Free / guest accounts are view-only: they can never clear the developer's
+    // displayed signals. Only a developer or an activated plan may clear.
+    if (!isDeveloperSession() && !isPlanClient) return;
     setTopSignals([]);
     if (isDeveloperSession()) {
       try {
@@ -1568,6 +1571,8 @@ const isDeveloperSession = () => {
   };
 
   const handleClearClientSignals = () => {
+    // View-only free/guest accounts may not clear displayed signals.
+    if (!isDeveloperSession() && !isPlanClient) return;
     setClientSignals([]);
     if (isPlanClient) {
       localStorage.removeItem(cxnSigKey);
@@ -3356,7 +3361,7 @@ const started = planGrants
                 the user browses other pages. Opening a trade no longer requires
                 sitting on the trade page. */}
             <div className={effectivePage === 'trade' ? 'contents' : 'hidden'} aria-hidden={effectivePage !== 'trade'}>
-              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() || isPlanClient ? topSignals : []} />
+              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() || isPlanClient ? topSignals : []} canTrade={isDeveloperSession() || isPlanClient} />
             </div>
 
             {effectivePage === 'store' && (

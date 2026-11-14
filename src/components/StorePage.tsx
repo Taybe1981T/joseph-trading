@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ShoppingCart, FileText, ChevronDown, ChevronUp, Bot, Activity, Crown, Package, Download, Gift, Sparkles, ArrowLeft, Code2, LayoutTemplate, Image, PenTool, Monitor, Cpu, BarChart3, Send, Check, KeyRound, Zap, Trash2, AlertTriangle, X } from 'lucide-react';
 import { StoreBot, StoreCategory, fetchStoreBots, formatFileSize, isFree, categoryOf, typeOf, typeLabelForCat, typesForCategory, STORE_CATEGORIES, downloadBot, getDownloadGrant, consumeBotDownload, DOWNLOAD_GRANT_TTL_MS } from '../services/storeService';
 import { generateBotBanner } from '../services/storeBanner';
+import { ensureClientIdentity } from '../services/clientIdentity';
 import { submitSiteRequest } from '../services/paymentRequests';
 import { StorePlan, fetchPlans, planLabel, planFeatures, durationLabel, toWesternDigits } from '../services/storePlans';
 
@@ -58,6 +59,10 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
   const [activeCat, setActiveCat] = useState<StoreCategory | null>(null);
   const [activeType, setActiveType] = useState<string | null>(null);
   const [showRequest, setShowRequest] = useState(false);
+  const [guestSiteModal, setGuestSiteModal] = useState(false);
+  const [guestSiteEmail, setGuestSiteEmail] = useState('');
+  const [guestSiteBusy, setGuestSiteBusy] = useState(false);
+  const [guestSiteErr, setGuestSiteErr] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [downloadMsg, setDownloadMsg] = useState<{ botId: string; text: string } | null>(null);
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -556,6 +561,32 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
     </div>
   );
 
+  const handleGuestSiteSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const em = guestSiteEmail.trim();
+    if (!em.includes('@')) {
+      setGuestSiteErr(isAr ? 'يرجى إدخال بريد إلكتروني صحيح' : 'Please enter a valid email');
+      return;
+    }
+    setGuestSiteBusy(true);
+    setGuestSiteErr('');
+    try {
+      const ok = await ensureClientIdentity(em);
+      if (!ok) {
+        setGuestSiteErr(isAr ? 'تعذر إنشاء الحساب. حاول مرة أخرى.' : 'Could not create the account. Try again.');
+        setGuestSiteBusy(false);
+        return;
+      }
+      setReqContact(em);
+      setReqName((prev) => (prev && prev.trim() ? prev : em.split('@')[0]));
+      setGuestSiteModal(false);
+      setShowRequest(true);
+    } catch {
+      setGuestSiteErr(isAr ? 'تعذر إنشاء الحساب. حاول مرة أخرى.' : 'Could not create the account. Try again.');
+    }
+    setGuestSiteBusy(false);
+  };
+
   const handleRequestSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reqName.trim() || !reqContact.trim() || !reqMessage.trim()) {
@@ -844,7 +875,10 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
             <motion.button
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              onClick={() => setShowRequest(true)}
+              onClick={() => {
+              if (!userEmail) { setGuestSiteModal(true); setGuestSiteEmail(''); setGuestSiteErr(''); }
+              else setShowRequest(true);
+            }}
               className="col-span-2 sm:col-span-3 bg-gradient-to-br from-amber-400 to-amber-700 border border-amber-300/50 rounded-2xl p-4 flex items-center justify-center gap-4 transition-all shadow-lg shadow-amber-600/40 ring-1 ring-white/10 hover:scale-[1.01] active:scale-95 text-center"
             >
               <div className="w-14 h-14 shrink-0 rounded-2xl bg-white/20 border border-white/40 flex items-center justify-center keep-white shadow-inner">
@@ -864,7 +898,51 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
           </p>
         </div>
       )}
-      {authGateModal}
+  {guestSiteModal && (
+      <div className="fixed inset-0 z-[135] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-gray-900 border-2 border-amber-400/50 rounded-3xl shadow-2xl p-6" dir={isAr ? 'rtl' : 'ltr'}>
+          <div className="flex flex-col items-center text-center">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-400/40 flex items-center justify-center mb-4">
+              <Code2 size={26} className="text-amber-400" />
+            </div>
+            <h3 className="text-lg font-black text-white leading-snug">
+              {isAr ? 'خطوة واحدة قبل المتابعة' : 'One step before you continue'}
+            </h3>
+            <p className="text-sm font-black text-amber-200 mt-3 leading-relaxed">
+              {isAr
+                ? 'لوضع طلبك، يرجى تسجيل في الموقع أو تسجيل الدخول إذا كان لديك حساب سابق.'
+                : 'To submit your request, please sign up on the site or sign in if you already have an account.'}
+            </p>
+          </div>
+          <form onSubmit={handleGuestSiteSubmit} className="mt-5 flex flex-col gap-3">
+            <input
+              type="email"
+              value={guestSiteEmail}
+              onChange={(e) => setGuestSiteEmail(e.target.value)}
+              placeholder={isAr ? 'أدخل بريدك الإلكتروني' : 'Enter your email'}
+              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-lg text-white outline-none focus:border-[#F59E0B]"
+              required
+            />
+            {guestSiteErr && <p className="text-sm font-black text-red-400">{guestSiteErr}</p>}
+            <button
+              type="submit"
+              disabled={guestSiteBusy}
+              className="w-full py-4 rounded-2xl bg-gradient-to-r from-amber-400 to-[#F59E0B] text-black font-black text-base uppercase tracking-wide shadow-lg hover:opacity-90 active:scale-[0.99] transition-all disabled:opacity-60"
+            >
+              {guestSiteBusy ? (isAr ? 'جاري التسجيل...' : 'Registering...') : (isAr ? 'تأكيد' : 'Confirm')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setGuestSiteModal(false)}
+              className="w-full py-3 rounded-2xl bg-white/5 border border-white/10 text-slate-300 font-black text-xs uppercase tracking-wider hover:bg-white/10 transition-all"
+            >
+              {isAr ? 'لاحقاً' : 'Later'}
+            </button>
+          </form>
+        </div>
+      </div>
+    )}
+    {authGateModal}
     </div>
   );
 }

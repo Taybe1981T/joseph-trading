@@ -367,6 +367,7 @@ export class AutoTradeEngine {
         const entryPrice = price;
         const { slPrice, tpPrice } = resolveRiskLevels({
           category: cat, symbol: sym, entry: entryPrice, isBuy, qty: q, balance,
+          signalSl: sig.stopLoss, signalTp: sig.takeProfit,
         });
 
         const tradeData: Omit<PaperTrade, 'id'> = {

@@ -294,10 +294,19 @@ export default function ProfilePage({ user, lang, onBack, onAvatarChange, onLogo
                         : t.status === 'pending' ? 'bg-amber-500/20 text-amber-400'
                         : 'bg-blue-500/20 text-blue-400'
                       }`}>
-                        {t.status === 'completed' ? (lang === 'ar' ? 'مكتملة' : 'Completed')
-                          : t.status === 'cancelled' ? (lang === 'ar' ? 'ملغاة' : 'Cancelled')
-                          : t.status === 'pending' ? (lang === 'ar' ? 'قيد التأكيد' : 'Pending')
-                          : (lang === 'ar' ? 'قيد الانتظار' : 'Active')}
+                        {t.kind === 'bot'
+                          ? (t.status === 'completed'
+                              ? (lang === 'ar' ? 'منتج مكتمل' : 'Product Completed')
+                              : t.status === 'cancelled'
+                                ? (lang === 'ar' ? 'ملغاة' : 'Cancelled')
+                                : (lang === 'ar' ? 'قيد الانتظار' : 'Pending'))
+                          : (t.status === 'completed'
+                              ? (lang === 'ar' ? 'مكتملة' : 'Completed')
+                              : t.status === 'cancelled'
+                                ? (lang === 'ar' ? 'ملغاة' : 'Cancelled')
+                                : t.status === 'pending'
+                                  ? (lang === 'ar' ? 'قيد التأكيد' : 'Pending')
+                                  : (lang === 'ar' ? 'قيد الانتظار' : 'Active'))}
                       </span>
                     </div>
                   </div>

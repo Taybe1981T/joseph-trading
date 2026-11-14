@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, RefreshCw, XCircle, Receipt, CheckCircle2, Clock, Store, Trash2, AlertTriangle } from 'lucide-react';
 import { Language } from '../lib/i18n';
 import { loadAllSessions, cancelSession, clearLocalSessions, removeLocalSessionById, createSession, PaymentSession } from '../services/paymentSession';
-import { fetchPaymentRequests, fetchUserPaymentRequests, fetchUserGrants, fetchDevHistory, deleteTransaction, deleteAllTransactions, deleteMyTransaction, deleteAllMyTransactions, fetchHiddenTxKeys, hideTxKeys, cleanupPendingPlanRequests, PaymentRequest, PaymentGrant } from '../services/paymentRequests';
+import { fetchPaymentRequests, fetchUserPaymentRequests, fetchUserGrants, fetchDevHistory, deleteTransaction, deleteAllTransactions, deleteMyTransaction, deleteAllMyTransactions, fetchHiddenTxKeys, hideTxKeys, cleanupPendingPlanRequests, PaymentRequest, PaymentGrant, ProductKind } from '../services/paymentRequests';
 import { db } from '../lib/firebase';
 import { deleteDoc, doc, getDocs, collection, query, where } from 'firebase/firestore';
 import PaymentRequestsSection from './PaymentRequestsSection';
@@ -28,6 +28,7 @@ interface TxRow {
   createdAt: number;
   decidedAt?: number;
   status: RowStatus;
+  kind?: ProductKind;
   session?: PaymentSession;
   request?: PaymentRequest;
   grant?: PaymentGrant;
@@ -86,6 +87,7 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
         createdAt: r.createdAt,
         decidedAt: r.decidedAt,
         status,
+        kind: r.kind,
         request: r,
         grant: grant || undefined,
       });
@@ -106,6 +108,7 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
           requestNo: g.requestNo,
           createdAt: g.releasedAt || g.activatedAt || g.createdAt || Date.now(),
           status: 'confirmed',
+          kind: g.kind,
           grant: g,
         });
       }
@@ -126,6 +129,7 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
         method: s.method,
         createdAt: s.createdAt,
         status,
+        kind: s.kind,
         session: s,
       });
     });
@@ -153,6 +157,7 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
               requestNo: activeSub.requestNo,
               createdAt: activeSub.startedAt || (activeSub.expiryDate ? new Date(activeSub.expiryDate).getTime() - (activeSub.durationDays || 30) * 86400000 : Date.now()),
               status: 'confirmed',
+              kind: 'plan',
             });
           }
         }
@@ -330,7 +335,17 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
   };
 
   const pendingCount = rows.filter((r) => r.status === 'active' || r.status === 'pending').length;
-  const stLabel = (st: RowStatus): string => {
+  const stLabel = (st: RowStatus, kind?: ProductKind): string => {
+    const isProduct = kind === 'bot';
+    if (isProduct) {
+      switch (st) {
+        case 'active':
+        case 'pending': return isAr ? 'قيد الانتظار' : 'Pending';
+        case 'confirmed':
+        case 'completed': return isAr ? 'منتج مكتمل' : 'Product Completed';
+        case 'cancelled': return isAr ? 'ملغاة' : 'Cancelled';
+      }
+    }
     switch (st) {
       case 'active': return isAr ? 'قيد الانتظار' : 'Active';
       case 'pending': return isAr ? 'قيد التأكيد' : 'Pending';
@@ -413,7 +428,7 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
                         </p>
                       </div>
                       <span className={`shrink-0 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider ${stClass(r.status === 'approved' ? 'confirmed' : r.status === 'rejected' ? 'cancelled' : 'pending')}`}>
-                        {stLabel(r.status === 'approved' ? 'confirmed' : r.status === 'rejected' ? 'cancelled' : 'pending')}
+                        {stLabel(r.status === 'approved' ? 'confirmed' : r.status === 'rejected' ? 'cancelled' : 'pending', r.kind)}
                       </span>
                       <button
                         onClick={async () => {
@@ -523,7 +538,7 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
                     </p>
                   </div>
                   <span className={`shrink-0 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider ${stClass(t.status)}`}>
-                    {stLabel(t.status)}
+                    {stLabel(t.status, t.kind)}
                   </span>
                 </div>
                 <div className="flex items-center gap-2.5 mt-3 flex-wrap">

@@ -27,9 +27,11 @@ interface MobileNewTradeProps {
   balance: number;
   signalFor?: (sym: string) => AnalysisResult | undefined;
   onOpen: (sym: string, type: 'buy' | 'sell', volume: number) => void;
+  /** Free/guest accounts are view-only. */
+  canTrade?: boolean;
 }
 
-export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor, onOpen }: MobileNewTradeProps) {
+export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor, onOpen, canTrade = true }: MobileNewTradeProps) {
   const isAr = lang === 'ar';
   // Same categories/symbols as the Manual Analysis section (unified source, incl. future adds).
   const groups = useMemo(() => getMobileSymbolGroups(), []);
@@ -227,12 +229,14 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   };
 
   const toggleAuto = () => {
+    if (!canTrade) return;
     const v = !autoTrade;
     setAutoTrade(v);
     setMobileAutoTrade(v);
   };
 
   const openSide = async (side: 'buy' | 'sell') => {
+    if (!canTrade) return;
     if (!symbol || busy) return;
     // Desktop parity: crypto trades 24/7; forex/metals/stocks only while their
     // session is open. Blocked here AND enforced again inside the bridge.
@@ -253,7 +257,11 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   };
   return (
     <div className="mt5-page-container">
-      {/* ── Account summary header (desktop parity: balance/equity/margin/level/floating) ── */}
+      {!canTrade && (
+        <div style={{ background: '#FACC15', color: '#111827', borderRadius: 12, padding: '10px 12px', marginBottom: 12, textAlign: 'center', fontWeight: 800, fontSize: 12 }}>
+          {isAr ? '👁️ وضع المشاهدة فقط — لا يمكن فتح صفقات. فعّل خطة للتداول.' : '👁️ View-only — cannot open trades. Activate a plan to trade.'}
+        </div>
+      )}
       <div className="mt5-card" style={{ background: 'linear-gradient(135deg,#0d1f16,#0a0a0a)', borderColor: 'rgba(0,255,136,0.25)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <span style={{ fontSize: 14, fontWeight: 900, color: '#fff' }}>
@@ -317,7 +325,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
             {isAr ? 'التداول التلقائي' : 'Auto Trading'}
           </div>
           <button type="button" className={`mt5-btn ${autoTrade ? 'mt5-btn-primary' : 'mt5-btn-secondary'}`}
-            style={{ padding: '8px 16px', fontSize: 13, minWidth: 72 }} onClick={toggleAuto}>
+            style={{ padding: '8px 16px', fontSize: 13, minWidth: 72, opacity: canTrade ? 1 : 0.45 }} disabled={!canTrade} onClick={toggleAuto}>
             {autoTrade ? 'ON' : 'OFF'}
           </button>
         </div>
@@ -517,7 +525,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
           type="button"
           className="mt5-btn-sell"
           style={{ flex: 1, opacity: busy || !symbol ? 0.5 : 1 }}
-          disabled={busy || !symbol}
+          disabled={busy || !symbol || !canTrade}
           onClick={() => openSide('sell')}
         >
           SELL
@@ -526,7 +534,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
           type="button"
           className="mt5-btn-buy"
           style={{ flex: 1, opacity: busy || !symbol ? 0.5 : 1 }}
-          disabled={busy || !symbol}
+          disabled={busy || !symbol || !canTrade}
           onClick={() => openSide('buy')}
         >
           BUY

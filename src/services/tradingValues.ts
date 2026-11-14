@@ -304,10 +304,43 @@ export function baseUnitForTrade(category: string, symbol?: string): number {
 }
 
 /**
+ * Turn an analysed signal's SL/TP PRICES into trade levels, but only when they
+ * are sane for this entry: both finite, on the correct side of the entry and
+ * not collapsed onto it. Returns null when the signal plan cannot be trusted,
+ * so the caller falls back to its normal dynamic behaviour.
+ */
+function signalLevels(args: {
+  symbol: string;
+  entry: number;
+  isBuy: boolean;
+  qty: number;
+  category: string;
+  signalSl?: number | null;
+  signalTp?: number | null;
+}): TradeLevels | null {
+  const { symbol, entry, isBuy, qty, category } = args;
+  const sl = Number(args.signalSl);
+  const tp = Number(args.signalTp);
+  if (!(entry > 0) || !Number.isFinite(sl) || !Number.isFinite(tp) || sl <= 0 || tp <= 0) return null;
+  // Both levels must sit on the profitable/losing side expected for this side.
+  if (isBuy ? !(sl < entry && tp > entry) : !(tp < entry && sl > entry)) return null;
+  const slUsd = Math.abs(entry - sl) * qty;
+  const tpUsd = Math.abs(tp - entry) * qty;
+  if (!(slUsd > 0) || !(tpUsd > 0)) return null;
+  // Guard against absurd distances (bad feed / stale signal): ignore > 50%.
+  if (Math.abs(entry - sl) / entry > 0.5 || Math.abs(tp - entry) / entry > 0.5) return null;
+  void symbol;
+  void category;
+  return { slPrice: sl, tpPrice: tp, slUsd, tpUsd };
+}
+
+/**
  * SL/TP price levels for a trade — the SINGLE source of truth for auto and
  * manual orders on desktop + mobile:
- *   • system ON  → forced fixed values (crypto = % of price)
- *   • system OFF → dynamic balance risk (crypto = % of price)
+ *   • system ON   → forced fixed values (crypto = % of price)
+ *   • system OFF  → the analysed signal's own ATR-based SL/TP when available
+ *                   (ALL categories, crypto included), otherwise the dynamic
+ *                   balance risk (crypto = % of price)
  */
 export function resolveRiskLevels(args: {
   category: string;
@@ -316,12 +349,30 @@ export function resolveRiskLevels(args: {
   isBuy: boolean;
   qty: number;
   balance: number;
+  /** Optional analysed-signal levels — used when the fixed system is OFF. */
+  signalSl?: number | null;
+  signalTp?: number | null;
 }): TradeLevels {
   const { symbol, entry, isBuy, qty, balance } = args;
   const cat = normalizeTradingCategory(args.category);
   const fixed = getTradingValuesOverride(cat);
 
   if (cat === 'crypto') {
+    // Fixed system ON → its % values win. Otherwise the signal's automatic
+    // levels are authoritative (same ATR system as every other category);
+    // the percentage fallback only covers symbols with no signal plan.
+    if (!fixed) {
+      const fromSignal = signalLevels({
+        symbol,
+        entry,
+        isBuy,
+        qty,
+        category: cat,
+        signalSl: args.signalSl,
+        signalTp: args.signalTp,
+      });
+      if (fromSignal) return fromSignal;
+    }
     return cryptoPctLevels(
       entry,
       isBuy,
@@ -339,6 +390,18 @@ export function resolveRiskLevels(args: {
       tpUsd: fixed.tpUsd,
     };
   }
+
+  // System OFF: honour the signal's own SL/TP plan when it is usable.
+  const fromSignal = signalLevels({
+    symbol,
+    entry,
+    isBuy,
+    qty,
+    category: cat,
+    signalSl: args.signalSl,
+    signalTp: args.signalTp,
+  });
+  if (fromSignal) return fromSignal;
 
   const { slUsd, tpUsd } = calcRiskUSD(balance);
   return {

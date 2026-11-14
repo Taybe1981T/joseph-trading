@@ -246,6 +246,7 @@ export async function pollMirrorEvents(opts: {
         const side: 'buy' | 'sell' = isBuy ? 'buy' : 'sell';
         const levels = resolveRiskLevels({
           category: cat, symbol: sym, entry: price, isBuy, qty: q, balance,
+          signalSl: ev.devSl, signalTp: ev.devTp,
         });
         await store.addTrade({
           symbol: sym, category: cat, side, qty: q, entryPrice: price,

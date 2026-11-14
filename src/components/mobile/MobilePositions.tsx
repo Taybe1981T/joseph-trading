@@ -46,9 +46,11 @@ interface MobilePositionsProps {
   closed?: ClosedPosition[];
   onClose: (id: string) => void;
   onSelect?: (symbol: string) => void;
+  /** Free/guest accounts are view-only. */
+  canTrade?: boolean;
 }
 
-export function MobilePositions({ positions, closed, onClose, onSelect }: MobilePositionsProps) {
+export function MobilePositions({ positions, closed, onClose, onSelect, canTrade = true }: MobilePositionsProps) {
   const lang: Language = (() => { try { const s = localStorage.getItem('language'); return (s === 'ar' ? 'ar' : 'en') as Language; } catch { return 'en'; } })();
   const [live, setLive] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -99,12 +101,14 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
     // The layout owns the close path (desktop market-hours guard, live exit
     // price, balance update and refresh). Calling the bridge here too would
     // double-credit the P&L and bypass the guard.
+    if (!canTrade) return;
     setBusy(id);
     onClose(id);
     setBusy(null);
   };
 
   const startEdit = (p: MobilePosition) => {
+    if (!canTrade) return;
     const category = p.category || detectMobileTradeCategory(p.symbol);
     const entry = p.openPrice;
     const qty = p.volume;
@@ -416,6 +420,7 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
                 <span style={{ color: '#88ffaa' }}>TP: {p.tp != null ? Number(p.tp).toFixed(dec) : '—'}</span>
                </div>
 
+                {canTrade && (
                 <button
                   type="button" title={mobileT(lang, 'Edit SL/TP/Trailing (USD)', 'تعديل الوقف/الهدف/تريلنغ (دولار)')}
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); startEdit(p); }}
@@ -426,11 +431,13 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
                 >
                   {mobileT(lang, 'Edit SL / TP / Trailing', 'تعديل الوقف / الهدف / التريلنغ')}
                 </button>
+                )}
             </div>
             <div style={{ textAlign: 'right' }}>
               <div className={`mt5-position-profit ${pnl >= 0 ? 'positive' : 'negative'}`}>
                 {pnl >= 0 ? '+' : ''}{pnl.toFixed(2)}$
               </div>
+              {canTrade && (
               <div className="mt5-position-actions" style={{ marginTop: 8 }}>
                 <button
                   type="button"
@@ -442,6 +449,7 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
                   <X size={14} /> {busy === p.id ? '...' : 'Close'}
                 </button>
               </div>
+              )}
             </div>
           </div>
         );

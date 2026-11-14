@@ -619,6 +619,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
 
   // (click sounds disabled to debug freeze)
   const setAutoBoth = useCallback((v: boolean) => {
+    if (!isDev && !isPlanClient) return;
     setAuto(v);
     setMobileAutoTrade(v);
     // Force the shared engine to resync immediately (same-tab toggles don't re-run effects).
@@ -899,6 +900,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   };
 
   const openTrade = (sym: string, type: 'buy' | 'sell', vol: number) => {
+    if (!isDev && !isPlanClient) return;
     const cat = String(detectMobileTradeCategory(sym));
     if (!isMarketOpen(cat, sym)) {
       marketClosedAlert('open');
@@ -916,6 +918,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // not just show an alert. Same bridge as the full mobile ticket, so the
   // developer fixed trading values are enforced here too.
   const executeDialogTrade = async (sym: string, type: 'buy' | 'sell', vol: number) => {
+    if (!isDev && !isPlanClient) return;
     const cat = String(detectMobileTradeCategory(sym));
     if (!isMarketOpen(cat, sym)) {
       marketClosedAlert('open');
@@ -935,6 +938,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   };
 
   const closeTradeById = useCallback(async (id: string) => {
+    if (!isDev && !isPlanClient) return;
     try {
       await closeMobileTrade(id);
     } catch (e: any) {
@@ -1232,8 +1236,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
         {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} onRemoveAll={() => setFullSignals([])} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} radarProgress={radarProgress} signalsAllowed={canViewSignals} />}
         {tab === 'quotes' && isDev && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
-        {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} />}
-        {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}
+        {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} canTrade={isDev || isPlanClient} />}
+        {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} canTrade={isDev || isPlanClient} />}
         {/* Desktop parity: a paid-plan client in paid mode gets Auto + Manual too. */}
         {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} />}
         {tab === 'manual' && canUseAnalysis && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}

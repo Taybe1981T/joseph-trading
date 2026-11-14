@@ -38,6 +38,8 @@ interface TradeNowPageProps {
   lang: Language;
   user: User | null;
   signals?: AnalysisResult[];
+  /** Free/guest accounts are view-only: no manual open/close/edit, no auto toggle. */
+  canTrade?: boolean;
 }
 
 const CUSTOM_KEY = 'paper_trading_custom_symbols';
@@ -168,7 +170,7 @@ const normalizeDecimal = (raw: string): string =>
     .replace(/[^0-9.]/g, '')
     .replace(/(\..*)\./g, '$1');
 
-export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageProps) {
+export default function TradeNowPage({ lang, user, signals = [], canTrade = true }: TradeNowPageProps) {
   const isAr = lang === 'ar';
   const [category, setCategory] = useState<string>('forex');
   const [symbol, setSymbol] = useState<string>('EURUSD');
@@ -371,6 +373,27 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
 
     // ── SL / TP ──
     if (isCrypto) {
+      // Fixed system ON → developer percentages win.
+      // Fixed system OFF → follow the analysed signal's automatic levels, exactly
+      // like every other category (ATR-based, clamped 3%–12% by the engine), and
+      // only fall back to the old 1.5% / 3% percentages when no signal exists.
+      if (!fixed) {
+        const anchor = Number(matchedSignal?.entryPrice) || Number(livePrice) || 0;
+        const sigSl = Number(matchedSignal?.stopLoss);
+        const sigTp = Number(matchedSignal?.takeProfit);
+        const clampPct = (v: number) => Math.min(25, Math.max(0.1, v));
+        if (anchor > 0 && Number.isFinite(sigSl) && Number.isFinite(sigTp) && sigSl > 0 && sigTp > 0) {
+          const slRaw = (Math.abs(anchor - sigSl) / anchor) * 100;
+          const tpRaw = (Math.abs(sigTp - anchor) / anchor) * 100;
+          if (slRaw > 0 && tpRaw > 0) {
+            const slPctStr = String(Number(clampPct(slRaw).toFixed(2)));
+            const tpPctStr = String(Number(clampPct(tpRaw).toFixed(2)));
+            if (!ticketTouchedRef.current.sl) setSlPrice((prev) => (prev === slPctStr ? prev : slPctStr));
+            if (!ticketTouchedRef.current.tp) setTpPrice((prev) => (prev === tpPctStr ? prev : tpPctStr));
+            return;
+          }
+        }
+      }
       // Percent of price, taken from the developer panel when the system is ON.
       const slPct = String(Number((fixed?.slPct ?? CRYPTO_SL_PCT).toFixed(2)));
       const tpPct = String(Number((fixed?.tpPct ?? CRYPTO_TP_PCT).toFixed(2)));
@@ -409,7 +432,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol, balance]);
+  }, [symbol, balance, matchedSignal]);
 
 
   const allSymbolsFor = (cat: string): string[] => {
@@ -743,7 +766,17 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
     autoOpenSignals();
   }, [autoTrade, signals, autoOpenSignals, reopenTick]);
 
+  // Free/guest accounts are VIEW-ONLY. Every manual trading action is refused
+  // with one clear notice (open, close, close-all, edit levels, auto toggle).
+  const denyViewOnly = useCallback(() => {
+    setToast(isAr
+      ? 'وضع المشاهدة فقط: الحساب المجاني أو الزائر لا يمكنه فتح أو إغلاق الصفقات يدوياً. فعّل خطة للتداول.'
+      : 'View-only mode: free or guest accounts cannot open or close trades manually. Activate a plan to trade.');
+    setTimeout(() => setToast(null), 4000);
+  }, [isAr]);
+
   const toggleAutoTrade = () => {
+    if (!canTrade) { denyViewOnly(); return; }
     setAutoTrade((prev) => {
       const next = !prev;
       try { localStorage.setItem(AUTO_TRADE_KEY, next ? '1' : '0'); } catch {}
@@ -884,6 +917,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   }
 
   async function openTrade(side: 'buy' | 'sell') {
+    if (!canTrade) { denyViewOnly(); return; }
     if (!livePrice || busy) return;
     const pendingCat = detectCategory(symbol);
     // Developer "Trading Values" system: when ON, force the fixed lot + the
@@ -1010,6 +1044,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   }
 
   async function closeTrade(t: PaperTrade) {
+    if (!canTrade) { denyViewOnly(); return; }
     const exit = priceOf(t);
     if (!exit) return;
     if (!isMarketOpen(t.category, t.symbol)) {
@@ -1024,6 +1059,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
 
   // Close all open trades at once at their current prices.
   async function closeAllTrades() {
+    if (!canTrade) { denyViewOnly(); return; }
     const open = tradesRef.current.filter((t) => t.status === 'open');
     const closable = open.filter((t) => priceMapRef.current[t.symbol] != null);
     if (closable.length === 0) {
@@ -1163,6 +1199,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   // Start inline editing of an open trade's SL/TP levels.
   // Values are shown/edited in USD amount (consistent with the open ticket).
   function startEditLevels(t: PaperTrade) {
+    if (!canTrade) { denyViewOnly(); return; }
     setEditSl(t.sl != null ? slAmountUSD(t.symbol, Math.abs(t.entryPrice - t.sl), t.qty, t.category).toFixed(2) : '');
     setEditTp(t.tp != null ? slAmountUSD(t.symbol, Math.abs(t.entryPrice - t.tp), t.qty, t.category).toFixed(2) : '');
     setEditId(t.id);
@@ -1172,6 +1209,7 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
   // The entered USD amounts are converted back to target prices using the
   // position side (TP on profit side, SL on loss side).
   async function saveEditLevels(t: PaperTrade) {
+    if (!canTrade) { denyViewOnly(); return; }
     const sl = parseFloat(editSl);
     const tp = parseFloat(editTp);
     let nextSl: number | null = null;
@@ -1277,6 +1315,18 @@ export default function TradeNowPage({ lang, user, signals = [] }: TradeNowPageP
 
   return (
     <div className="w-full px-2 sm:px-4 pt-2 pb-3 space-y-3">
+      {!canTrade && (
+        <div className="rounded-2xl border-2 border-[#FACC15]/70 bg-[#FACC15]/15 px-4 py-3 text-center">
+          <div className="text-sm sm:text-base font-black text-[#FACC15]">
+            {isAr ? '👁️ وضع المشاهدة فقط — الحساب المجاني / الزائر' : '👁️ View-only mode — Free / Guest account'}
+          </div>
+          <div className="text-[11px] sm:text-xs font-bold text-brand-text/70 mt-1">
+            {isAr
+              ? 'يمكنك متابعة الإشارات والأسعار، لكن فتح أو إغلاق الصفقات يدوياً وتعديل المستويات والتنفيذ التلقائي متاح فقط لأصحاب الخطة المفعّلة.'
+              : 'You can follow signals and prices, but opening/closing trades, editing levels and auto-execution require an active plan.'}
+          </div>
+        </div>
+      )}
       {/* Account bar */}
       <div className="rounded-2xl border border-[#F59E0B]/40 bg-gradient-to-r from-[#F59E0B]/15 via-transparent to-transparent px-3 sm:px-4 py-2.5 flex flex-col gap-2.5 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between lg:gap-3">
         <div className="flex items-center gap-2">
