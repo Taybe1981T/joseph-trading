@@ -358,21 +358,20 @@ export function resolveRiskLevels(args: {
   const fixed = getTradingValuesOverride(cat);
 
   if (cat === 'crypto') {
-    // Fixed system ON → its % values win. Otherwise the signal's automatic
-    // levels are authoritative (same ATR system as every other category);
-    // the percentage fallback only covers symbols with no signal plan.
-    if (!fixed) {
-      const fromSignal = signalLevels({
-        symbol,
-        entry,
-        isBuy,
-        qty,
-        category: cat,
-        signalSl: args.signalSl,
-        signalTp: args.signalTp,
-      });
-      if (fromSignal) return fromSignal;
-    }
+    // Crypto must follow the SAME automatic (ATR/signal-based) levels system as
+    // every other category: the analysed signal's own SL/TP are authoritative
+    // whenever they are usable, regardless of the developer fixed-values switch.
+    // Fixed percentages / defaults are only a fallback for symbols with no signal.
+    const fromSignal = signalLevels({
+      symbol,
+      entry,
+      isBuy,
+      qty,
+      category: cat,
+      signalSl: args.signalSl,
+      signalTp: args.signalTp,
+    });
+    if (fromSignal) return fromSignal;
     return cryptoPctLevels(
       entry,
       isBuy,

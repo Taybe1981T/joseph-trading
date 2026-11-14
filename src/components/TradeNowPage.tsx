@@ -375,25 +375,23 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
 
     // ── SL / TP ──
     if (isCrypto) {
-      // Fixed system ON → developer percentages win.
-      // Fixed system OFF → follow the analysed signal's automatic levels, exactly
-      // like every other category (ATR-based, clamped 3%–12% by the engine), and
-      // only fall back to the old 1.5% / 3% percentages when no signal exists.
-      if (!fixed) {
-        const anchor = Number(matchedSignal?.entryPrice) || Number(livePrice) || 0;
-        const sigSl = Number(matchedSignal?.stopLoss);
-        const sigTp = Number(matchedSignal?.takeProfit);
-        const clampPct = (v: number) => Math.min(25, Math.max(0.1, v));
-        if (anchor > 0 && Number.isFinite(sigSl) && Number.isFinite(sigTp) && sigSl > 0 && sigTp > 0) {
-          const slRaw = (Math.abs(anchor - sigSl) / anchor) * 100;
-          const tpRaw = (Math.abs(sigTp - anchor) / anchor) * 100;
-          if (slRaw > 0 && tpRaw > 0) {
-            const slPctStr = String(Number(clampPct(slRaw).toFixed(2)));
-            const tpPctStr = String(Number(clampPct(tpRaw).toFixed(2)));
-            if (!ticketTouchedRef.current.sl) setSlPrice((prev) => (prev === slPctStr ? prev : slPctStr));
-            if (!ticketTouchedRef.current.tp) setTpPrice((prev) => (prev === tpPctStr ? prev : tpPctStr));
-            return;
-          }
+      // Crypto follows the automatic (ATR/signal-based) levels system like every
+      // other category: the analysed signal's own levels win whenever they are
+      // usable, regardless of the developer fixed-values switch. The fixed
+      // percentages / defaults are only a fallback for symbols with no signal.
+      const anchor = Number(matchedSignal?.entryPrice) || Number(livePrice) || 0;
+      const sigSl = Number(matchedSignal?.stopLoss);
+      const sigTp = Number(matchedSignal?.takeProfit);
+      const clampPct = (v: number) => Math.min(25, Math.max(0.1, v));
+      if (anchor > 0 && Number.isFinite(sigSl) && Number.isFinite(sigTp) && sigSl > 0 && sigTp > 0) {
+        const slRaw = (Math.abs(anchor - sigSl) / anchor) * 100;
+        const tpRaw = (Math.abs(sigTp - anchor) / anchor) * 100;
+        if (slRaw > 0 && tpRaw > 0) {
+          const slPctStr = String(Number(clampPct(slRaw).toFixed(2)));
+          const tpPctStr = String(Number(clampPct(tpRaw).toFixed(2)));
+          if (!ticketTouchedRef.current.sl) setSlPrice((prev) => (prev === slPctStr ? prev : slPctStr));
+          if (!ticketTouchedRef.current.tp) setTpPrice((prev) => (prev === tpPctStr ? prev : tpPctStr));
+          return;
         }
       }
       // Percent of price, taken from the developer panel when the system is ON.
