@@ -81,9 +81,9 @@ export function MobileHeader({
             </div>
           )}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <button className="mt5-icon-btn" style={{ width: 72, height: 72, position: 'relative' }} onClick={onAutoAnalysisToggle} aria-label={isAr ? 'بدء التحليل التلقائي' : 'Start auto analysis'}>
-            <Activity size={34} style={{ color: isDark ? '#ffffff' : (autoAnalysisRunning ? '#10B981' : '#ffffff'), animation: autoAnalysisRunning ? 'pulse 1.5s infinite' : 'none' }} />
+            <Activity size={34} style={{ color: autoAnalysisRunning ? '#10B981' : '#F59E0B', animation: autoAnalysisRunning ? 'pulse 1.5s infinite' : 'none' }} />
             <span style={{ position: 'absolute', top: 4, right: 4, width: 16, height: 16, borderRadius: '50%', background: autoAnalysisRunning ? '#10B981' : '#ffffff' }} />
           </button>
           {/* Developer + paid client only: this button starts the same auto
@@ -91,7 +91,12 @@ export function MobileHeader({
               the control at all. */}
           {onAutoAnalysisToggle && (
             <span style={{
-              fontSize: 9,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '8px 14px',
+              borderRadius: 999,
+              fontSize: 11,
               fontWeight: 900,
               letterSpacing: '0.08em',
               lineHeight: 1,
