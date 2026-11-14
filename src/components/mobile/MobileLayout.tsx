@@ -199,6 +199,30 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     } catch { return ''; }
   });
   const [clientCount, setClientCount] = useState(0);
+  // Keep the developer's clients badge in sync with the cached client list even
+  // before the Client Monitor page is opened (the monitor also reports its own
+  // merged Firestore+local count via onCountChange).
+  useEffect(() => {
+    if (!isDev) { setClientCount(0); return; }
+    const read = () => {
+      try {
+        const arr = JSON.parse(localStorage.getItem('finalyze_clients') || '[]');
+        setClientCount(Array.isArray(arr) ? arr.length : 0);
+      } catch { setClientCount(0); }
+    };
+    read();
+    window.addEventListener('storage', read);
+    // Live count from Firestore as well, so the badge is right on a fresh phone
+    // where the local client cache has never been filled.
+    let alive = true;
+    void (async () => {
+      try {
+        const snap = await getDocs(collection(db, 'clients'));
+        if (alive && snap.size > 0) setClientCount(snap.size);
+      } catch { /* keep the cached count */ }
+    })();
+    return () => { alive = false; window.removeEventListener('storage', read); };
+  }, [isDev]);
   const [savedAccounts, setSavedAccounts] = useState<string[]>(() => {
     try { return JSON.parse(localStorage.getItem('finalyze_saved_accounts') || '[]'); } catch { return []; }
   });
@@ -1189,7 +1213,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         )}
         {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} />}
         {tab === 'profile' && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} isLoggedIn={!!(user?.email || email)} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} isFollowing={following} onFollowToggle={toggleFollowing} />}
-        {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} />}
+        {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} onCountChange={setClientCount} />}
         {children}
       </div>
       <MobileBottomNav
