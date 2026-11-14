@@ -38,8 +38,10 @@ interface TradeNowPageProps {
   lang: Language;
   user: User | null;
   signals?: AnalysisResult[];
-  /** Free/guest accounts are view-only: no manual open/close/edit, no auto toggle. */
+  /** Free/guest accounts are view-only for trading actions that change positions. */
   canTrade?: boolean;
+  /** Signed-in users (incl. free registered clients) may open manual trades. */
+  canOpenManual?: boolean;
 }
 
 const CUSTOM_KEY = 'paper_trading_custom_symbols';
@@ -170,7 +172,7 @@ const normalizeDecimal = (raw: string): string =>
     .replace(/[^0-9.]/g, '')
     .replace(/(\..*)\./g, '$1');
 
-export default function TradeNowPage({ lang, user, signals = [], canTrade = true }: TradeNowPageProps) {
+export default function TradeNowPage({ lang, user, signals = [], canTrade = true, canOpenManual = true }: TradeNowPageProps) {
   const isAr = lang === 'ar';
   const [category, setCategory] = useState<string>('forex');
   const [symbol, setSymbol] = useState<string>('EURUSD');
@@ -917,7 +919,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
   }
 
   async function openTrade(side: 'buy' | 'sell') {
-    if (!canTrade) { denyViewOnly(); return; }
+    if (!canOpenManual) { denyViewOnly(); return; }
     if (!livePrice || busy) return;
     const pendingCat = detectCategory(symbol);
     // Developer "Trading Values" system: when ON, force the fixed lot + the

@@ -27,11 +27,13 @@ interface MobileNewTradeProps {
   balance: number;
   signalFor?: (sym: string) => AnalysisResult | undefined;
   onOpen: (sym: string, type: 'buy' | 'sell', volume: number) => void;
-  /** Free/guest accounts are view-only. */
+  /** Free/guest accounts are view-only for trading actions that change positions. */
   canTrade?: boolean;
+  /** Signed-in users (incl. free registered clients) may open manual trades. */
+  canOpenManual?: boolean;
 }
 
-export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor, onOpen, canTrade = true }: MobileNewTradeProps) {
+export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor, onOpen, canTrade = true, canOpenManual = true }: MobileNewTradeProps) {
   const isAr = lang === 'ar';
   // Same categories/symbols as the Manual Analysis section (unified source, incl. future adds).
   const groups = useMemo(() => getMobileSymbolGroups(), []);
@@ -236,7 +238,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   };
 
   const openSide = async (side: 'buy' | 'sell') => {
-    if (!canTrade) return;
+    if (!canOpenManual) return;
     if (!symbol || busy) return;
     // Desktop parity: crypto trades 24/7; forex/metals/stocks only while their
     // session is open. Blocked here AND enforced again inside the bridge.
@@ -525,7 +527,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
           type="button"
           className="mt5-btn-sell"
           style={{ flex: 1, opacity: busy || !symbol ? 0.5 : 1 }}
-          disabled={busy || !symbol || !canTrade}
+          disabled={busy || !symbol || !canOpenManual}
           onClick={() => openSide('sell')}
         >
           SELL
@@ -534,7 +536,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
           type="button"
           className="mt5-btn-buy"
           style={{ flex: 1, opacity: busy || !symbol ? 0.5 : 1 }}
-          disabled={busy || !symbol || !canTrade}
+          disabled={busy || !symbol || !canOpenManual}
           onClick={() => openSide('buy')}
         >
           BUY

@@ -3364,7 +3364,7 @@ const started = planGrants
                 the user browses other pages. Opening a trade no longer requires
                 sitting on the trade page. */}
             <div className={effectivePage === 'trade' ? 'contents' : 'hidden'} aria-hidden={effectivePage !== 'trade'}>
-              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() || !isPlanClient ? topSignals : []} canTrade={isDeveloperSession() || isPlanClient} />
+              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() || !isPlanClient ? topSignals : []} canTrade={isDeveloperSession() || isPlanClient} canOpenManual={!!user} />
             </div>
 
             {effectivePage === 'store' && (
