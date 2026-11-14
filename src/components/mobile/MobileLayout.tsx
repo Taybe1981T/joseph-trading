@@ -490,11 +490,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const planActive = !!mobileSub && mobileSubscriptionActive(mobileSub);
   const isPlanClient = !isDev && planActive && planPaid;
   const canUseAnalysis = isDev || isPlanClient;
-  // PAID-ONLY SIGNALS: the developer's displayed analysis (shared_results) and
-  // any stored signals are visible/tradeable only while the client is INSIDE a
-  // paid plan. A free-plan client (or a paid client who pressed "رجوع للمجانية")
-  // sees zero signals. The developer always sees them.
-  const canViewSignals = isDev || isPlanClient;
+  // Developer signals are visible to EVERYONE on mobile: a free/guest client
+  // sees the developer's published signals (read-only), a paid client sees their
+  // own analysis. The developer always sees them.
+  const canViewSignals = true;
   // Losing the plan (expired / returned to free / signed out) must not leave the
   // client stranded on a paid screen that no longer renders.
   useEffect(() => {
@@ -639,15 +638,21 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       // it persisted — before this, a client's radar ran but its signals never
       // reached the home feed (and therefore neither did the analysis reasons).
       if (canViewSignals) {
+        // Free/guest clients see the DEVELOPER's published signals (read-only);
+        // paid clients see their own analysis.
+        const signalKey = (!isDev && !isPlanClient)
+          ? 'top_signals_persistent__' + (DEVELOPER_EMAILS[0] || 'guest').toLowerCase().replace(/[^a-z0-9@._-]/g, '_')
+          : mobileSignalsStorageKey();
         try {
-          const raw = localStorage.getItem(mobileSignalsStorageKey());
+          const raw = localStorage.getItem(signalKey);
           const auto = raw ? JSON.parse(raw) : [];
           if (Array.isArray(auto)) {
             merged.push(...auto.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).map((s: any) => ({ ...s, source: s.source || 'auto' })));
           }
         } catch {}
-        // Manual analysis results (same as desktop — always in sync). Paid-only:
-        // a free-mode client must not inherit a previous paid session's signals.
+        // Manual analysis results are the client's OWN analysis — only paid clients
+        // (and the developer) run analysis, so free clients skip this source.
+        if (isDev || isPlanClient) {
         try {
           const mraw = localStorage.getItem('manual_results');
           const man = mraw ? JSON.parse(mraw) : [];
@@ -655,6 +660,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
             merged.push(...man.filter((s: any) => s && s.signal && s.signal !== 'neutral').map((s: any) => ({ ...s, source: 'manual' })));
           }
         } catch {}
+        }
       }
       // de-dup by symbol+timeframe (first occurrence wins)
       const seen = new Set<string>();
