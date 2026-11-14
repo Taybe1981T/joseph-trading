@@ -96,12 +96,7 @@ export default function App() {
   const [analysisResults, setAnalysisResults] = useState<AnalysisResult[] | null>(null);
   const [detailResult, setDetailResult] = useState<AnalysisResult | null>(null);
   const [clientDetailResult, setClientDetailResult] = useState<AnalysisResult | null>(null);
-  const [clientSignals, setClientSignals] = useState<AnalysisResult[]>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('finalyze_client_signals') || '[]');
-      return saved.filter((s: any) => !s.isSideways);
-    } catch { return []; }
-  });
+  const [clientSignals, setClientSignals] = useState<AnalysisResult[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [lang, setLang] = useState<Language>(() => {
@@ -452,106 +447,19 @@ const isDeveloperSession = () => {
     if (effectivePage === 'store') setStoreVisited(true);
   }, [effectivePage]);
 
-  // CLIENT: Mirror results from developer via Firestore ΓÇö poll collection every 10s, NO orderBy
+  // PAID-ONLY (free mode purge): the developer's published analysis
+  // (shared_results) is a paid entitlement. A free-plan client — or a paid
+  // client who switched to free mode — must NOT poll it and must not keep a
+  // previously cached feed. Entering paid mode repopulates the client's own
+  // scoped signals through the plan effect below (desktop parity with mobile).
   useEffect(() => {
     if (isDeveloperSession() || isPlanClient) return;
-    // Allow if user is logged in OR if login is not required (guest mode)
-    if (!user && clientLoginRequired) return;
-    console.log('[CLIENT] Setting up Firestore polling for shared_results');
+    setClientSignals((prev) => (prev.length ? [] : prev));
+    try { localStorage.removeItem('finalyze_client_signals'); } catch {}
+  }, [user, isPlanClient]);
 
-    const isFirstLoad = !localStorage.getItem('finalyze_client_signals');
-    let hasPlayedFirstSound = false;
-
-    const loadFromFirestore = async () => {
-      try {
-        console.log('[CLIENT] Polling shared_results collection...');
-        const snap = await getDocs(collection(db, 'shared_results'));
-        console.log(`[CLIENT] Found ${snap.size} docs in shared_results`);
-        
-        if (snap.empty) {
-          console.warn('[CLIENT] shared_results collection is empty');
-          setClientSignals([]);
-          localStorage.removeItem('finalyze_client_signals');
-          return;
-        }
-        
-        // Find the latest doc by comparing timestamps (handle string, Date, Timestamp, number)
-        let latestData: any = null;
-        let latestTs = 0;
-        
-        snap.forEach(d => {
-          const dta = d.data();
-          let ts = 0;
-          if (dta.timestamp) {
-            if (typeof dta.timestamp === 'string') ts = new Date(dta.timestamp).getTime();
-            else if (typeof dta.timestamp === 'object' && dta.timestamp.toMillis) ts = dta.timestamp.toMillis();
-            else if (dta.timestamp instanceof Date) ts = dta.timestamp.getTime();
-            else if (typeof dta.timestamp === 'number') ts = dta.timestamp;
-          }
-          if (ts >= latestTs) { latestTs = ts; latestData = dta; }
-        });
-        
-        if (!latestData) {
-          console.warn('[CLIENT] No docs with valid timestamp found');
-          setClientSignals([]);
-          localStorage.removeItem('finalyze_client_signals');
-          return;
-        }
-        
-        const results = latestData.results;
-        if (!results || !Array.isArray(results) || results.length === 0) {
-          console.warn('[CLIENT] Latest doc has no results array, clearing');
-          setClientSignals([]);
-          localStorage.removeItem('finalyze_client_signals');
-          return;
-        }
-        
-        const strongCount = results.filter((r: any) => r.signal === 'strong_buy' || r.signal === 'strong_sell').length;
-        console.log(`[CLIENT] Setting ${results.length} signals (${strongCount} strong)`);
-        
-        // Alert for any new signal (any symbol not seen before)
-        const currentSignals = JSON.parse(localStorage.getItem('finalyze_client_signals') || '[]');
-        const currentSymbols = new Set(currentSignals.map((s: any) => s.symbol));
-        const newSignals = results.filter((r: any) => !currentSymbols.has(r.symbol));
-        const hasNewSignal = newSignals.length > 0;
-
-        // Play sound on first load if signals exist
-        if (isFirstLoad && !hasPlayedFirstSound && results.length > 0) {
-          hasPlayedFirstSound = true;
-          const symbols = results.map((r: any) => r.symbol).join(' ΓÇó ');
-          setNewSignalAlert(lang === 'ar' ? `\u062a\u0646\u0628\u064a\u0647 \u0641\u0631\u0635\u0629 \u062c\u062f\u064a\u062f\u0629 \u2014 ${symbols}` : `New Opportunity Alert \u2014 ${symbols}`);
-          setTimeout(() => setNewSignalAlert(null), 10000);
-          try { playAudio('success'); } catch {}
-        }
-        // Play sound when any new opportunity arrives
-        else if (hasNewSignal) {
-          const newSymbols = newSignals.map((r: any) => r.symbol).join(' ΓÇó ');
-          setNewSignalAlert(lang === 'ar' ? `\u062a\u0646\u0628\u064a\u0647 \u0641\u0631\u0635\u0629 \u062c\u062f\u064a\u062f\u0629 \u2014 ${newSymbols}` : `New Opportunity Alert \u2014 ${newSymbols}`);
-          setTimeout(() => setNewSignalAlert(null), 10000);
-          try { playAudio('success'); } catch {}
-        }
-        
-        setClientSignals(results.filter((r: any) => !r.isSideways));
-        localStorage.setItem('finalyze_client_signals', JSON.stringify(results.filter((r: any) => !r.isSideways)));
-      } catch (e: any) {
-        console.error('[CLIENT] Failed to load shared results:', e?.code || e?.message || e);
-      }
-    };
-    
-    // Initial fetch immediately
-    loadFromFirestore();
-    
-    // Poll every 10 seconds
-    const interval = setInterval(loadFromFirestore, 10000);
-    
-    return () => {
-      console.log('[CLIENT] Cleaning up Firestore polling');
-      clearInterval(interval);
-    };
-  }, [user, lang, isPlanClient]);
-
-  // CLIENT PLAN: load per-client scoped signals & auto settings when the plan view is active
-  // When in free mode, load developer shared signals
+  // CLIENT PLAN: load per-client scoped signals & auto settings when the plan
+  // view is active. FREE MODE: no developer signals — clear the feed (paid-only).
   useEffect(() => {
     if (isDeveloperSession()) return;
     if (isPlanClient) {
@@ -569,12 +477,8 @@ const isDeveloperSession = () => {
         }
       } catch {}
     } else {
-      try {
-        const saved = JSON.parse(localStorage.getItem('finalyze_client_signals') || '[]');
-        setClientSignals(Array.isArray(saved) ? saved.filter((s: any) => !s.isSideways) : []);
-      } catch {
-        setClientSignals([]);
-      }
+      setClientSignals((prev) => (prev.length ? [] : prev));
+      try { localStorage.removeItem('finalyze_client_signals'); } catch {}
     }
   }, [isPlanClient, cxnSigKey, cxnAutoKey]);
 
@@ -1166,11 +1070,14 @@ const isDeveloperSession = () => {
       const raw = JSON.parse(localStorage.getItem('paper_trading_data') || 'null');
       if (raw && typeof raw.leverage === 'number' && raw.leverage > 0) currentLeverage = raw.leverage;
     } catch { /* keep default */ }
+    // PAID-ONLY: a free-plan client never feeds signals to the auto engine, so
+    // no trade can ever be opened from the developer's displayed analysis.
+    const entitledFeed = (isDeveloperSession() || isPlanClient) ? topSignals : [];
     if (!autoEngineRef.current) {
       autoEngineRef.current = new AutoTradeEngine({
         user,
         leverage: currentLeverage,
-        signals: topSignals.filter((s: any) => !s?.isSideways).map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
+        signals: entitledFeed.filter((s: any) => !s?.isSideways).map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
         isDeveloper: isDeveloperSession(),
         origin: user?.uid || user?.email || '',
       });
@@ -1179,12 +1086,12 @@ const isDeveloperSession = () => {
       autoEngineRef.current.updateConfig({
         user,
         leverage: currentLeverage,
-        signals: topSignals.filter((s: any) => !s?.isSideways).map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
+        signals: entitledFeed.filter((s: any) => !s?.isSideways).map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
         isDeveloper: isDeveloperSession(),
         origin: user?.uid || user?.email || '',
       });
     }
-  }, [topSignals, user, autoTradeGen]);
+  }, [topSignals, user, autoTradeGen, isPlanClient]);
 
   useEffect(() => () => { autoEngineRef.current?.stop(); autoEngineRef.current = null; }, []);
 
@@ -1258,10 +1165,15 @@ const isDeveloperSession = () => {
     if (!mirrorEnabledState) return;
     let alive = true;
     let busy = false;
-    const displayed = () => [
-      ...(Array.isArray(topSignals) ? topSignals.map((s: any) => s?.symbol).filter(Boolean) : []),
-      ...(Array.isArray(clientSignals) ? clientSignals.map((s: any) => s?.symbol).filter(Boolean) : []),
-    ];
+    const displayed = () => {
+      // PAID-ONLY: free clients expose no displayed symbols, so the mirror can
+      // never open a trade from the developer's analysis for them.
+      if (!isDeveloperSession() && !isPlanClient) return [];
+      return [
+        ...(Array.isArray(topSignals) ? topSignals.map((s: any) => s?.symbol).filter(Boolean) : []),
+        ...(Array.isArray(clientSignals) ? clientSignals.map((s: any) => s?.symbol).filter(Boolean) : []),
+      ];
+    };
     const mirrorOpts = () => ({
       user,
       displayedSymbols: displayed(),
@@ -3444,7 +3356,7 @@ const started = planGrants
                 the user browses other pages. Opening a trade no longer requires
                 sitting on the trade page. */}
             <div className={effectivePage === 'trade' ? 'contents' : 'hidden'} aria-hidden={effectivePage !== 'trade'}>
-              <TradeNowPage lang={lang} user={user} signals={topSignals} />
+              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() || isPlanClient ? topSignals : []} />
             </div>
 
             {effectivePage === 'store' && (

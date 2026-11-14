@@ -490,6 +490,11 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const planActive = !!mobileSub && mobileSubscriptionActive(mobileSub);
   const isPlanClient = !isDev && planActive && planPaid;
   const canUseAnalysis = isDev || isPlanClient;
+  // PAID-ONLY SIGNALS: the developer's displayed analysis (shared_results) and
+  // any stored signals are visible/tradeable only while the client is INSIDE a
+  // paid plan. A free-plan client (or a paid client who pressed "رجوع للمجانية")
+  // sees zero signals. The developer always sees them.
+  const canViewSignals = isDev || isPlanClient;
   // Losing the plan (expired / returned to free / signed out) must not leave the
   // client stranded on a paid screen that no longer renders.
   useEffect(() => {
@@ -632,7 +637,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       // AND a paid-plan client run their own radar, so both must see the results
       // it persisted — before this, a client's radar ran but its signals never
       // reached the home feed (and therefore neither did the analysis reasons).
-      if (isDev || isPlanClient) {
+      if (canViewSignals) {
         try {
           const raw = localStorage.getItem(mobileSignalsStorageKey());
           const auto = raw ? JSON.parse(raw) : [];
@@ -640,15 +645,16 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
             merged.push(...auto.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).map((s: any) => ({ ...s, source: s.source || 'auto' })));
           }
         } catch {}
+        // Manual analysis results (same as desktop — always in sync). Paid-only:
+        // a free-mode client must not inherit a previous paid session's signals.
+        try {
+          const mraw = localStorage.getItem('manual_results');
+          const man = mraw ? JSON.parse(mraw) : [];
+          if (Array.isArray(man)) {
+            merged.push(...man.filter((s: any) => s && s.signal && s.signal !== 'neutral').map((s: any) => ({ ...s, source: 'manual' })));
+          }
+        } catch {}
       }
-      // Manual analysis results (same as desktop — always in sync)
-      try {
-        const mraw = localStorage.getItem('manual_results');
-        const man = mraw ? JSON.parse(mraw) : [];
-        if (Array.isArray(man)) {
-          merged.push(...man.filter((s: any) => s && s.signal && s.signal !== 'neutral').map((s: any) => ({ ...s, source: 'manual' })));
-        }
-      } catch {}
       // de-dup by symbol+timeframe (first occurrence wins)
       const seen = new Set<string>();
       const full: any[] = [];
@@ -660,19 +666,22 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       }
       full.sort((a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
       // Only update state when the data really changed (avoids needless re-renders every 5s).
-      const nextFull = full.slice(0, 40);
+      const nextFull = canViewSignals ? full.slice(0, 40) : [];
       setFullSignals((prev) => {
+        // Free mode: always empty — signals must disappear the moment the client
+        // leaves the paid plan (never keep the previous paid feed).
+        if (!canViewSignals) return prev.length ? [] : prev;
         if (nextFull.length === 0 && prev.length > 0) return prev;
         try { if (JSON.stringify(prev) === JSON.stringify(nextFull)) return prev; } catch {}
         return nextFull as AnalysisResult[];
       });
-      setSignals(full.map((s: any) => ({
+      setSignals(canViewSignals ? full.map((s: any) => ({
         symbol: String(s.symbol || ''),
         type: (String(s.signal || '').includes('sell') ? 'sell' : 'buy') as 'buy' | 'sell',
         price: Number(s.entryPrice ?? s.price ?? 0),
         change: Number(s.change ?? 0),
         changePercent: Number(s.changePercent ?? 0),
-      })).filter((s) => s.symbol));
+      })).filter((s) => s.symbol) : []);
     } catch {}
     // Account: same store as desktop (balance + leverage aware).
     try {
@@ -799,12 +808,19 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
 
 
 
-  // CLIENT: Poll Firestore for shared signals from desktop (same as desktop client logic).
-  // Paid-plan clients run their own analysis instead (desktop parity).
+  // PAID-ONLY: the developer's published analysis (shared_results) is the ONLY
+  // source of "main-site" signals on mobile. It must reach paid-plan clients in
+  // paid mode ONLY — never a free-plan client, never a paid client who pressed
+  // "رجوع للمجانية", and never the developer (who already owns the source data).
+  // canViewSignalsRef lets the poll keep its own identity without re-subscribing.
+  const canViewSignalsRef = useRef(canViewSignals);
+  useEffect(() => { canViewSignalsRef.current = canViewSignals; }, [canViewSignals]);
+
   useEffect(() => {
     const userEmail = (user?.email || email || '').toLowerCase().trim();
     const isDev = isDeveloperEmail(userEmail);
-    if (isDev || isPlanClient) return;
+    // Developer has nothing to mirror; free clients are not entitled at all.
+    if (isDev || !isPlanClient) return;
 
     const pollFirestore = async () => {
       try {
@@ -825,6 +841,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         const firestoreSignals = latestData.results.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).map((s: any) => ({ ...s, source: s.source || 'auto' }));
         if (firestoreSignals.length > 0) {
           setFullSignals((prev) => {
+            // The client may have dropped to free mode mid-poll: never resurrect
+            // a feed that is no longer entitled.
+            if (!canViewSignalsRef.current) return prev.length ? [] : prev;
             const seen = new Set<string>();
             const merged: any[] = [];
             for (const s of firestoreSignals) {
@@ -850,7 +869,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     pollFirestore();
     const iv = setInterval(pollFirestore, 10000);
     return () => clearInterval(iv);
-  }, [user, email, isPlanClient]);
+  }, [user, email, isPlanClient, canViewSignals]);
 
   const ping = (freq: number) => {
     if (!sound) return;
@@ -1034,6 +1053,21 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     setPlanPaid(false);
     setMobileFreeModeChosen(signedInEmail, true);
     setMobilePaidMode(signedInEmail, false);
+    // Signals are a paid entitlement: wipe them from the screen at once and stop
+    // the client's own radar, so nothing from the developer's feed stays visible.
+    setFullSignals([]);
+    setSignals([]);
+    setDetail(null);
+    setFreshCount(0);
+    try { syncMobileAutoEngine([]); } catch {}
+    try {
+      stopMobileRadar();
+      setAutoAnalysisOn(false);
+      setRadarProgress(null);
+      const s = readMobileAuto();
+      try { localStorage.setItem('auto_settings', JSON.stringify({ ...s, isEnabled: false })); } catch {}
+      try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
+    } catch {}
     setAlert(lang === 'ar' ? 'تم الرجوع للخطة المجانية' : 'Returned to the free plan');
     setTimeout(() => setAlert(null), 4000);
   };
@@ -1103,13 +1137,27 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const signalFor = useCallback((sym: string) => fullSignals.find((r) => r.symbol === sym), [fullSignals]);
 
   const [freshCount, setFreshCount] = useState(0);
+  // PAID-ONLY: alerts are gated by the same entitlement that gates the feed.
   useMobileSignalAlert(useCallback((n: number) => {
     loadAll();
     setFreshCount(n);
     ping(880);
     setAlert((lang === 'ar' ? 'إشارة جديدة: ' : 'New signal: ') + n);
     setTimeout(() => { setAlert(null); setFreshCount(0); }, 8000);
-  }, [loadAll, lang]));
+  }, [loadAll, lang]), canViewSignals);
+
+  // Leaving the paid plan (free mode / expiry / sign-out) must remove the
+  // displayed developer signals IMMEDIATELY — not on the next 3s load tick and
+  // not only after a refresh. Reactivating the plan is handled by the normal
+  // loadAll effects, which repopulate the feed from the entitled sources.
+  useEffect(() => {
+    if (canViewSignals) return;
+    setFullSignals((prev) => (prev.length ? [] : prev));
+    setSignals((prev) => (prev.length ? [] : prev));
+    setDetail(null);
+    setFreshCount(0);
+    try { syncMobileAutoEngine([]); } catch {}
+  }, [canViewSignals]);
 
   const runManual = (results: any[]) => {
     loadAll();
@@ -1149,34 +1197,40 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         </button>
       )}
       {/* Paid plan strip: the client's plan is visible on every section of the
-          app, with the same paid/free switch the desktop site has. */}
+          app, with the same paid/free switch the desktop site has. SOLID YELLOW
+          (brand accent) so it is impossible to miss as the free/paid link. */}
       {tab !== 'store' && mobileSub && (
-        <div style={{ margin: '8px 14px 0', padding: '10px 12px', borderRadius: 12, background: planPaid ? 'rgba(16,185,129,0.12)' : 'rgba(148,163,184,0.12)', border: `1px solid ${planPaid ? 'rgba(16,185,129,0.4)' : 'rgba(148,163,184,0.35)'}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-            <span style={{ fontSize: 12, fontWeight: 900, color: planPaid ? '#10B981' : '#94A3B8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div style={{ margin: '8px 14px 0', padding: '10px 12px', borderRadius: 12, background: '#FACC15', border: '1px solid #EAB308', boxShadow: '0 2px 10px rgba(234,179,8,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+            <span style={{ fontSize: 12.5, fontWeight: 900, color: '#111827', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {planPaid ? (lang === 'ar' ? 'خطتك المدفوعة' : 'Your paid plan') : (lang === 'ar' ? 'الخطة المدفوعة متوقفة' : 'Paid plan paused')}
               {': '}{mobileSub.label}
             </span>
-            <span style={{ fontSize: 11, color: '#9CA3AF' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#78350F' }}>
               {(() => {
                 const ms = new Date(mobileSub.expiryDate).getTime();
                 if (!isFinite(ms)) return lang === 'ar' ? 'بانتظار المفتاح' : 'Waiting for key';
                 const d = Math.max(0, Math.ceil((ms - Date.now()) / 86400000));
                 return lang === 'ar' ? `${d} يوم متبقٍ` : `${d} days left`;
               })()}
+              {!planPaid && (
+                <span style={{ display: 'block', color: '#78350F' }}>
+                  {lang === 'ar' ? 'الإشارات مخفية في الوضع المجاني' : 'Signals hidden in free mode'}
+                </span>
+              )}
             </span>
           </div>
           <button
             type="button"
             onClick={() => { if (planPaid) returnToFreePlan(); else activatePaidPlan(); }}
-            style={{ flexShrink: 0, padding: '8px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 900, color: '#fff', background: planPaid ? '#475569' : '#10B981' }}
+            style={{ flexShrink: 0, padding: '8px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 900, color: '#fff', background: planPaid ? '#111827' : '#065E46' }}
           >
             {planPaid ? (lang === 'ar' ? 'رجوع للمجانية' : 'Back to Free') : (lang === 'ar' ? 'تفعيل المدفوعة' : 'Activate Paid')}
           </button>
         </div>
       )}
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
-        {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} onRemoveAll={() => setFullSignals([])} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} radarProgress={radarProgress} />}
+        {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} onRemoveAll={() => setFullSignals([])} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} radarProgress={radarProgress} signalsAllowed={canViewSignals} />}
         {tab === 'quotes' && isDev && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} />}

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Zap } from 'lucide-react';
+import { Zap, Lock } from 'lucide-react';
 import { AnalysisResult } from '../../types';
 import { Language } from '../../lib/i18n';
 import { useMobileMode, mobileT } from '../../lib/mobileMode';
@@ -17,6 +17,7 @@ interface MobileHomeProps {
   radarOn: boolean;
   radarLabel: string | null;
   radarProgress: { current: string; total: number; index: number; category?: string } | null;
+  signalsAllowed: boolean;
 }
 
 const AR_CATS: Record<string, string> = {
@@ -29,6 +30,7 @@ const CAT_ORDER = ['forex', 'crypto', 'stocks', 'metals', 'energy', 'indices', '
 export function MobileHome({
   fullSignals, lang, onDetail, onTrade, onRemove, onRemoveAll,
   autoTradeEnabled, onAutoTradeToggle, radarOn, radarLabel, radarProgress,
+  signalsAllowed,
 }: MobileHomeProps) {
   const { isDev, isClient, hasPlan } = useMobileMode();
   const isAr = lang === 'ar';
@@ -148,12 +150,24 @@ export function MobileHome({
         </div>
       )}
 
-      {isClient && !hasPlan && (
-        <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10, padding: '9px 14px', fontSize: 12, color: '#F59E0B', fontWeight: 700 }}>
-          {mobileT(lang, 'Free plan — limited signals. Upgrade for full access.', 'خطة مجانية — إشارات محدودة. رقِّ للوصول الكامل.')}
+      {/* PAID-ONLY: without an active paid plan (free plan, or paid paused) NO
+          signal is rendered — the developer's main-site analysis is visible to
+          paid clients in paid mode only. Solid yellow so the lock is obvious. */}
+      {!signalsAllowed && (
+        <div style={{ background: '#FACC15', border: '1px solid #EAB308', borderRadius: 14, padding: '16px 14px', marginBottom: 12, color: '#111827', boxShadow: '0 3px 12px rgba(250,204,21,0.35)', textAlign: 'center' }}>
+          <Lock size={30} style={{ color: '#111827', marginBottom: 6 }} />
+          <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 4 }}>
+            {mobileT(lang, 'Signals are locked', 'الإشارات مقفلة')}
+          </div>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#78350F', lineHeight: 1.6 }}>
+            {mobileT(lang,
+              'Signals from the developer analysis appear only for paid-plan accounts inside paid mode. Activate your plan from the yellow bar above to view and trade them.',
+              'إشارات تحليل المطوّر تظهر فقط لحسابات الخطة المدفوعة داخل وضع الخطة. فعّل خطتك من الشريط الأصفر بالأعلى لعرضها والتداول عليها.')}
+          </div>
         </div>
       )}
 
+      {signalsAllowed && (<>
       <div className="mt5-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span><Zap size={16} /> {mobileT(lang, 'Best current signal', 'أفضل إشارة حالية')}</span>
         {fullSignals.length > 0 && (
@@ -214,6 +228,7 @@ export function MobileHome({
           ))}
         </div>
       ))}
+      </>)}
     </div>
   );
 }

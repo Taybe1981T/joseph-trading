@@ -3,10 +3,18 @@ import { playChampagnePop } from '../../lib/tradeSounds';
 import { initAudio } from '../../lib/audioEngine';
 import { mobileSignalsStorageKey } from '../../services/mobileAnalysisEngine';
 
-export function useMobileSignalAlert(onFresh: (count: number) => void) {
+export function useMobileSignalAlert(onFresh: (count: number) => void, enabled = true) {
   const prevRef = useRef<Set<string>>(new Set());
   const firstRef = useRef(true);
   useEffect(() => {
+    // PAID-ONLY: a free-plan client (or a paid client in free mode) must get no
+    // new-signal alerts at all. Reset the baseline so reactivating the paid plan
+    // does not fire a burst for signals that appeared while disabled.
+    if (!enabled) {
+      firstRef.current = true;
+      prevRef.current = new Set();
+      return;
+    }
     const snapshot = () => {
       try {
         const raw = localStorage.getItem(mobileSignalsStorageKey());
@@ -35,5 +43,5 @@ export function useMobileSignalAlert(onFresh: (count: number) => void) {
     const iv = setInterval(snapshot, 5000);
     window.addEventListener('storage', snapshot);
     return () => { clearInterval(iv); window.removeEventListener('storage', snapshot); };
-  }, [onFresh]);
+  }, [onFresh, enabled]);
 }
