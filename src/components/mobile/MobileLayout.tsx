@@ -45,6 +45,7 @@ import {
   detectMobileTradeCategory,
   startMobilePositionManager,
   openMobileManualTrade,
+  stampMobileLegacyTradeModes,
 } from '../../services/mobileTradeBridge';
 import { auth, db } from '../../lib/firebase';
 import { signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
@@ -494,6 +495,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // sees the developer's published signals (read-only), a paid client sees their
   // own analysis. The developer always sees them.
   const canViewSignals = true;
+  // Trades are display-scoped by the mode they were opened in. Developer sees all.
+  const activeTradeMode: 'free' | 'paid' = isDev || isPlanClient ? 'paid' : 'free';
   // ONE-TIME CLEANUP of the old developer-signal leak: older builds stored the
   // polled developer feed in the shared `top_signals_persistent__<account>` key,
   // so a paid client could see developer signals again after a page refresh.
@@ -647,6 +650,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     syncMobileAutoEngine(isDev || isPlanClient ? fullSignals : []);
   }, [fullSignals, isDev, isPlanClient]);
 
+  // The latest signals are read through a ref instead. Declared BEFORE loadAll
+  // so the trade-mode migration can compare legacy auto trades against the
+  // client's CURRENT paid analysis instead of the mount-time value.
+  const fullSignalsRef = useRef<AnalysisResult[]>([]);
+  useEffect(() => { fullSignalsRef.current = fullSignals; }, [fullSignals]);
+
   const loadAll = useCallback(async () => {
     try {
       const merged: any[] = [];
@@ -707,12 +716,26 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       const acc = await readMobileAccount();
       if (typeof acc.balance === 'number') setBalance(acc.balance);
     } catch {}
-    // Positions tab: read open trades from the SAME store (auto + manual) — no mock fills.
+    // Positions tab: read open trades from the SAME store (auto + manual) - no mock fills.
     try {
+      // One-time: stamp legacy trades with the mode they belong to. Legacy AUTO
+      // trades not present in the client's own paid analysis are free-view copy
+      // trades, so paid mode hides them without deleting anything.
+      try {
+        await stampMobileLegacyTradeModes(
+          activeTradeMode,
+          fullSignalsRef.current.map((s: any) => String(s?.symbol || '')),
+          signedInEmail,
+        );
+      } catch {}
       const all = await listMobileTrades();
-      const open = all.filter((t: any) => t.status === 'open');
+      // Display scope: only trades belonging to the current mode (developer: all).
+      const visible = isDev
+        ? all
+        : all.filter((t: any) => !t.mode || t.mode === activeTradeMode);
+      const open = visible.filter((t: any) => t.status === 'open');
       // History tab: closed trades from the SAME store (desktop parity: History tab).
-      const closed = all
+      const closed = visible
         .filter((t: any) => t.status === 'closed')
         .slice()
         .sort((a: any, b: any) => (b.closedAt || 0) - (a.closedAt || 0))
@@ -786,9 +809,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // IMPORTANT: this effect must NOT depend on fullSignals. loadAll() calls
   // setFullSignals(new array) every run, so depending on it created an endless
   // render loop (loadAll -> setFullSignals -> effect re-run -> loadAll ...) that
-  // froze the mobile UI. The latest signals are read through a ref instead.
-  const fullSignalsRef = useRef<AnalysisResult[]>([]);
-  useEffect(() => { fullSignalsRef.current = fullSignals; }, [fullSignals]);
+  // froze the mobile UI. The latest signals are read through a ref instead
+  // (declared above loadAll).
 
   useEffect(() => {
     loadAll();

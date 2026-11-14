@@ -115,6 +115,8 @@ export interface AutoTradeConfig {
   isDeveloper?: boolean;
   /** Developer identity stamped on broadcast events (uid or email). */
   origin?: string;
+  /** Display mode the opened trades belong to (free view vs paid analysis). */
+  tradeMode?: 'free' | 'paid';
 }
 
 const SCAN_INTERVAL_MS = 3000;
@@ -374,6 +376,7 @@ export class AutoTradeEngine {
           symbol: sym, category: cat, side, qty: q, entryPrice,
           status: 'open' as const, tp: tpPrice, sl: slPrice, openedAt: Date.now(),
           source: 'auto',
+          mode: this.config.tradeMode || 'paid',
         };
 
         try {

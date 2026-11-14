@@ -157,6 +157,8 @@ export async function pollMirrorEvents(opts: {
    * honoured (closing is safe even if the signal vanished).
    */
   displayedSymbols?: string[];
+  /** Display mode the mirrored trades belong to (free view vs paid). */
+  mode?: 'free' | 'paid';
 }): Promise<MirrorTradeEvent[]> {
   const executed: MirrorTradeEvent[] = [];
   // Respect the user's mirror toggle — both the 10s poll and the real-time
@@ -255,6 +257,7 @@ export async function pollMirrorEvents(opts: {
           sl: levels.slPrice,
           openedAt: Date.now(),
           source: 'auto',
+          mode: opts.mode || 'free',
         });
         guardMarkOpened(sym);
         openedThisPoll.add(sym);

@@ -25,6 +25,7 @@ import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { usdToPrice } from '../lib/positionMath';
 import { baseQtyForSymbol, baseQtyPerCategory, calcRiskUSD, getDefaultQty } from './paperTradingService';
+import { cryptoTierRiskPct } from '../lib/cryptoTiers';
 
 export type TradingCategory = 'forex' | 'crypto' | 'stocks' | 'metals';
 
@@ -52,12 +53,12 @@ export const TRADING_VALUES_STORAGE_KEY = 'finalyze_trading_values_v1';
 // standard trailing rule ($5 activation / $2 step).
 const DEFAULT_RISK = calcRiskUSD(10000);
 
-// Crypto stops/targets are PERCENTAGES of the entry price, not USD amounts.
-// A USD distance divided by the coin quantity is meaningless across coins:
-// $60 with 0.1 BTC = 0.6% (too tight) and $60 with 0.1 DOGE = a price 3000×
-// below zero. Percentages give logical levels on every coin.
-export const CRYPTO_SL_PCT = 1.5;   // 1.5% stop
-export const CRYPTO_TP_PCT = 3;     // 3% target (1:2 R:R)
+// Crypto stops/targets are PERCENTAGES of the entry price, tiered by liquidity.
+// At a $1,000 notional: high 5%/10% ($50/$100), medium 3%/6% ($30/$60),
+// weak 1.5%/3% ($15/$30). The lot scales with balanceThousands(), so the USD
+// amounts grow with the account balance.
+export const CRYPTO_SL_PCT = 5;    // high-liquidity stop (medium ×0.6, low ×0.3)
+export const CRYPTO_TP_PCT = 10;   // high-liquidity target (1:2 R:R)
 const CRYPTO_PCT_MIN = 0.1;
 const CRYPTO_PCT_MAX = 25;
 // Old documents stored crypto SL/TP as USD (60 / 120). They are migrated by
@@ -72,8 +73,8 @@ export function normalizeTradingCategory(category: string): TradingCategory {
 export function defaultCategoryTradingValues(category: string): CategoryTradingValues {
   const cat = normalizeTradingCategory(category);
   if (cat === 'crypto') {
-    // Crypto: lotSize is the HIGH-tier base (×10 medium, ×100 low) and the
-    // SL/TP fields hold percentages.
+    // Crypto: lotSize is the HIGH-tier base (×100 medium, ×1000 low) and the
+    // SL/TP fields hold the HIGH-tier percentages (medium/low derive from them).
     return {
       lotSize: baseQtyPerCategory('crypto'),
       stopLossUSD: CRYPTO_SL_PCT,
@@ -121,10 +122,22 @@ export function normalizeTradingValues(raw: any): TradingValuesConfig {
     const src = raw && raw.categories && typeof raw.categories === 'object' ? raw.categories[cat] : null;
     const value = src && typeof src === 'object' ? src : {};
     const isCrypto = cat === 'crypto';
+    let lotSize = positiveNumber(value.lotSize, def.lotSize);
+    let stopLossUSD = isCrypto ? cryptoPercent(value.stopLossUSD, def.stopLossUSD) : positiveNumber(value.stopLossUSD, def.stopLossUSD);
+    let takeProfitUSD = isCrypto ? cryptoPercent(value.takeProfitUSD, def.takeProfitUSD) : positiveNumber(value.takeProfitUSD, def.takeProfitUSD);
+    if (isCrypto) {
+      // Upgrade values saved by an older build: crypto lot 0.1 → 0.01 and the
+      // old 1.5% / 3% levels → the new high-tier 5% / 10%.
+      if (Math.abs(lotSize - 0.1) < 1e-9) lotSize = def.lotSize;
+      if (Math.abs(stopLossUSD - 1.5) < 0.01 && Math.abs(takeProfitUSD - 3) < 0.01) {
+        stopLossUSD = def.stopLossUSD;
+        takeProfitUSD = def.takeProfitUSD;
+      }
+    }
     cats[cat] = {
-      lotSize: positiveNumber(value.lotSize, def.lotSize),
-      stopLossUSD: isCrypto ? cryptoPercent(value.stopLossUSD, def.stopLossUSD) : positiveNumber(value.stopLossUSD, def.stopLossUSD),
-      takeProfitUSD: isCrypto ? cryptoPercent(value.takeProfitUSD, def.takeProfitUSD) : positiveNumber(value.takeProfitUSD, def.takeProfitUSD),
+      lotSize,
+      stopLossUSD,
+      takeProfitUSD,
       trailingActivationUSD: positiveNumber(value.trailingActivationUSD, def.trailingActivationUSD),
       trailingStepUSD: positiveNumber(value.trailingStepUSD, def.trailingStepUSD),
     };
@@ -267,7 +280,7 @@ export function cryptoPctLevels(
 
 /**
  * Lot size for a trade.
- * - crypto: ALWAYS the tiered, balance-scaled lot (BTC 0.1 / SOL 1 / DOGE 10
+ * - crypto: ALWAYS the tiered, balance-scaled lot (BTC 0.01 / SOL 1 / DOGE 10
  *   per $1,000); the panel's crypto lot is the high-tier base.
  * - other categories: the developer's fixed lot when the system is ON,
  *   otherwise the balance-scaled lot.
@@ -337,10 +350,10 @@ function signalLevels(args: {
 /**
  * SL/TP price levels for a trade — the SINGLE source of truth for auto and
  * manual orders on desktop + mobile:
- *   • system ON   → forced fixed values (crypto = % of price)
- *   • system OFF  → the analysed signal's own ATR-based SL/TP when available
- *                   (ALL categories, crypto included), otherwise the dynamic
- *                   balance risk (crypto = % of price)
+ *   • crypto      → liquidity-tier percentages (high 5/10, medium 3/6, weak 1.5/3)
+ *   • system ON   → forced fixed values
+ *   • system OFF  → the analysed signal's own ATR-based SL/TP when available,
+ *                   otherwise the dynamic balance risk
  */
 export function resolveRiskLevels(args: {
   category: string;
@@ -358,27 +371,17 @@ export function resolveRiskLevels(args: {
   const fixed = getTradingValuesOverride(cat);
 
   if (cat === 'crypto') {
-    // Crypto must follow the SAME automatic (ATR/signal-based) levels system as
-    // every other category: the analysed signal's own SL/TP are authoritative
-    // whenever they are usable, regardless of the developer fixed-values switch.
-    // Fixed percentages / defaults are only a fallback for symbols with no signal.
-    const fromSignal = signalLevels({
+    // Crypto uses the liquidity-tier plan directly (the user's rules):
+    //   high 5% / 10%, medium 3% / 6%, weak 1.5% / 3% of the entry price.
+    // Higher liquidity = wider stop/target. The qty/balance scaling already
+    // makes the USD risk grow with the account balance. When the developer
+    // fixed-values system is ON, its crypto fields hold the HIGH-tier base.
+    const tier = cryptoTierRiskPct(
       symbol,
-      entry,
-      isBuy,
-      qty,
-      category: cat,
-      signalSl: args.signalSl,
-      signalTp: args.signalTp,
-    });
-    if (fromSignal) return fromSignal;
-    return cryptoPctLevels(
-      entry,
-      isBuy,
       fixed?.slPct ?? CRYPTO_SL_PCT,
       fixed?.tpPct ?? CRYPTO_TP_PCT,
-      qty,
     );
+    return cryptoPctLevels(entry, isBuy, tier.slPct, tier.tpPct, qty);
   }
 
   if (fixed) {

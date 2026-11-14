@@ -28,6 +28,8 @@ import { openEventFor, broadcastMirrorEvent } from '../services/tradeMirror';
 import MT5ConnectModal from './MT5ConnectModal';
 import { loadConnection, mt5Bridge, MT5Connection } from '../services/mt5Bridge';
 import { isDeveloperEmail } from '../lib/clientIds';
+import { cryptoTierRiskPct } from '../lib/cryptoTiers';
+import { TradeMode, currentTradeMode, stampLegacyTradeModes } from '../lib/tradeMode';
 
 // Minimum wait after an auto-close before the same symbol may be auto-opened
 // again. Prevents a rapid open→close→open loop while still letting a still-valid
@@ -42,6 +44,10 @@ interface TradeNowPageProps {
   canTrade?: boolean;
   /** Signed-in users (incl. free registered clients) may open manual trades. */
   canOpenManual?: boolean;
+  /** Current display mode (free view vs paid analysis). */
+  tradeMode?: TradeMode;
+  /** Developer sees every trade regardless of mode. */
+  showAllTradeModes?: boolean;
 }
 
 const CUSTOM_KEY = 'paper_trading_custom_symbols';
@@ -172,8 +178,9 @@ const normalizeDecimal = (raw: string): string =>
     .replace(/[^0-9.]/g, '')
     .replace(/(\..*)\./g, '$1');
 
-export default function TradeNowPage({ lang, user, signals = [], canTrade = true, canOpenManual = true }: TradeNowPageProps) {
+export default function TradeNowPage({ lang, user, signals = [], canTrade = true, canOpenManual = true, tradeMode, showAllTradeModes = false }: TradeNowPageProps) {
   const isAr = lang === 'ar';
+  const activeTradeMode: TradeMode = tradeMode ?? currentTradeMode(user?.email);
   const [category, setCategory] = useState<string>('forex');
   const [symbol, setSymbol] = useState<string>('EURUSD');
   const isCryptoTicket = detectCategory(symbol) === 'crypto';
@@ -375,28 +382,15 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
 
     // ── SL / TP ──
     if (isCrypto) {
-      // Crypto follows the automatic (ATR/signal-based) levels system like every
-      // other category: the analysed signal's own levels win whenever they are
-      // usable, regardless of the developer fixed-values switch. The fixed
-      // percentages / defaults are only a fallback for symbols with no signal.
-      const anchor = Number(matchedSignal?.entryPrice) || Number(livePrice) || 0;
-      const sigSl = Number(matchedSignal?.stopLoss);
-      const sigTp = Number(matchedSignal?.takeProfit);
-      const clampPct = (v: number) => Math.min(25, Math.max(0.1, v));
-      if (anchor > 0 && Number.isFinite(sigSl) && Number.isFinite(sigTp) && sigSl > 0 && sigTp > 0) {
-        const slRaw = (Math.abs(anchor - sigSl) / anchor) * 100;
-        const tpRaw = (Math.abs(sigTp - anchor) / anchor) * 100;
-        if (slRaw > 0 && tpRaw > 0) {
-          const slPctStr = String(Number(clampPct(slRaw).toFixed(2)));
-          const tpPctStr = String(Number(clampPct(tpRaw).toFixed(2)));
-          if (!ticketTouchedRef.current.sl) setSlPrice((prev) => (prev === slPctStr ? prev : slPctStr));
-          if (!ticketTouchedRef.current.tp) setTpPrice((prev) => (prev === tpPctStr ? prev : tpPctStr));
-          return;
-        }
-      }
-      // Percent of price, taken from the developer panel when the system is ON.
-      const slPct = String(Number((fixed?.slPct ?? CRYPTO_SL_PCT).toFixed(2)));
-      const tpPct = String(Number((fixed?.tpPct ?? CRYPTO_TP_PCT).toFixed(2)));
+      // Crypto uses the liquidity-tier plan: high 5%/10%, medium 3%/6%,
+      // weak 1.5%/3% (the developer panel drives the high-tier base).
+      const tierRisk = cryptoTierRiskPct(
+        symbol,
+        fixed?.slPct ?? CRYPTO_SL_PCT,
+        fixed?.tpPct ?? CRYPTO_TP_PCT,
+      );
+      const slPct = String(Number(tierRisk.slPct.toFixed(2)));
+      const tpPct = String(Number(tierRisk.tpPct.toFixed(2)));
       if (!ticketTouchedRef.current.sl) setSlPrice((prev) => (prev === slPct ? prev : slPct));
       if (!ticketTouchedRef.current.tp) setTpPrice((prev) => (prev === tpPct ? prev : tpPct));
       return;
@@ -442,14 +436,24 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     return [...new Set([...base, ...extra])].filter((s) => !hiddenSymbols.includes(s));
   };
   const symbols = allSymbolsFor(category);
-  const openTrades = trades.filter((t) => t.status === 'open');
-  const closedTrades = trades.filter((t) => t.status === 'closed').slice(0, 30);
+  // MODE-SCOPED DISPLAY: free-mode trades are shown only in free mode, paid ones
+  // only in paid mode. The developer sees everything. The trade data itself is
+  // untouched — switching modes only changes what is displayed.
+  const visibleTrades = showAllTradeModes
+    ? trades
+    : trades.filter((t) => !t.mode || t.mode === activeTradeMode);
+  const allOpenTrades = trades.filter((t) => t.status === 'open');
+  const openTrades = visibleTrades.filter((t) => t.status === 'open');
+  const closedTrades = visibleTrades.filter((t) => t.status === 'closed').slice(0, 30);
+  // Symbol signature of the client's own analysis — re-runs the one-time
+  // legacy-mode migration as soon as the paid signals are actually available.
+  const paidSymbolsSig = signals.map((s) => String(s?.symbol || '')).filter(Boolean).sort().join('|');
 
   const priceMapRef = React.useRef<Record<string, number>>({});
   function priceOf(t: PaperTrade): number | undefined {
     return priceMapRef.current[t.symbol];
   }
-  const unrealizedPnl = openTrades.reduce((sum, t) => {
+  const unrealizedPnl = allOpenTrades.reduce((sum, t) => {
     const p = priceOf(t);
     return p != null ? sum + calcPnl(t, p) : sum;
   }, 0);
@@ -476,6 +480,29 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     })();
     return () => { alive = false; };
   }, [user?.uid]);
+
+  // Re-scope the displayed trade list the instant the client switches mode.
+  // (The trade page can stay mounted while the plan modal changes the mode.)
+  // Also runs when the client's paid-analysis symbols change, so the one-time
+  // legacy migration only fires once the symbols are really available.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await stampLegacyTradeModes(
+          store,
+          activeTradeMode,
+          signals.map((s) => String(s?.symbol || '')),
+          user?.email,
+        );
+        const list = await store.listTrades();
+        if (!alive) return;
+        setTrades(list.sort((a, b) => b.openedAt - a.openedAt));
+      } catch {}
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, user?.email, activeTradeMode, paidSymbolsSig]);
 
   // ── LIVE TRADE-LIST SYNC (show auto-opened trades without refresh) ──
   // Why: the global AutoTradeEngine opens trades directly in the store while
@@ -528,10 +555,11 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     return () => { alive = false; };
   }, [symbol]);
 
-  // Subscribe to prices
-  const openTradeSymbolsSer = [...new Set(openTrades.map((t) => t.symbol))].sort().join('|');
+  // Subscribe to prices (ALL open trades, including hidden-mode ones, so their
+  // P&L and SL/TP keep updating while they are not displayed).
+  const openTradeSymbolsSer = [...new Set(allOpenTrades.map((t) => t.symbol))].sort().join('|');
   useEffect(() => {
-    const watchList = [...new Set([...openTrades.map((t) => t.symbol), symbol])];
+    const watchList = [...new Set([...allOpenTrades.map((t) => t.symbol), symbol])];
     if (watchList.length === 0) return;
     const unsub = subscribePrices(watchList, (sym, price) => {
       const prev = priceMapRef.current[sym];
@@ -732,6 +760,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
         tp: tpPrice,
         sl: slPrice,
         openedAt: Date.now(),
+        mode: activeTradeMode,
       };
 
       autoOpeningRef.current.add(sym);
@@ -964,14 +993,21 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     if (cat === 'crypto') {
       const typedSl = parseFloat(slPrice);
       const typedTp = parseFloat(tpPrice);
-      // Percent fields: clamp to a sane 0.1 % – 25 % range so a stray large
-      // number can never place the stop below zero.
+      // Liquidity tier decides how WIDE the stop/target are: high 5%/10%,
+      // medium 3%/6%, weak 1.5%/3% (anchored on the developer high-tier base).
+      // Untouched fields fall back to the tier values; typed values are used
+      // as-is (still clamped to a sane 0.1 % – 25 % range).
+      const tier = cryptoTierRiskPct(
+        symbol,
+        fixed?.slPct ?? CRYPTO_SL_PCT,
+        fixed?.tpPct ?? CRYPTO_TP_PCT,
+      );
       const slPct = Number.isFinite(typedSl) && typedSl > 0
         ? Math.min(25, Math.max(0.1, typedSl))
-        : (fixed?.slPct ?? CRYPTO_SL_PCT);
+        : tier.slPct;
       const tpPct = Number.isFinite(typedTp) && typedTp > 0
         ? Math.min(25, Math.max(0.1, typedTp))
-        : (fixed?.tpPct ?? CRYPTO_TP_PCT);
+        : tier.tpPct;
       const lv = cryptoPctLevels(livePrice, isBuy, slPct, tpPct, execQty);
       slVal = lv.slPrice;
       tpVal = lv.tpPrice;
@@ -983,7 +1019,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
       if (slAmount > 0) slVal = usdToPrice(symbol, slAmount, livePrice, !isBuy, execQty, cat);
       else slVal = matchedSignal?.stopLoss || null;
     }
-    const tradeData = { symbol, category: cat, side, qty: execQty, entryPrice: livePrice, status: 'open' as const, tp: tpVal, sl: slVal, openedAt: Date.now(), source: 'manual' as const };
+    const tradeData = { symbol, category: cat, side, qty: execQty, entryPrice: livePrice, status: 'open' as const, tp: tpVal, sl: slVal, openedAt: Date.now(), source: 'manual' as const, mode: activeTradeMode };
 
     // ── REAL execution via self-hosted MT5 bridge (opt-in) ──────────────
     // Runs ONLY when the user has connected a bridge AND flipped the switch

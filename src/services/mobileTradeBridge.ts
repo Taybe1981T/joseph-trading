@@ -25,6 +25,7 @@ import {
   resolveRiskLevels,
   baseUnitForTrade,
 } from './tradingValues';
+import { currentTradeMode, stampLegacyTradeModes } from '../lib/tradeMode';
 
 export const MOBILE_AUTO_TRADE_KEY = 'paper_trading_auto_trade';
 
@@ -63,6 +64,16 @@ export function detectMobileTradeCategory(sym: string): string {
 export async function listMobileTrades(): Promise<PaperTrade[]> {
   const store = getTradeStore(mobileTradeUser() as any);
   try { return await store.listTrades(); } catch { return []; }
+}
+
+/** One-time mode stamp for mobile trades created before mode tagging existed. */
+export async function stampMobileLegacyTradeModes(
+  active: 'free' | 'paid',
+  paidSymbols: string[] = [],
+  email?: string | null,
+): Promise<void> {
+  const store = getTradeStore(mobileTradeUser() as any);
+  await stampLegacyTradeModes(store, active, paidSymbols, email);
 }
 
 export async function readMobileAccount(): Promise<{ balance: number; leverage: number }> {
@@ -112,6 +123,7 @@ export async function openMobileManualTrade(
   const row: Omit<PaperTrade, 'id'> = {
     symbol: sym, category, side, qty, entryPrice: price, status: 'open',
     sl: sl ?? null, tp: tp ?? null, openedAt: Date.now(), source: 'manual',
+    mode: currentTradeMode(),
   };
   const id = await store.addTrade(row);
   try { window.dispatchEvent(new CustomEvent('mobile-trades-changed', { detail: { action: 'open', id, symbol: sym } })); } catch {}
@@ -322,13 +334,14 @@ export function syncMobileAutoEngine(signals: AnalysisResult[]): void {
     if (raw && typeof raw.leverage === 'number' && raw.leverage > 0) leverage = raw.leverage;
   } catch {}
   const sigs = engineSignals(signals);
+  const tradeMode = currentTradeMode();
   if (!mobileEngine) {
     try {
-      mobileEngine = new AutoTradeEngine({ user, leverage, signals: sigs, isDeveloper: true, origin: '' });
+      mobileEngine = new AutoTradeEngine({ user, leverage, signals: sigs, isDeveloper: true, origin: '', tradeMode });
       mobileEngine.start();
     } catch { mobileEngine = null; }
   } else {
-    try { mobileEngine.updateConfig({ user, leverage, signals: sigs }); } catch {}
+    try { mobileEngine.updateConfig({ user, leverage, signals: sigs, tradeMode }); } catch {}
   }
 }
 

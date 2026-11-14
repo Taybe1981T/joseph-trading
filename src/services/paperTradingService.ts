@@ -25,6 +25,10 @@ export interface PaperTrade {
   // 'manual' = the user's own ticket on the trade page. Exactly one engine
   // manages a given trade so SL/TP/trailing is never applied twice.
   source?: 'auto' | 'manual';
+  // Display scope: the mode the trade was opened in. A free-mode trade is only
+  // shown while the client uses the free view, a paid one only in paid mode.
+  // Legacy trades without a mode are stamped once by the mode migration.
+  mode?: 'free' | 'paid';
   // Per-position trailing-stop settings (USD) edited via the position editor
   // (pencil → modal). When set, the background position manager uses these
   // instead of the global strategy_settings defaults.
@@ -82,7 +86,7 @@ export function isMarketOpen(category: string, symbol?: string, now: Date = new 
 // $3,000 balance trades 3× the base, a $7,000 balance 7×, etc.
 export function baseQtyPerCategory(category: string): number {
   switch (category) {
-    case 'crypto': return 0.1;   // 0.1 units of coin per $1,000
+    case 'crypto': return 0.01;  // high-liquidity base per $1,000 (medium ×100, low ×1000)
     case 'forex': return 0.01;   // 0.01 lots per $1,000 (1 lot = 100,000 units)
     case 'metals': return 0.01;  // 0.01 lots per $1,000 (1 lot = 100 oz)
     case 'stocks': return 0.01;  // 0.01 lots per $1,000 (1 lot = 100 shares)
@@ -97,10 +101,10 @@ export function balanceThousands(balance: number): number {
   return Math.max(1, Math.floor(b / 1000));
 }
 
-// Base lot for a specific symbol: crypto is tiered per coin (BTC 0.1 · SOL 1 ·
+// Base lot for a specific symbol: crypto is tiered per coin (BTC 0.01 · SOL 1 ·
 // DOGE 10 per $1,000), every other category uses its single category base.
 // `cryptoTierBase` lets the developer's fixed-values panel drive the high tier.
-export function baseQtyForSymbol(category: string, symbol?: string, cryptoTierBase = 0.1): number {
+export function baseQtyForSymbol(category: string, symbol?: string, cryptoTierBase = 0.01): number {
   if ((category || '') === 'crypto' && symbol) return cryptoBaseQty(symbol, cryptoTierBase);
   return baseQtyPerCategory(category);
 }
@@ -108,7 +112,7 @@ export function baseQtyForSymbol(category: string, symbol?: string, cryptoTierBa
 // Lot size that scales with the account balance: base × thousands.
 // $1,000 -> 0.01 (forex), $3,000 -> 0.03, $7,000 -> 0.07, $10,000 -> 0.10.
 // Crypto: the symbol's tier base is used, so DOGE at $10,000 = 10 × 10 = 100.
-export function getDefaultQty(category: string, balance: number = START_BALANCE, symbol?: string, cryptoTierBase = 0.1): number {
+export function getDefaultQty(category: string, balance: number = START_BALANCE, symbol?: string, cryptoTierBase = 0.01): number {
   const base = baseQtyForSymbol(category, symbol, cryptoTierBase);
   const scaled = base * balanceThousands(balance);
   // Keep lot precision tidy (avoid 0.070000000001 style values).

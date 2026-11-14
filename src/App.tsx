@@ -1135,9 +1135,11 @@ const isDeveloperSession = () => {
       const raw = JSON.parse(localStorage.getItem('paper_trading_data') || 'null');
       if (raw && typeof raw.leverage === 'number' && raw.leverage > 0) currentLeverage = raw.leverage;
     } catch { /* keep default */ }
-    // PAID-ONLY: a free-plan client never feeds signals to the auto engine, so
-    // no trade can ever be opened from the developer's displayed analysis.
-    const entitledFeed = isDeveloperSession() ? topSignals : [];
+    // PAID-ONLY auto trading: the developer trades the developer feed, a paid
+    // client trades ONLY their own analysed signals, a free/guest account never
+    // feeds the engine (developer signals are read-only for them).
+    const entitledFeed = isDeveloperSession() ? topSignals : isPlanClient ? clientSignals : [];
+    const tradeMode: 'free' | 'paid' = isDeveloperSession() || isPlanClient ? 'paid' : 'free';
     if (!autoEngineRef.current) {
       autoEngineRef.current = new AutoTradeEngine({
         user,
@@ -1145,6 +1147,7 @@ const isDeveloperSession = () => {
         signals: entitledFeed.filter((s: any) => !s?.isSideways).map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
         isDeveloper: isDeveloperSession(),
         origin: user?.uid || user?.email || '',
+        tradeMode,
       });
       autoEngineRef.current.start();
     } else {
@@ -1154,9 +1157,10 @@ const isDeveloperSession = () => {
         signals: entitledFeed.filter((s: any) => !s?.isSideways).map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
         isDeveloper: isDeveloperSession(),
         origin: user?.uid || user?.email || '',
+        tradeMode,
       });
     }
-  }, [topSignals, user, autoTradeGen, isPlanClient]);
+  }, [topSignals, clientSignals, user, autoTradeGen, isPlanClient]);
 
   useEffect(() => () => { autoEngineRef.current?.stop(); autoEngineRef.current = null; }, []);
 
@@ -1242,6 +1246,7 @@ const isDeveloperSession = () => {
     const mirrorOpts = () => ({
       user,
       displayedSymbols: displayed(),
+      mode: (isDeveloperSession() || isPlanClient ? 'paid' : 'free') as 'free' | 'paid',
       playChampagne: () => {
         try { playChampagnePop(Math.max(0, Math.min(1, autoSettingsRef.current?.volume ?? 0.7))); } catch {}
       },
@@ -3440,7 +3445,7 @@ const started = planGrants
                 the user browses other pages. Opening a trade no longer requires
                 sitting on the trade page. */}
             <div className={effectivePage === 'trade' ? 'contents' : 'hidden'} aria-hidden={effectivePage !== 'trade'}>
-              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() ? topSignals : isPlanClient ? clientSignals : topSignals} canTrade={isDeveloperSession() || isPlanClient} canOpenManual={!!user} />
+              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() ? topSignals : isPlanClient ? clientSignals : topSignals} canTrade={isDeveloperSession() || isPlanClient} canOpenManual={!!user} tradeMode={isDeveloperSession() || isPlanClient ? 'paid' : 'free'} showAllTradeModes={isDeveloperSession()} />
             </div>
 
             {effectivePage === 'store' && (
