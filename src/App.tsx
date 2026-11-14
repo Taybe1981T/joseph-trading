@@ -1865,8 +1865,11 @@ const isDeveloperSession = () => {
     // final pass would be redundant and risk opening late — exactly the bug we
     // are fixing. `scanResults` remains only for the Firestore sync below.
 
-    // Save results to Firestore for clients ΓÇö only if there are results
-    if (!isPlanClient) {
+    // Save results to Firestore for clients — only the DEVELOPER publishes the
+    // shared feed. Paid/free clients run their own analysis locally and must
+    // never overwrite the developer's published signals (that was making the
+    // feed look "inverted": free/guest published, paid did not).
+    if (isDeveloperSession()) {
     try {
       const merged = signalsRef.current || [];
       if (merged.length > 0) {
@@ -1887,8 +1890,8 @@ const isDeveloperSession = () => {
     }
     }
 
-    // Save alerts to Firestore for clients
-    if (!isPlanClient) {
+    // Save alerts to Firestore for clients — developer only.
+    if (isDeveloperSession()) {
     try {
       await Promise.race([
         setDoc(doc(db, 'shared_alerts', 'latest'), {
