@@ -13,7 +13,7 @@ import {
   mobileLivePrice,
   mobileTradeUser,
 } from '../../services/mobileTradeBridge';
-import { getTradeStore, calcPnl, START_BALANCE, getLivePrices } from '../../services/paperTradingService';
+import { getTradeStore, calcPnl, START_BALANCE, getLivePrices, isMarketOpen } from '../../services/paperTradingService';
 import { notionalInUSD, usdToPrice } from '../../lib/positionMath';
 import { calcTrailingStop } from '../../lib/trailingStop';
 import type { PaperTrade } from '../../services/paperTradingService';
@@ -234,6 +234,12 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
 
   const openSide = async (side: 'buy' | 'sell') => {
     if (!symbol || busy) return;
+    // Desktop parity: crypto trades 24/7; forex/metals/stocks only while their
+    // session is open. Blocked here AND enforced again inside the bridge.
+    if (!isMarketOpen(detectMobileTradeCategory(symbol), symbol)) {
+      onOpen(symbol, side, volume); // layout shows the closed-market alert
+      return;
+    }
     setBusy(true);
     try {
       // Desktop parity: same store + live-price math, then the shared engine/layout refresh.

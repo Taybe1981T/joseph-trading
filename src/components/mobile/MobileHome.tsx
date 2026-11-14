@@ -70,6 +70,78 @@ export function MobileHome({
   }, [fullSignals]);
   return (
     <div className="mt5-page-container">
+      <style>{`@keyframes mt5-radar-stripes { from { background-position: 0 0; } to { background-position: 28px 0; } }`}</style>
+
+      {/* Live auto-analysis progress — first thing under the four market boxes.
+          Solid yellow like the auto-analysis settings card, thicker moving bar
+          and larger inner text (category / symbol / counter). */}
+      {(isDev || hasPlan) && radarProgress && (
+        <div
+          style={{
+            background: '#FACC15',
+            border: '1px solid #EAB308',
+            borderRadius: 14,
+            padding: '12px 14px',
+            marginBottom: 10,
+            color: '#111827',
+            boxShadow: '0 3px 12px rgba(250,204,21,0.35)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <Zap size={21} style={{ color: '#111827', fill: '#111827', flexShrink: 0 }} />
+            <span style={{ fontSize: 15, fontWeight: 900, color: '#111827', lineHeight: 1.15 }}>
+              {mobileT(lang, 'Auto analysis started', 'بدأ التحليل التلقائي')}
+            </span>
+            {radarProgress.category && (
+              <span
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 900,
+                  color: '#111827',
+                  background: 'rgba(17,24,39,0.12)',
+                  border: '1px solid rgba(17,24,39,0.28)',
+                  borderRadius: 8,
+                  padding: '2px 8px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: 130,
+                }}
+              >
+                {isAr ? (AR_CATS[radarProgress.category] || radarProgress.category) : radarProgress.category}
+              </span>
+            )}
+            <span style={{ marginLeft: 'auto', fontSize: 14, fontWeight: 900, color: '#111827', flexShrink: 0 }} dir="ltr">
+              {radarProgress.index}/{radarProgress.total}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9, fontSize: 14 }}>
+            <span style={{ color: '#78350F', fontWeight: 800 }}>
+              {mobileT(lang, 'Analyzing now', 'يُحلَّل الآن')}
+            </span>
+            <span style={{ color: '#111827', fontWeight: 900, fontSize: 17 }} dir="ltr">
+              {radarProgress.current}
+            </span>
+          </div>
+
+          {/* 2× thicker than before, with moving stripes so progress is obvious. */}
+          <div style={{ height: 16, borderRadius: 8, background: 'rgba(17,24,39,0.22)', overflow: 'hidden' }}>
+            <div
+              style={{
+                height: '100%',
+                width: `${radarProgress.total > 0 ? Math.round((radarProgress.index / radarProgress.total) * 100) : 0}%`,
+                borderRadius: 8,
+                background: 'repeating-linear-gradient(45deg, #111827 0 10px, #065F46 10px 20px)',
+                backgroundSize: '28px 28px',
+                animation: 'mt5-radar-stripes 0.8s linear infinite',
+                transition: 'width 0.3s',
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {radarOn && radarLabel && (
         <div style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10, padding: '9px 14px', fontSize: 12, fontWeight: 700, color: '#00ff88', display: 'flex', alignItems: 'center', gap: 8 }}>
           <Zap size={15} style={{ color: '#FACC15', fill: '#FACC15' }} /> {radarLabel}
@@ -90,33 +162,6 @@ export function MobileHome({
           </button>
         )}
       </div>
-
-      {/* Live auto-analysis progress. Desktop parity: a paid-plan client sees
-          exactly what the developer sees — the running bar, the category being
-          scanned and the symbol under analysis right now. */}
-      {(isDev || hasPlan) && radarProgress && (
-        <div style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10, padding: '9px 14px', fontSize: 12, fontWeight: 700, color: '#00ff88', marginBottom: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <Zap size={15} style={{ color: '#FACC15', fill: '#FACC15' }} />
-            <span>{mobileT(lang, 'Auto analysis started', 'بدأ التحليل التلقائي')}</span>
-            {radarProgress.category && (
-              <span style={{ fontSize: 10, fontWeight: 800, color: '#10B981', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 6, padding: '1px 6px' }}>
-                {isAr ? (AR_CATS[radarProgress.category] || radarProgress.category) : radarProgress.category}
-              </span>
-            )}
-            <span style={{ marginLeft: 'auto', fontSize: 11, color: '#888', fontWeight: 600 }}>
-              {radarProgress.index}/{radarProgress.total}
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 11 }}>
-            <span style={{ color: '#888' }}>{mobileT(lang, 'Analyzing now', 'يُحلَّل الآن')}</span>
-            <span style={{ color: '#fff', fontWeight: 900 }}>{radarProgress.current}</span>
-          </div>
-          <div style={{ height: 8, borderRadius: 4, background: '#2a2a2a', overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${radarProgress.total > 0 ? Math.round((radarProgress.index / radarProgress.total) * 100) : 0}%`, background: '#10B981', transition: 'width 0.3s' }} />
-          </div>
-        </div>
-      )}
 
       {fullSignals.length === 0 && (
         <div className="mt5-empty-state">

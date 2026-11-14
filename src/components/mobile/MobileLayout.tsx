@@ -29,7 +29,6 @@ import {
 import { fetchUserGrants, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from '../../services/paymentRequests';
 import { MobileAnalysis } from './MobileAnalysis';
 import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar, getMobileRadarProgress, mobileSignalsStorageKey } from '../../services/mobileAnalysisEngine';
-import { detectMobileType } from '../../services/mobileAnalysisEngine';
 import { flagManualRadarStart, takeRadarStartNow, isFreshRadarSession, isRadarArmed } from '../../services/radarSession';
 import { MobileManualSheet } from './MobileManualSheet';
 import { MobileClientMonitor } from './MobileClientMonitor';
@@ -43,6 +42,7 @@ import {
   readMobileAccount,
   syncMobileAutoEngine,
   closeMobileTrade,
+  detectMobileTradeCategory,
   startMobilePositionManager,
   openMobileManualTrade,
 } from '../../services/mobileTradeBridge';
@@ -865,11 +865,24 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     } catch {}
   };
 
+  // Desktop parity (TradeNowPage): one closed-market message for opening and
+  // one for closing. Crypto is 24/7 and never blocked by isMarketOpen.
+  const marketClosedAlert = (mode: 'open' | 'close') => {
+    const msg = lang === 'ar'
+      ? (mode === 'open'
+        ? 'السوق مغلق لهذا الأصل، لا يمكن فتح صفقة. التداول متاح حالياً للكريبتو فقط (24/7).'
+        : 'السوق مغلق لهذا الأصل، لا يمكن إغلاق الصفقة حالياً. الكريبتو يعمل 24/7.')
+      : (mode === 'open'
+        ? 'Market is closed for this asset — cannot open a trade. Trading is currently available for crypto only (24/7).'
+        : 'Market is closed for this asset — cannot close the trade now. Crypto trades 24/7.');
+    setAlert(msg);
+    setTimeout(() => setAlert(null), 4000);
+  };
+
   const openTrade = (sym: string, type: 'buy' | 'sell', vol: number) => {
-    const cat = String(detectMobileType(sym));
+    const cat = String(detectMobileTradeCategory(sym));
     if (!isMarketOpen(cat, sym)) {
-      setAlert((lang === 'ar' ? 'السوق مغلق حالياً، لا يمكن فتح/إغلاق الصفقات حتى يفتح: ' : 'Market is currently closed; trades cannot be opened/closed until it opens: ') + sym);
-      setTimeout(() => setAlert(null), 4000);
+      marketClosedAlert('open');
       return;
     }
     ping(type === 'buy' ? 880 : 440);
@@ -884,25 +897,38 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // not just show an alert. Same bridge as the full mobile ticket, so the
   // developer fixed trading values are enforced here too.
   const executeDialogTrade = async (sym: string, type: 'buy' | 'sell', vol: number) => {
-    const cat = String(detectMobileType(sym));
+    const cat = String(detectMobileTradeCategory(sym));
     if (!isMarketOpen(cat, sym)) {
-      setAlert((lang === 'ar' ? 'السوق مغلق حالياً، لا يمكن فتح/إغلاق الصفقات حتى يفتح: ' : 'Market is currently closed; trades cannot be opened/closed until it opens: ') + sym);
-      setTimeout(() => setAlert(null), 4000);
+      marketClosedAlert('open');
       return;
     }
     try {
       await openMobileManualTrade(sym, type, vol, signalFor(sym) || null);
       openTrade(sym, type, vol);
     } catch (e: any) {
+      if (String(e?.message || '').startsWith('MARKET_CLOSED:')) {
+        marketClosedAlert('open');
+        return;
+      }
       setAlert((lang === 'ar' ? 'فشل فتح الصفقة: ' : 'Failed to open trade: ') + (e?.message || String(e)));
       setTimeout(() => setAlert(null), 4000);
     }
   };
 
   const closeTradeById = useCallback(async (id: string) => {
-    try { await closeMobileTrade(id); } catch {}
+    try {
+      await closeMobileTrade(id);
+    } catch (e: any) {
+      // The bridge enforces desktop market hours on closing too.
+      if (String(e?.message || '').startsWith('MARKET_CLOSED:')) {
+        marketClosedAlert('close');
+        return;
+      }
+    }
+    try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {}
     loadAll();
-  }, [loadAll]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadAll, lang]);
 
   // A plan/product was chosen in the store: open the same PaymentModal the
   // desktop site opens for the very same choice.

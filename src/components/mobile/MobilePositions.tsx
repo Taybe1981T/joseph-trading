@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Check } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
-import { closeMobileTrade, updateMobileTradeLevels, detectMobileTradeCategory } from '../../services/mobileTradeBridge';
+import { updateMobileTradeLevels, detectMobileTradeCategory } from '../../services/mobileTradeBridge';
 import { subscribeQuoteBatch } from '../../services/paperTradingService';
 import { calcPnl } from '../../services/paperTradingService';
 import { slAmountUSD, usdToPrice } from '../../lib/positionMath';
@@ -95,10 +95,11 @@ export function MobilePositions({ positions, closed, onClose, onSelect }: Mobile
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symKey]);
 
-  const doClose = async (id: string) => {
+  const doClose = (id: string) => {
+    // The layout owns the close path (desktop market-hours guard, live exit
+    // price, balance update and refresh). Calling the bridge here too would
+    // double-credit the P&L and bypass the guard.
     setBusy(id);
-    try { await closeMobileTrade(id); } catch {}
-    try { window.dispatchEvent(new CustomEvent('mobile-close-trade', { detail: { id } })); } catch {}
     onClose(id);
     setBusy(null);
   };

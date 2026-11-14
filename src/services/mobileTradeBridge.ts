@@ -13,6 +13,7 @@ import {
   getLivePrice,
   getLivePrices,
   calcPnl,
+  isMarketOpen,
   type PaperTrade,
 } from './paperTradingService';
 import { AutoTradeEngine } from './autoTradeEngine';
@@ -80,10 +81,13 @@ export async function openMobileManualTrade(
 ): Promise<PaperTrade> {
   const sym = (symbol || '').trim().toUpperCase();
   if (!sym) throw new Error('empty symbol');
+  const category = detectMobileTradeCategory(sym);
+  // Desktop parity (TradeNowPage.openTrade): block opening while this asset's
+  // market is closed. Crypto trades 24/7 and is always allowed.
+  if (!isMarketOpen(category, sym)) throw new Error('MARKET_CLOSED:' + sym);
   const store = getTradeStore(mobileTradeUser() as any);
   const price = await getLivePrice(sym);
   if (price == null || !isFinite(price) || price <= 0) throw new Error('no live price for ' + sym);
-  const category = detectMobileTradeCategory(sym);
   const fixed = getTradingValuesOverride(category);
   // Same sizing rules as desktop + the global engine:
   //   • crypto → tiered balance-scaled lot (BTC 0.1 · SOL 1 · DOGE 10 per $1k)
@@ -120,9 +124,20 @@ export async function openMobileManualTrade(
 export async function closeMobileTrade(id: string): Promise<void> {
   if (!id) return;
   const store = getTradeStore(mobileTradeUser() as any);
+  let t: PaperTrade | undefined;
   try {
     const all = await store.listTrades();
-    const t = all.find((x) => x.id === id);
+    t = all.find((x) => x.id === id);
+  } catch { /* best effort */ }
+  // Already closed → never credit the P&L twice (the position card and the
+  // layout both route through here).
+  if (t && t.status !== 'open') return;
+  // Desktop parity (TradeNowPage.closeTrade): a trade can only be closed while
+  // its market is open. Crypto trades 24/7. The caller shows the alert.
+  if (t && !isMarketOpen(t.category || detectMobileTradeCategory(t.symbol), t.symbol)) {
+    throw new Error('MARKET_CLOSED:' + t.symbol);
+  }
+  try {
     if (t) {
       const p = await getLivePrice(t.symbol);
       const cur = p ?? t.entryPrice;
