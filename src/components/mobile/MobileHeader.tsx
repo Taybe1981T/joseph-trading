@@ -33,20 +33,21 @@ const CATS = [
   { key: 'metals', en: 'Metals', ar: 'المعادن' },
 ];
 
-/** White icon button used inside the green brand bar (visible in both themes). */
+/** Solid-yellow icon button used inside the green brand bar (both themes). */
 const barBtn: React.CSSProperties = {
-  width: 34,
-  height: 34,
+  width: 30,
+  height: 30,
   borderRadius: 9,
-  background: 'rgba(255,255,255,0.18)',
-  border: '1px solid rgba(255,255,255,0.38)',
-  color: '#ffffff',
+  background: '#FACC15',
+  border: '1px solid #EAB308',
+  color: '#111827',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   cursor: 'pointer',
   padding: 0,
   flexShrink: 0,
+  boxShadow: '0 1px 4px rgba(0,0,0,0.18)',
 };
 
 export function MobileHeader({
@@ -64,9 +65,73 @@ export function MobileHeader({
     return () => { window.removeEventListener('storage', h); clearInterval(iv); };
   }, []);
   const isAr = lang === 'ar';
+
+  // The auto-analysis button sits in the MIDDLE of the icon row and is larger
+  // than the rest, so it is listed between theme and notifications below.
+  const autoButton = (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, flexShrink: 0 }}>
+      <button
+        className="mt5-icon-btn"
+        aria-label={isAr ? 'بدء التحليل التلقائي' : 'Start auto analysis'}
+        onClick={onAutoAnalysisToggle}
+        style={{
+          width: 46,
+          height: 46,
+          borderRadius: 14,
+          border: '1px solid #EAB308',
+          background: 'linear-gradient(135deg, #FDE047 0%, #FACC15 55%, #F59E0B 100%)',
+          color: '#111827',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          position: 'relative',
+          cursor: 'pointer',
+          padding: 0,
+          flexShrink: 0,
+          boxShadow: '0 3px 10px rgba(0,0,0,0.25)',
+        }}
+      >
+        <Activity
+          size={25}
+          style={{
+            color: '#111827',
+            strokeWidth: 2.6,
+            animation: autoAnalysisRunning ? 'pulse 1.2s infinite' : 'none',
+          }}
+        />
+        <span
+          style={{
+            position: 'absolute',
+            top: 3,
+            right: 3,
+            width: 10,
+            height: 10,
+            borderRadius: '50%',
+            background: autoAnalysisRunning ? '#065F46' : '#B45309',
+            border: '1.5px solid #FDE047',
+          }}
+        />
+      </button>
+      {onAutoAnalysisToggle && (
+        <span
+          style={{
+            fontSize: 8,
+            fontWeight: 900,
+            letterSpacing: '0.05em',
+            lineHeight: 1,
+            textTransform: 'uppercase',
+            color: '#FDE047',
+          }}
+        >
+          {autoAnalysisRunning ? (isAr ? 'يعمل' : 'ON') : (isAr ? 'بدء' : 'START')}
+        </span>
+      )}
+    </div>
+  );
+
   return (
     <>
-      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.2); } }`}</style>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(1.18); } }`}</style>
       <header
         className="mt5-header"
         style={{
@@ -79,7 +144,7 @@ export function MobileHeader({
           borderBottom: 'none',
         }}
       >
-        {/* ── Green brand bar: mini logo + site name + every top icon ── */}
+        {/* ── Green brand bar: mini logo + site name + solid-yellow top icons ── */}
         <div
           style={{
             display: 'flex',
@@ -93,7 +158,7 @@ export function MobileHeader({
             color: '#ffffff',
           }}
         >
-          {/* Mini site logo — raised to the same level as the site name. */}
+          {/* Mini site logo — same level as the site name. */}
           <div
             style={{
               width: 34,
@@ -140,7 +205,7 @@ export function MobileHeader({
             </div>
           </div>
 
-          {/* Top icons — all inside the green bar. */}
+          {/* Top icons — all solid yellow; auto analysis is the middle & largest. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
             <div style={{ position: 'relative' }}>
               <button
@@ -149,13 +214,13 @@ export function MobileHeader({
                 onClick={() => setShowLang(!showLang)}
                 aria-label="Language"
               >
-                <Globe size={16} />
+                <Globe size={15} style={{ color: '#111827' }} />
               </button>
               {showLang && (
                 <div
                   style={{
                     position: 'absolute',
-                    top: 40,
+                    top: 36,
                     right: 0,
                     background: '#1a1a1a',
                     border: '1px solid #2a2a2a',
@@ -191,58 +256,17 @@ export function MobileHeader({
               )}
             </div>
 
-            {/* Auto analysis: original top position, START/ON word underneath. */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, flexShrink: 0 }}>
-              <button
-                className="mt5-icon-btn"
-                style={{ ...barBtn, width: 36, position: 'relative' }}
-                onClick={onAutoAnalysisToggle}
-                aria-label={isAr ? 'بدء التحليل التلقائي' : 'Start auto analysis'}
-              >
-                <Activity
-                  size={19}
-                  style={{
-                    color: autoAnalysisRunning ? '#D1FAE5' : '#FDE68A',
-                    animation: autoAnalysisRunning ? 'pulse 1.5s infinite' : 'none',
-                  }}
-                />
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: 2,
-                    right: 2,
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: autoAnalysisRunning ? '#ffffff' : '#F59E0B',
-                    border: '1px solid rgba(0,0,0,0.15)',
-                  }}
-                />
-              </button>
-              {onAutoAnalysisToggle && (
-                <span
-                  style={{
-                    fontSize: 7.5,
-                    fontWeight: 900,
-                    letterSpacing: '0.05em',
-                    lineHeight: 1,
-                    textTransform: 'uppercase',
-                    color: autoAnalysisRunning ? '#D1FAE5' : '#FDE68A',
-                  }}
-                >
-                  {autoAnalysisRunning ? (isAr ? 'يعمل' : 'ON') : (isAr ? 'بدء' : 'START')}
-                </span>
-              )}
-            </div>
-
             <button
               className="mt5-icon-btn"
               style={barBtn}
               onClick={toggleTheme}
               aria-label="Theme"
             >
-              {isDark ? <Sun size={16} /> : <Moon size={16} />}
+              {isDark ? <Sun size={15} style={{ color: '#111827' }} /> : <Moon size={15} style={{ color: '#111827' }} />}
             </button>
+
+            {/* Centered, larger auto-analysis button. */}
+            {autoButton}
 
             {onNotificationsClick && (
               <button
@@ -251,7 +275,7 @@ export function MobileHeader({
                 onClick={onNotificationsClick}
                 aria-label="Notifications"
               >
-                <Bell size={16} />
+                <Bell size={15} style={{ color: '#111827' }} />
               </button>
             )}
 
@@ -270,7 +294,7 @@ export function MobileHeader({
                     style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover' }}
                   />
                 ) : (
-                  <User size={16} />
+                  <User size={15} style={{ color: '#111827' }} />
                 )}
               </button>
               {userEmail && (
@@ -281,19 +305,13 @@ export function MobileHeader({
                     right: -5,
                     background: '#ffffff',
                     borderRadius: '50%',
-                    width: 10,
-                    height: 10,
-                    border: '2px solid #10B981',
-                    fontSize: 8,
-                    fontWeight: 900,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
+                    width: 9,
+                    height: 9,
+                    border: '2px solid #EAB308',
                   }}
                 />
               )}
             </div>
-
           </div>
         </div>
 

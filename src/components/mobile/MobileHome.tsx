@@ -72,7 +72,7 @@ export function MobileHome({
     <div className="mt5-page-container">
       {radarOn && radarLabel && (
         <div style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10, padding: '9px 14px', fontSize: 12, fontWeight: 700, color: '#00ff88', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Zap size={14} /> {radarLabel}
+          <Zap size={15} style={{ color: '#FACC15', fill: '#FACC15' }} /> {radarLabel}
         </div>
       )}
 
@@ -97,7 +97,7 @@ export function MobileHome({
       {(isDev || hasPlan) && radarProgress && (
         <div style={{ background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 10, padding: '9px 14px', fontSize: 12, fontWeight: 700, color: '#00ff88', marginBottom: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <Zap size={14} />
+            <Zap size={15} style={{ color: '#FACC15', fill: '#FACC15' }} />
             <span>{mobileT(lang, 'Auto analysis started', 'بدأ التحليل التلقائي')}</span>
             {radarProgress.category && (
               <span style={{ fontSize: 10, fontWeight: 800, color: '#10B981', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.35)', borderRadius: 6, padding: '1px 6px' }}>

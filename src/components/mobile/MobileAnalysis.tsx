@@ -97,27 +97,68 @@ export function MobileAnalysis({ lang }: Props) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div className="mt5-card" style={autoOn ? { borderColor: 'rgba(0,255,136,0.4)' } : undefined}>
-        <div className="mt5-card-header">
-          <div className="mt5-card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div
+        className="mt5-card"
+        style={{
+          background: '#FACC15',
+          borderColor: '#EAB308',
+          boxShadow: '0 3px 12px rgba(250,204,21,0.35)',
+        }}
+      >
+        <div className="mt5-card-header" style={{ borderBottomColor: 'rgba(17,24,39,0.20)' }}>
+          <div className="mt5-card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#111827' }}>
             <span style={{ position: 'relative', display: 'inline-flex' }}>
-              <Zap size={18} style={{ color: autoOn ? '#00ff88' : '#888' }} fill={autoOn ? 'currentColor' : 'none'} />
-              {autoOn && <span style={{ position: 'absolute', top: -2, right: -2, width: 9, height: 9, borderRadius: '50%', background: '#fff' }} />}
+              <Zap size={20} style={{ color: '#111827' }} fill={autoOn ? '#111827' : 'none'} />
+              {autoOn && <span style={{ position: 'absolute', top: -2, right: -2, width: 9, height: 9, borderRadius: '50%', background: '#065F46', border: '1.5px solid #FDE047' }} />}
             </span>
             {mobileT(lang, 'Auto Analysis', 'التحليل التلقائي')}
           </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button className="mt5-btn mt5-btn-secondary" style={{ padding: '7px 12px', fontSize: 12 }} onClick={() => setShowSettings(!showSettings)}>
-              <Settings size={14} />
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            {/* Settings gear: larger, SOLID grey. */}
+            <button
+              type="button"
+              aria-label={isAr ? 'إعدادات التحليل' : 'Analysis settings'}
+              onClick={() => setShowSettings(!showSettings)}
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 12,
+                border: '1px solid #4B5563',
+                background: '#6B7280',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.22)',
+                flexShrink: 0,
+              }}
+            >
+              <Settings size={21} />
             </button>
-            <button className={`mt5-btn ${autoOn ? 'mt5-btn-primary' : 'mt5-btn-secondary'}`} style={{ padding: '8px 16px', fontSize: 13 }} onClick={toggleAuto}>
+            <button
+              type="button"
+              onClick={toggleAuto}
+              style={{
+                height: 42,
+                padding: '0 16px',
+                minWidth: 66,
+                borderRadius: 12,
+                border: `1px solid ${autoOn ? '#065F46' : '#111827'}`,
+                background: autoOn ? '#065F46' : '#111827',
+                color: '#ffffff',
+                fontSize: 13,
+                fontWeight: 900,
+                cursor: 'pointer',
+              }}
+            >
               {autoOn ? 'ON' : 'OFF'}
             </button>
           </div>
         </div>
-        <div className="mt5-card-subtitle">
+        <div className="mt5-card-subtitle" style={{ color: '#78350F', fontWeight: 800 }}>
           {autoOn ? mobileT(lang, 'Radar active', 'الرادار نشط') : mobileT(lang, 'Radar off', 'الرادار متوقف')}
-          {lastRun && autoOn && <span style={{ display: 'block', marginTop: 4 }}>{mobileT(lang, 'Last: ', 'آخر فحص: ')}{lastRun}</span>}
+          {lastRun && autoOn && <span style={{ display: 'block', marginTop: 4, color: '#78350F' }}>{mobileT(lang, 'Last: ', 'آخر فحص: ')}{lastRun}</span>}
         </div>
       </div>
 
