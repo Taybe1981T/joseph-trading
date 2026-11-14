@@ -447,19 +447,21 @@ const isDeveloperSession = () => {
     if (effectivePage === 'store') setStoreVisited(true);
   }, [effectivePage]);
 
-  // PAID-ONLY (free mode purge): the developer's published analysis
-  // (shared_results) is a paid entitlement. A free-plan client — or a paid
-  // client who switched to free mode — must NOT poll it and must not keep a
-  // previously cached feed. Entering paid mode repopulates the client's own
-  // scoped signals through the plan effect below (desktop parity with mobile).
+  // When a paid plan is ACTIVE, the client must NOT see the developer's
+  // published signals — they see only their own analysis. When NOT in an active
+  // paid plan (guest, registered without plan, or paid switched to free mode),
+  // the developer's signals ARE shown (read-only) via shared_results polling.
   useEffect(() => {
-    if (isDeveloperSession() || isPlanClient) return;
-    setClientSignals((prev) => (prev.length ? [] : prev));
-    try { localStorage.removeItem('finalyze_client_signals'); } catch {}
+    if (isDeveloperSession()) return;
+    if (isPlanClient) {
+      // Paid active: hide developer feed; keep only the client's own signals.
+      setTopSignals((prev) => (prev.length ? [] : prev));
+    }
   }, [user, isPlanClient]);
 
   // CLIENT PLAN: load per-client scoped signals & auto settings when the plan
-  // view is active. FREE MODE: no developer signals — clear the feed (paid-only).
+  // view is active. When NOT in an active paid plan, the developer's published
+  // signals are shown via shared_results polling instead.
   useEffect(() => {
     if (isDeveloperSession()) return;
     if (isPlanClient) {
@@ -477,10 +479,48 @@ const isDeveloperSession = () => {
         }
       } catch {}
     } else {
+      // Free mode / guest / no active plan: clear client's own plan feed.
       setClientSignals((prev) => (prev.length ? [] : prev));
-      try { localStorage.removeItem('finalyze_client_signals'); } catch {}
     }
   }, [isPlanClient, cxnSigKey, cxnAutoKey]);
+
+  // GUEST / REGISTERED WITHOUT ACTIVE PAID PLAN: poll the developer's published
+  // signals (shared_results). These users see developer signals (read-only).
+  // An active paid-plan client does NOT see them and runs their own analysis.
+  useEffect(() => {
+    if (isDeveloperSession() || isPlanClient) return;
+    let cancelled = false;
+    const loadFromFirestore = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'shared_results'));
+        if (cancelled) return;
+        if (snap.empty) { setTopSignals([]); return; }
+        let latestData: any = null;
+        let latestTs = 0;
+        snap.forEach(d => {
+          const dta = d.data();
+          let ts = 0;
+          if (dta.timestamp) {
+            if (typeof dta.timestamp === 'string') ts = new Date(dta.timestamp).getTime();
+            else if (typeof dta.timestamp === 'object' && (dta.timestamp as any).toMillis) ts = (dta.timestamp as any).toMillis();
+            else if (dta.timestamp instanceof Date) ts = dta.timestamp.getTime();
+            else if (typeof dta.timestamp === 'number') ts = dta.timestamp;
+          }
+          if (ts >= latestTs) { latestTs = ts; latestData = dta; }
+        });
+        if (!latestData) { setTopSignals([]); return; }
+        const results = latestData.results;
+        if (!results || !Array.isArray(results) || results.length === 0) { setTopSignals([]); return; }
+        const filtered = results.filter((r: any) => r && r.signal !== 'neutral' && r.signal !== 'no_entry' && !r.isSideways);
+        setTopSignals(filtered);
+      } catch {
+        // ignore poll errors
+      }
+    };
+    loadFromFirestore();
+    const interval = setInterval(loadFromFirestore, 10000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [isPlanClient, user]);
 
   // CLIENT: Sync freemium state from Firestore
   useEffect(() => {
@@ -972,14 +1012,20 @@ const isDeveloperSession = () => {
     } catch { return 'top_signals_persistent__guest'; }
   };
   const [topSignals, setTopSignals] = useState<AnalysisResult[]>([]);
-  // Load this account's own signals whenever the logged-in user changes.
+  // Load this account's own signals for developer / paid-plan clients.
+  // For guests or clients NOT in an active paid plan, developer signals come
+  // from shared_results polling instead (see effect below).
   useEffect(() => {
+    if (!isDeveloperSession() && !isPlanClient) {
+      setTopSignals([]);
+      return;
+    }
     try {
       const stored = JSON.parse(localStorage.getItem(signalsStorageKey()) || '[]');
       setTopSignals(Array.isArray(stored) ? stored.filter((s: AnalysisResult) => s.signal !== 'neutral' && s.signal !== 'no_entry') : []);
     } catch { setTopSignals([]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, user?.email]);
+  }, [user?.uid, user?.email, isPlanClient]);
   const [lastSyncStatus, setLastSyncStatus] = useState<{ ok: boolean; count?: number; error?: string; time: number } | null>(null);
 
   // Web Audio API ΓÇö no unlock needed
@@ -1213,7 +1259,16 @@ const isDeveloperSession = () => {
 
   useEffect(() => {
     signalsRef.current = topSignals;
-    try { localStorage.setItem(signalsStorageKey(), JSON.stringify(topSignals)); } catch {}
+    // Only the developer's own feed (and a paid client's own analysis, which is
+    // stored separately as clientSignals) may be persisted to this account key.
+    // A guest / free client sees a POLLED copy of the developer feed, so writing
+    // it into their scoped key would leak developer signals into a future paid
+    // session. Paid clients get their key cleared instead.
+    if (isDeveloperSession()) {
+      try { localStorage.setItem(signalsStorageKey(), JSON.stringify(topSignals)); } catch {}
+    } else if (isPlanClient) {
+      try { localStorage.removeItem(signalsStorageKey()); } catch {}
+    }
 
     // Debounced synchronization to Firestore ΓÇö only the latest state wins
     if (isDeveloperSession()) {
@@ -1559,6 +1614,8 @@ const isDeveloperSession = () => {
   };
 
   const removeClientSignal = (symbol: string) => {
+    // Free/guest accounts see the developer feed read-only: no deletion.
+    if (!isDeveloperSession() && !isPlanClient) return;
     setClientSignals(prev => {
       const updated = prev.filter(s => s.symbol !== symbol);
       if (isPlanClient) {

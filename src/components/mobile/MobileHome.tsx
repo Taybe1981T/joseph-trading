@@ -170,7 +170,7 @@ export function MobileHome({
       {signalsAllowed && (<>
       <div className="mt5-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span><Zap size={16} /> {mobileT(lang, 'Best current signal', 'أفضل إشارة حالية')}</span>
-        {fullSignals.length > 0 && (
+        {fullSignals.length > 0 && (isDev || hasPlan) && (
           <button className="mt5-btn mt5-btn-danger" style={{ padding: '4px 10px', fontSize: 11 }} onClick={onRemoveAll}>
             {mobileT(lang, 'Clear all', 'حذف الكل')}
           </button>

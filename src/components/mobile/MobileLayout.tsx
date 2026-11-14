@@ -626,40 +626,35 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   }, []);
 
   // Sync the shared mobile auto engine with the SAME home-page signals (desktop parity: App.tsx).
+  // Free/guest accounts are view-only: developer signals must never feed the
+  // auto-trade engine for them (the paid client's own analysis is the only source).
   useEffect(() => {
-    syncMobileAutoEngine(fullSignals);
-  }, [fullSignals]);
+    syncMobileAutoEngine(isDev || isPlanClient ? fullSignals : []);
+  }, [fullSignals, isDev, isPlanClient]);
 
   const loadAll = useCallback(async () => {
     try {
       const merged: any[] = [];
-      // Auto radar signals (same as desktop AnalysisResults). Both the developer
-      // AND a paid-plan client run their own radar, so both must see the results
-      // it persisted — before this, a client's radar ran but its signals never
-      // reached the home feed (and therefore neither did the analysis reasons).
       if (canViewSignals) {
-        // Free/guest clients see the DEVELOPER's published signals (read-only);
-        // paid clients see their own analysis.
-        const signalKey = (!isDev && !isPlanClient)
-          ? 'top_signals_persistent__' + (DEVELOPER_EMAILS[0] || 'guest').toLowerCase().replace(/[^a-z0-9@._-]/g, '_')
-          : mobileSignalsStorageKey();
-        try {
-          const raw = localStorage.getItem(signalKey);
-          const auto = raw ? JSON.parse(raw) : [];
-          if (Array.isArray(auto)) {
-            merged.push(...auto.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).map((s: any) => ({ ...s, source: s.source || 'auto' })));
-          }
-        } catch {}
-        // Manual analysis results are the client's OWN analysis — only paid clients
-        // (and the developer) run analysis, so free clients skip this source.
-        if (isDev || isPlanClient) {
-        try {
-          const mraw = localStorage.getItem('manual_results');
-          const man = mraw ? JSON.parse(mraw) : [];
-          if (Array.isArray(man)) {
-            merged.push(...man.filter((s: any) => s && s.signal && s.signal !== 'neutral').map((s: any) => ({ ...s, source: 'manual' })));
-          }
-        } catch {}
+        if (!isDev && !isPlanClient) {
+          // Free/guest: developer's published signals come from shared_results
+          // polling (set via effect below). Keep existing state here.
+        } else {
+          // Developer / paid-plan client: own analysis signals.
+          try {
+            const raw = localStorage.getItem(mobileSignalsStorageKey());
+            const auto = raw ? JSON.parse(raw) : [];
+            if (Array.isArray(auto)) {
+              merged.push(...auto.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).map((s: any) => ({ ...s, source: s.source || 'auto' })));
+            }
+          } catch {}
+          try {
+            const mraw = localStorage.getItem('manual_results');
+            const man = mraw ? JSON.parse(mraw) : [];
+            if (Array.isArray(man)) {
+              merged.push(...man.filter((s: any) => s && s.signal && s.signal !== 'neutral').map((s: any) => ({ ...s, source: 'manual' })));
+            }
+          } catch {}
         }
       }
       // de-dup by symbol+timeframe (first occurrence wins)
@@ -672,23 +667,23 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         full.push(s);
       }
       full.sort((a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
-      // Only update state when the data really changed (avoids needless re-renders every 5s).
-      const nextFull = canViewSignals ? full.slice(0, 40) : [];
-      setFullSignals((prev) => {
-        // Free mode: always empty — signals must disappear the moment the client
-        // leaves the paid plan (never keep the previous paid feed).
-        if (!canViewSignals) return prev.length ? [] : prev;
-        if (nextFull.length === 0 && prev.length > 0) return prev;
-        try { if (JSON.stringify(prev) === JSON.stringify(nextFull)) return prev; } catch {}
-        return nextFull as AnalysisResult[];
-      });
-      setSignals(canViewSignals ? full.map((s: any) => ({
-        symbol: String(s.symbol || ''),
-        type: (String(s.signal || '').includes('sell') ? 'sell' : 'buy') as 'buy' | 'sell',
-        price: Number(s.entryPrice ?? s.price ?? 0),
-        change: Number(s.change ?? 0),
-        changePercent: Number(s.changePercent ?? 0),
-      })).filter((s) => s.symbol) : []);
+      // For free/guest clients, developer signals are supplied by shared_results
+      // polling (cross-device). Do not overwrite them with local storage here.
+      if (isDev || isPlanClient) {
+        const nextFull = full.slice(0, 40);
+        setFullSignals((prev) => {
+          if (nextFull.length === 0 && prev.length > 0) return prev;
+          try { if (JSON.stringify(prev) === JSON.stringify(nextFull)) return prev; } catch {}
+          return nextFull as AnalysisResult[];
+        });
+        setSignals(nextFull.map((s: any) => ({
+          symbol: String(s.symbol || ''),
+          type: (String(s.signal || '').includes('sell') ? 'sell' : 'buy') as 'buy' | 'sell',
+          price: Number(s.entryPrice ?? s.price ?? 0),
+          change: Number(s.change ?? 0),
+          changePercent: Number(s.changePercent ?? 0),
+        })).filter((s) => s.symbol));
+      }
     } catch {}
     // Account: same store as desktop (balance + leverage aware).
     try {
@@ -815,24 +810,29 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
 
 
 
-  // PAID-ONLY: the developer's published analysis (shared_results) is the ONLY
-  // source of "main-site" signals on mobile. It must reach paid-plan clients in
-  // paid mode ONLY — never a free-plan client, never a paid client who pressed
-  // "رجوع للمجانية", and never the developer (who already owns the source data).
-  // canViewSignalsRef lets the poll keep its own identity without re-subscribing.
+  // The developer's published analysis (shared_results) is mirrored on mobile
+  // for GUESTS and REGISTERED CLIENTS WITHOUT AN ACTIVE PAID PLAN — never for an
+  // active paid-plan client (they run their own analysis) and never for the
+  // developer (who already owns the source data). This is the cross-device
+  // source of "main-site" signals, so a guest on the app sees the exact same
+  // developer signals as the public website.
   const canViewSignalsRef = useRef(canViewSignals);
   useEffect(() => { canViewSignalsRef.current = canViewSignals; }, [canViewSignals]);
 
   useEffect(() => {
     const userEmail = (user?.email || email || '').toLowerCase().trim();
     const isDev = isDeveloperEmail(userEmail);
-    // Developer has nothing to mirror; free clients are not entitled at all.
-    if (isDev || !isPlanClient) return;
+    // Developer owns the source data; a paid-plan client sees their own analysis.
+    // Only guests and clients without an active paid plan mirror the feed.
+    if (isDev || isPlanClient) return;
 
     const pollFirestore = async () => {
       try {
         const snap = await getDocs(collection(db, 'shared_results'));
-        if (snap.empty) return;
+        if (snap.empty) {
+          setFullSignals((prev) => (prev.length ? [] : prev));
+          return;
+        }
         let latestData: any = null;
         let latestTs = 0;
         snap.forEach(d => {
@@ -840,35 +840,29 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
           let ts = 0;
           if (dta.timestamp) {
             if (typeof dta.timestamp === 'string') ts = new Date(dta.timestamp).getTime();
+            else if (typeof dta.timestamp === 'object' && (dta.timestamp as any).toMillis) ts = (dta.timestamp as any).toMillis();
             else if (typeof dta.timestamp === 'number') ts = dta.timestamp;
           }
           if (ts >= latestTs) { latestTs = ts; latestData = dta; }
         });
-        if (!latestData || !Array.isArray(latestData.results)) return;
-        const firestoreSignals = latestData.results.filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways).map((s: any) => ({ ...s, source: s.source || 'auto' }));
-        if (firestoreSignals.length > 0) {
-          setFullSignals((prev) => {
-            // The client may have dropped to free mode mid-poll: never resurrect
-            // a feed that is no longer entitled.
-            if (!canViewSignalsRef.current) return prev.length ? [] : prev;
-            const seen = new Set<string>();
-            const merged: any[] = [];
-            for (const s of firestoreSignals) {
-              const k = `${s.symbol}_${s.timeframe || ''}`;
-              if (seen.has(k)) continue;
-              seen.add(k);
-              merged.push(s);
-            }
-            for (const s of prev) {
-              const k = `${s.symbol}_${s.timeframe || ''}`;
-              if (seen.has(k)) continue;
-              seen.add(k);
-              merged.push(s);
-            }
-            merged.sort((a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
-            return merged.slice(0, 40) as any;
-          });
+        if (!latestData || !Array.isArray(latestData.results)) {
+          setFullSignals((prev) => (prev.length ? [] : prev));
+          return;
         }
+        // The developer feed is authoritative for these accounts: replace (not
+        // merge) so removed developer signals also disappear here.
+        const firestoreSignals = latestData.results
+          .filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways)
+          .map((s: any) => ({ ...s, source: s.source || 'auto' }))
+          .sort((a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
+          .slice(0, 40);
+        setFullSignals((prev) => {
+          // The client may have entered a paid plan mid-poll: never keep a feed
+          // that is no longer entitled for that account.
+          if (!canViewSignalsRef.current) return prev.length ? [] : prev;
+          try { if (JSON.stringify(prev) === JSON.stringify(firestoreSignals)) return prev; } catch {}
+          return firestoreSignals as AnalysisResult[];
+        });
       } catch (e) {
         console.warn('[CLIENT] Failed to poll Firestore:', e);
       }
@@ -1129,6 +1123,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   };
 
   const removeSignal = (sym: string) => {
+    // Free/guest accounts see the developer feed read-only: they cannot delete
+    // any displayed developer signal (desktop parity).
+    if (!isDev && !isPlanClient) return;
     try {
       const raw = localStorage.getItem(mobileSignalsStorageKey());
       const arr = raw ? JSON.parse(raw) : [];
@@ -1147,7 +1144,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const signalFor = useCallback((sym: string) => fullSignals.find((r) => r.symbol === sym), [fullSignals]);
 
   const [freshCount, setFreshCount] = useState(0);
-  // PAID-ONLY: alerts are gated by the same entitlement that gates the feed.
+  // Alerts follow the same visibility as the feed: guests/free clients get the
+  // developer feed alert (read-only), paid clients get their own-analysis alerts.
   useMobileSignalAlert(useCallback((n: number) => {
     loadAll();
     setFreshCount(n);
@@ -1156,10 +1154,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     setTimeout(() => { setAlert(null); setFreshCount(0); }, 8000);
   }, [loadAll, lang]), canViewSignals);
 
-  // Leaving the paid plan (free mode / expiry / sign-out) must remove the
-  // displayed developer signals IMMEDIATELY — not on the next 3s load tick and
-  // not only after a refresh. Reactivating the plan is handled by the normal
-  // loadAll effects, which repopulate the feed from the entitled sources.
+  // The feed is visible to everyone, so this legacy purge effect is kept only as
+  // a safety net: if visibility is ever restricted again, the displayed feed is
+  // dropped immediately instead of waiting for the next load tick.
   useEffect(() => {
     if (canViewSignals) return;
     setFullSignals((prev) => (prev.length ? [] : prev));
