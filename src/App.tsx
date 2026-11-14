@@ -1072,7 +1072,7 @@ const isDeveloperSession = () => {
     } catch { /* keep default */ }
     // PAID-ONLY: a free-plan client never feeds signals to the auto engine, so
     // no trade can ever be opened from the developer's displayed analysis.
-    const entitledFeed = (isDeveloperSession() || isPlanClient) ? topSignals : [];
+    const entitledFeed = isDeveloperSession() ? topSignals : [];
     if (!autoEngineRef.current) {
       autoEngineRef.current = new AutoTradeEngine({
         user,
@@ -3364,7 +3364,7 @@ const started = planGrants
                 the user browses other pages. Opening a trade no longer requires
                 sitting on the trade page. */}
             <div className={effectivePage === 'trade' ? 'contents' : 'hidden'} aria-hidden={effectivePage !== 'trade'}>
-              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() || isPlanClient ? topSignals : []} canTrade={isDeveloperSession() || isPlanClient} />
+              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() || !isPlanClient ? topSignals : []} canTrade={isDeveloperSession() || isPlanClient} />
             </div>
 
             {effectivePage === 'store' && (
@@ -3590,7 +3590,7 @@ const started = planGrants
           <div className="max-w-7xl mx-auto px-4">
             <AdSlot position="header" lang={lang} />
             <ClientDashboard
-              results={clientSignals}
+              results={isPlanClient ? clientSignals : topSignals}
               lang={lang}
               hasActivePlan={hasActivePlan}
               onDetail={setClientDetailResult}
