@@ -494,6 +494,21 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // sees the developer's published signals (read-only), a paid client sees their
   // own analysis. The developer always sees them.
   const canViewSignals = true;
+  // ONE-TIME CLEANUP of the old developer-signal leak: older builds stored the
+  // polled developer feed in the shared `top_signals_persistent__<account>` key,
+  // so a paid client could see developer signals again after a page refresh.
+  // Purge it once per non-developer account; afterwards that key only ever holds
+  // the client's OWN analysis (mobile radar / desktop paid analysis).
+  useEffect(() => {
+    if (!signedInEmail || isDeveloperEmail(signedInEmail)) return;
+    const safe = signedInEmail.replace(/[^a-z0-9@._-]/g, '_');
+    const marker = `finalyze_signals_leak_purged_v1__${safe}`;
+    try {
+      if (localStorage.getItem(marker) === '1') return;
+      localStorage.removeItem(`top_signals_persistent__${safe}`);
+      localStorage.setItem(marker, '1');
+    } catch {}
+  }, [signedInEmail]);
   // Losing the plan (expired / returned to free / signed out) must not leave the
   // client stranded on a paid screen that no longer renders.
   useEffect(() => {
@@ -672,7 +687,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       if (isDev || isPlanClient) {
         const nextFull = full.slice(0, 40);
         setFullSignals((prev) => {
-          if (nextFull.length === 0 && prev.length > 0) return prev;
+          // Replace even when the new list is empty: entering paid mode (or the
+          // client deleting their signals) must remove the previously displayed
+          // free-mode developer feed, not keep it alive.
           try { if (JSON.stringify(prev) === JSON.stringify(nextFull)) return prev; } catch {}
           return nextFull as AnalysisResult[];
         });
@@ -748,6 +765,22 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       setPositions(mapped);
     } catch {}
   }, [isDev, isPlanClient]);
+
+  // Entering PAID mode must clear the free-mode developer feed IMMEDIATELY (not
+  // on the next 3s tick), then load only the client's own analysis. Returning to
+  // FREE mode is handled by the shared_results poll, which refetches at once.
+  const prevPlanClientRef = useRef(isPlanClient);
+  useEffect(() => {
+    const was = prevPlanClientRef.current;
+    prevPlanClientRef.current = isPlanClient;
+    if (!isPlanClient || was) return;
+    setFullSignals([]);
+    setSignals([]);
+    setDetail(null);
+    setFreshCount(0);
+    try { syncMobileAutoEngine([]); } catch {}
+    void loadAll();
+  }, [isPlanClient, loadAll]);
 
   // Live store sync: trades opened/closed (auto engine or this device) refresh instantly.
   // IMPORTANT: this effect must NOT depend on fullSignals. loadAll() calls
@@ -1083,6 +1116,14 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     setPlanPaid(true);
     setMobileFreeModeChosen(signedInEmail, false);
     setMobilePaidMode(signedInEmail, true);
+    // Drop the free-mode developer feed at once; the main page must start clean
+    // and only show signals produced by THIS client's own analysis.
+    setFullSignals([]);
+    setSignals([]);
+    setDetail(null);
+    setFreshCount(0);
+    try { syncMobileAutoEngine([]); } catch {}
+    void loadAll();
     if (signedInEmail) {
       let requestNo: number | null = null;
       try {

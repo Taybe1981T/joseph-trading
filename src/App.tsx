@@ -456,6 +456,8 @@ const isDeveloperSession = () => {
     if (isPlanClient) {
       // Paid active: hide developer feed; keep only the client's own signals.
       setTopSignals((prev) => (prev.length ? [] : prev));
+      // Close any developer-signal detail panel that was open in free mode.
+      setClientDetailResult(null);
     }
   }, [user, isPlanClient]);
 
@@ -1012,11 +1014,28 @@ const isDeveloperSession = () => {
     } catch { return 'top_signals_persistent__guest'; }
   };
   const [topSignals, setTopSignals] = useState<AnalysisResult[]>([]);
-  // Load this account's own signals for developer / paid-plan clients.
-  // For guests or clients NOT in an active paid plan, developer signals come
-  // from shared_results polling instead (see effect below).
+  // ONE-TIME CLEANUP of the old developer-signal leak. Earlier builds saved the
+  // polled developer feed into each client's own `top_signals_persistent__…`
+  // key, so a paid client could see developer signals again after a refresh.
+  // Purge that key once per non-developer account; from now on only the
+  // developer writes it and only paid-client analysis is ever stored there.
   useEffect(() => {
-    if (!isDeveloperSession() && !isPlanClient) {
+    const em = (user?.email || '').toLowerCase().trim();
+    if (!em || isDeveloperEmail(em)) return;
+    const safe = em.replace(/[^a-z0-9@._-]/g, '_');
+    const marker = `finalyze_signals_leak_purged_v1__${safe}`;
+    try {
+      if (localStorage.getItem(marker) === '1') return;
+      localStorage.removeItem(`top_signals_persistent__${safe}`);
+      localStorage.setItem(marker, '1');
+    } catch {}
+  }, [user?.email]);
+  // Load the developer's own signals (the only account that OWNS topSignals).
+  // A client — paid or free — must never restore developer signals from local
+  // storage: paid clients use their own analysis (clientSignals) and free/guest
+  // accounts get the polled developer feed in memory (never persisted).
+  useEffect(() => {
+    if (!isDeveloperSession()) {
       setTopSignals([]);
       return;
     }
@@ -3421,7 +3440,7 @@ const started = planGrants
                 the user browses other pages. Opening a trade no longer requires
                 sitting on the trade page. */}
             <div className={effectivePage === 'trade' ? 'contents' : 'hidden'} aria-hidden={effectivePage !== 'trade'}>
-              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() || !isPlanClient ? topSignals : []} canTrade={isDeveloperSession() || isPlanClient} canOpenManual={!!user} />
+              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() ? topSignals : isPlanClient ? clientSignals : topSignals} canTrade={isDeveloperSession() || isPlanClient} canOpenManual={!!user} />
             </div>
 
             {effectivePage === 'store' && (
