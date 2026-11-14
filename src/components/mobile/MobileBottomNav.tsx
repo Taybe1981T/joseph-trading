@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Briefcase, Settings, Zap, Package, Receipt, TrendingUp, Hand } from 'lucide-react';
+import { Home, Briefcase, Settings, Zap, Package, Receipt, TrendingUp, Hand, Users } from 'lucide-react';
 
 export type MobileTab = 'home' | 'quotes' | 'positions' | 'trade' | 'settings' | 'profile' | 'analysis' | 'manual' | 'store' | 'clients' | 'transactions';
 
@@ -38,6 +38,9 @@ export function MobileBottomNav({ activeTab, onTabChange, isDeveloper: isDev, ha
     { id: 'home', label: isAr ? 'الرئيسية' : 'Home', icon: Home },
     ...(canAnalyze ? [{ id: 'analysis' as MobileTab, label: isAr ? 'تلقائي' : 'Auto AI', icon: Zap, highlight: highlightNewTools }] : []),
     ...(canAnalyze ? [{ id: 'manual' as MobileTab, label: isAr ? 'يدوي' : 'Manual', icon: Hand, highlight: highlightNewTools }] : []),
+    // Developer-only: Client Monitor as a bottom-nav icon (moved off the top
+    // header per request — same logic/entitlements as the desktop monitor).
+    ...(isDev ? [{ id: 'clients' as MobileTab, label: isAr ? 'العملاء' : 'Clients', icon: Users }] : []),
     { id: 'transactions', label: isAr ? 'معاملات' : 'Tx', icon: Receipt },
     { id: 'trade', label: isAr ? 'تداول' : 'Trade', icon: TrendingUp },
     { id: 'positions', label: isAr ? 'صفقات' : 'Positions', icon: Briefcase },

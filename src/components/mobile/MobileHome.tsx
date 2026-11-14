@@ -76,25 +76,6 @@ export function MobileHome({
         </div>
       )}
 
-      {isClient && (
-        <div className="mt5-card">
-          <div className="mt5-card-header">
-            <div className="mt5-card-title">{mobileT(lang, 'Auto Mirror', 'النسخ التلقائي')}</div>
-            <button
-              className={`mt5-btn ${autoTradeEnabled ? 'mt5-btn-primary' : 'mt5-btn-secondary'}`}
-              onClick={() => onAutoTradeToggle(!autoTradeEnabled)}
-              style={{ padding: '8px 16px', fontSize: 12 }}
-            >
-              {autoTradeEnabled ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div className="mt5-card-subtitle">
-            {autoTradeEnabled
-              ? mobileT(lang, 'Developer trades open instantly on your account', 'صفقات المطور تفتح فوراً على حسابك')
-              : mobileT(lang, 'Tap ON to mirror developer signals automatically', 'فعّل لنسخ إشارات المطور تلقائياً')}
-          </div>
-        </div>
-      )}
       {isClient && !hasPlan && (
         <div style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10, padding: '9px 14px', fontSize: 12, color: '#F59E0B', fontWeight: 700 }}>
           {mobileT(lang, 'Free plan — limited signals. Upgrade for full access.', 'خطة مجانية — إشارات محدودة. رقِّ للوصول الكامل.')}
@@ -131,7 +112,7 @@ export function MobileHome({
             <span style={{ color: '#888' }}>{mobileT(lang, 'Analyzing now', 'يُحلَّل الآن')}</span>
             <span style={{ color: '#fff', fontWeight: 900 }}>{radarProgress.current}</span>
           </div>
-          <div style={{ height: 4, borderRadius: 2, background: '#2a2a2a', overflow: 'hidden' }}>
+          <div style={{ height: 8, borderRadius: 4, background: '#2a2a2a', overflow: 'hidden' }}>
             <div style={{ height: '100%', width: `${radarProgress.total > 0 ? Math.round((radarProgress.index / radarProgress.total) * 100) : 0}%`, background: '#10B981', transition: 'width 0.3s' }} />
           </div>
         </div>

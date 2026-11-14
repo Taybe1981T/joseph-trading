@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Globe, Sun, Moon, Bell, User, Users, Activity } from 'lucide-react';
+import { Globe, Sun, Moon, Bell, User, Activity } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { getOpenStockExchanges } from '../../lib/marketHours';
 import { BASE_URL } from '../../lib/firebase';
@@ -58,10 +58,10 @@ export function MobileHeader({
           <img src={logo || (BASE_URL + 'logo.png')} alt="JT" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', lineHeight: 1.1 }}>
-            Joseph.<span style={{ color: '#7dd3fc', fontStyle: 'italic' }}>Trading</span>
+          <div style={{ fontSize: 15, fontWeight: 800, color: isDark ? '#ffffff' : '#111111', lineHeight: 1.1 }}>
+            Joseph.<span style={{ color: isDark ? '#7dd3fc' : '#0369a1', fontStyle: 'italic' }}>Trading</span>
           </div>
-          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.55)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          <div style={{ fontSize: 10, color: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(17,17,17,0.6)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
             {isAr ? 'لتحليل الأسواق المالية' : 'For Financial Market Analysis'} · {title}
           </div>
         </div>
@@ -83,7 +83,7 @@ export function MobileHeader({
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flexShrink: 0 }}>
           <button className="mt5-icon-btn" style={{ width: 72, height: 72, position: 'relative' }} onClick={onAutoAnalysisToggle} aria-label={isAr ? 'بدء التحليل التلقائي' : 'Start auto analysis'}>
-            <Activity size={34} style={{ color: autoAnalysisRunning ? '#10B981' : '#ffffff', animation: autoAnalysisRunning ? 'pulse 1.5s infinite' : 'none' }} />
+            <Activity size={34} style={{ color: isDark ? '#ffffff' : (autoAnalysisRunning ? '#10B981' : '#ffffff'), animation: autoAnalysisRunning ? 'pulse 1.5s infinite' : 'none' }} />
             <span style={{ position: 'absolute', top: 4, right: 4, width: 16, height: 16, borderRadius: '50%', background: autoAnalysisRunning ? '#10B981' : '#ffffff' }} />
           </button>
           {/* Developer + paid client only: this button starts the same auto
@@ -130,14 +130,10 @@ export function MobileHeader({
             </div>
           )}
         </div>
-        {clientCount && clientCount > 0 && onClientsClick && (
-          <button className="mt5-icon-btn" style={{ width: 36, height: 36, position: 'relative' }} onClick={onClientsClick} aria-label="Clients">
-            <Users size={16} />
-            <span style={{ position: 'absolute', top: 2, right: 2, width: 14, height: 14, borderRadius: '50%', background: '#F59E0B', color: '#000', fontSize: 9, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              {clientCount}
-            </span>
-          </button>
-        )}
+      </div>
+      {/* Big site logo — shown at the top, above the four market-status boxes. */}
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0 0' }}>
+        <img src={logo || (BASE_URL + 'logo.png')} alt="Joseph Trading" style={{ width: 72, height: 72, objectFit: 'contain' }} />
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         {CATS.map((c) => {
