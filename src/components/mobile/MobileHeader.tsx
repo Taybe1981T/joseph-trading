@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Globe, Sun, Moon, Bell, User, Activity } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { getOpenStockExchanges } from '../../lib/marketHours';
-import { BASE_URL } from '../../lib/firebase';
 
 interface MobileHeaderProps {
   title: string;
@@ -55,7 +54,7 @@ export function MobileHeader({
       <header className="mt5-header" style={{ height: 'auto', flexDirection: 'column', alignItems: 'stretch', gap: 6, padding: '8px 12px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ width: 38, height: 38, borderRadius: 10, overflow: 'hidden', background: '#000', border: '1px solid rgba(255,255,255,0.25)', flexShrink: 0 }}>
-          <img src={logo || (BASE_URL + 'logo.png')} alt="JT" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          <img src={logo || 'https://joseph-trading.vercel.app/logo.png'} alt="JT" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 800, color: isDark ? '#ffffff' : '#111111', lineHeight: 1.1 }}>
@@ -81,7 +80,7 @@ export function MobileHeader({
             </div>
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flexShrink: 0 }}>
           <button className="mt5-icon-btn" style={{ width: 72, height: 72, position: 'relative' }} onClick={onAutoAnalysisToggle} aria-label={isAr ? 'بدء التحليل التلقائي' : 'Start auto analysis'}>
             <Activity size={34} style={{ color: autoAnalysisRunning ? '#10B981' : '#F59E0B', animation: autoAnalysisRunning ? 'pulse 1.5s infinite' : 'none' }} />
             <span style={{ position: 'absolute', top: 4, right: 4, width: 16, height: 16, borderRadius: '50%', background: autoAnalysisRunning ? '#10B981' : '#ffffff' }} />
@@ -91,11 +90,6 @@ export function MobileHeader({
               the control at all. */}
           {onAutoAnalysisToggle && (
             <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '8px 14px',
-              borderRadius: 999,
               fontSize: 11,
               fontWeight: 900,
               letterSpacing: '0.08em',
@@ -136,9 +130,15 @@ export function MobileHeader({
           )}
         </div>
       </div>
-      {/* Big site logo — shown at the top, above the four market-status boxes. */}
+      {/* Big green wordmark — shown at the top, above the four market-status boxes. */}
       <div style={{ display: 'flex', justifyContent: 'center', padding: '2px 0 0' }}>
-        <img src={logo || (BASE_URL + 'logo.png')} alt="Joseph Trading" style={{ width: 72, height: 72, objectFit: 'contain' }} />
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 34, fontWeight: 900, color: '#10B981', letterSpacing: '0.01em', lineHeight: 1.05 }}>Joseph.</div>
+          <div style={{ fontSize: 34, fontWeight: 900, color: '#10B981', fontStyle: 'italic', lineHeight: 1.05 }}>Trading</div>
+          <div style={{ fontSize: 9, fontWeight: 800, color: isDark ? 'rgba(255,255,255,0.55)' : 'rgba(17,17,17,0.6)', letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 3 }}>
+            {isAr ? 'لتحليل الأسواق المالية' : 'For Financial Market Analysis'}
+          </div>
+        </div>
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         {CATS.map((c) => {
