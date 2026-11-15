@@ -46,6 +46,7 @@ import {
   startMobilePositionManager,
   openMobileManualTrade,
   stampMobileLegacyTradeModes,
+  mobileTradeUser,
 } from '../../services/mobileTradeBridge';
 import { auth, db } from '../../lib/firebase';
 import { signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
@@ -934,7 +935,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     let alive = true;
     let busy = false;
     const opts = () => ({
-      user,
+      // Same session source the mobile store uses, so a mirrored trade lands in
+      // exactly the account this screen reads (never a stale guest store).
+      user: mobileTradeUser(),
       force: true,
       mode: 'free' as const,
       playChampagne: () => {},

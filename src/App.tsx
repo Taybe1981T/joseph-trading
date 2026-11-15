@@ -1239,8 +1239,10 @@ const isDeveloperSession = () => {
     let alive = true;
     let busy = false;
     const displayed = () => {
-      // PAID-ONLY: free clients expose no displayed symbols, so the mirror can
-      // never open a trade from the developer's analysis for them.
+      // FREE MODE (guest, no plan, or subscriber paused to free): an empty list
+      // means "no analysis fence" — the mirror follows the developer's book
+      // automatically, which is the whole point of free mode (view-only copy).
+      // PAID: only symbols from the client's own displayed analysis are copied.
       if (!isDeveloperSession() && !isPlanClient) return [];
       return [
         ...(Array.isArray(topSignals) ? topSignals.map((s: any) => s?.symbol).filter(Boolean) : []),
