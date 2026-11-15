@@ -200,6 +200,8 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
   const [showForm, setShowForm] = useState(true);
+  const radarScanningRef = useRef<boolean>(false);
+  const radarSettledSignalsRef = useRef<any[]>([]);
   const [isScanningFinished, setIsScanningFinished] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('auto_settings');
@@ -1141,6 +1143,15 @@ const isDeveloperSession = () => {
     // feeds the engine (developer signals are read-only for them).
     const entitledFeed = isDeveloperSession() ? topSignals : isPlanClient ? clientSignals : [];
     const tradeMode: 'free' | 'paid' = isDeveloperSession() || isPlanClient ? 'paid' : 'free';
+    // During radar scan, never feed ALL displayed signals to the engine — only the
+    // settled top-3-per-category set (so no trade opens until its category is
+    // fully analyzed and filtered). The scan loop feeds them manually with gaps.
+    if (radarScanningRef.current) {
+      if (autoEngineRef.current) {
+        try { autoEngineRef.current.updateConfig({ signals: [...radarSettledSignalsRef.current] }); } catch {}
+      }
+      return;
+    }
     if (!autoEngineRef.current) {
       autoEngineRef.current = new AutoTradeEngine({
         user,
@@ -1161,7 +1172,7 @@ const isDeveloperSession = () => {
         tradeMode,
       });
     }
-  }, [topSignals, clientSignals, user, autoTradeGen, isPlanClient]);
+  }, [topSignals, clientSignals, user, autoTradeGen, isPlanClient, isScanningFinished]);
 
   useEffect(() => () => { autoEngineRef.current?.stop(); autoEngineRef.current = null; }, []);
 
@@ -1278,7 +1289,7 @@ const isDeveloperSession = () => {
       } catch {} finally { busy = false; }
     };
     void tick();
-    const iv = setInterval(tick, 10000);
+    const iv = setInterval(tick, 5000);
     const onMirror = () => { void tick(); };
     try { window.addEventListener('finalyze-mirror-changed', onMirror as EventListener); } catch {}
     // REAL-TIME: execute a developer open within milliseconds of the broadcast
@@ -1324,7 +1335,7 @@ const isDeveloperSession = () => {
       } catch { /* keep the previous book on transient errors */ }
     };
     void publish();
-    const iv = setInterval(publish, 20000);
+    const iv = setInterval(publish, 10000);
     return () => { alive = false; clearInterval(iv); };
   }, [user]);
 
@@ -1853,7 +1864,25 @@ const isDeveloperSession = () => {
     if (openJobs.length === 0) return;
 
     setIsScanningFinished(false);
-
+    radarScanningRef.current = true;
+    radarSettledSignalsRef.current = [];
+    // Ensure the engine exists and clear its signals so the interval timer won't
+    // open trades during analysis.
+    try {
+      if (!autoEngineRef.current) {
+        autoEngineRef.current = new AutoTradeEngine({
+          user,
+          leverage: 100,
+          signals: [],
+          isDeveloper: isDeveloperSession(),
+          origin: user?.uid || user?.email || '',
+          tradeMode: isDeveloperSession() || isPlanClient ? 'paid' : 'free',
+        });
+        autoEngineRef.current.start();
+      } else {
+        autoEngineRef.current.updateConfig({ signals: [] });
+      }
+    } catch {}
     let hidden: string[] = [];
     let custom: string[] = [];
     try {
@@ -1867,9 +1896,6 @@ const isDeveloperSession = () => {
 
     const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
     const toEngineSig = (r: any) => ({ symbol: r.symbol, signal: r.signal, entryPrice: (r as any).entryPrice ?? null, stopLoss: (r as any).stopLoss ?? null, takeProfit: (r as any).takeProfit ?? null });
-    // Across this scan: signals settled (top-3 per completed category) allowed to auto-open.
-    const settledOpenSigs: Array<{ symbol: string; signal: any; entryPrice?: number | null; stopLoss?: number | null; takeProfit?: number | null }> = [];
-
     for (let jobIdx = 0; jobIdx < openJobs.length; jobIdx++) {
       if (!autoSettingsRef.current.isEnabled) break;
       const { cat, region, exchange } = openJobs[jobIdx];
@@ -1986,9 +2012,10 @@ const isDeveloperSession = () => {
       // ── PER-CATEGORY: DISPLAY + DEFERRED OPEN (after category complete) ──
       // All of THIS category's symbols are analyzed. Display its signals now,
       // but DO NOT open trades during analysis: settle the TOP 3 for this
-      // category, then open them in "first presented" order (earliest timestamp)
-      // with a 2-second gap between each open. This guarantees only the best 3
-      // per completed category are traded, in order.
+      // category (by confidence + other conditions), then open them in
+      // "first presented" order (earliest timestamp) with a 2-second gap
+      // between each open. This guarantees only the best 3 per completed
+      // category are traded, gradually after the category finishes.
       updateTopSignals(jobResults, false);
       try {
         const actionable = jobResults.filter((r) => r && r.signal && r.signal !== 'no_entry' && r.signal !== 'neutral' && !(r as any).isSideways);
@@ -2000,24 +2027,26 @@ const isDeveloperSession = () => {
         const top3 = ranked.slice(0, 3);
         // Open order: first presented/offered (earliest timestamp) first.
         const openOrder = [...top3].sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+        // Accumulate into the settled set (so the engine-feeding effect never
+        // re-opens all displayed signals during the scan).
+        for (const sig of openOrder) radarSettledSignalsRef.current.push(toEngineSig(sig));
+        const eng = (autoEngineRef as any)?.current;
         for (let oi = 0; oi < openOrder.length; oi++) {
           if (!autoSettingsRef.current.isEnabled) break;
-          const sig = openOrder[oi];
-          settledOpenSigs.push(toEngineSig(sig));
-          const eng = (autoEngineRef as any)?.current;
           if (eng && typeof eng.scanNow === 'function') {
             try {
-              eng.updateConfig?.({ signals: [...settledOpenSigs] });
+              eng.updateConfig?.({ signals: [...radarSettledSignalsRef.current] });
               eng.scanNow();
             } catch {}
           } else {
-            // Engine not ready: ensure it (re)starts with the settled signals.
             try { setAutoTradeGen((n) => n + 1); } catch {}
           }
           if (oi < openOrder.length - 1) await delay(2000);
         }
       } catch (e) { console.warn('[radar] deferred open failed:', e); }
     }
+    // Scan finished: allow the engine-feeding effect to run normally again.
+    radarScanningRef.current = false;
     // Restore engine to the full displayed signal set after the scan.
     try {
       const eng = (autoEngineRef as any)?.current;

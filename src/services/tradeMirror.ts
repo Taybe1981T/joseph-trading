@@ -446,6 +446,7 @@ async function runMirrorPass(opts: {
     if (ev.kind === 'open' && devHeld) {
       if (!inDevBook) {
         const age = now - Number(ev.publishedAt || 0);
+        console.log(`[TradeMirror] skip ${sym}: not in dev book (age ${Math.round(age/1000)}s)${age > 2*60*1000 ? ' — marked seen' : ' — will retry'}`);
         if (age > 2 * 60 * 1000) markSeen(ev.id);
         continue;
       }
@@ -485,17 +486,17 @@ async function runMirrorPass(opts: {
           console.warn(`[TradeMirror] stuck guard for ${sym} — clearing so mirror open can proceed`);
         }
         const lastClose = guardLastClosedAt(sym);
-        if (lastClose && Date.now() - lastClose < 8000) continue; // retry after cooldown
+        if (lastClose && Date.now() - lastClose < 8000) { console.log(`[TradeMirror] retry ${sym}: reopen cooldown`); continue; } // retry after cooldown
         const cat = detectMirrorCategory(sym);
-        if (!isMarketOpen(cat, sym)) continue; // retry — market may open later
+        if (!isMarketOpen(cat, sym)) { console.log(`[TradeMirror] retry ${sym}: market closed (${cat})`); continue; } // retry — market may open later
         const price = await getLivePrice(sym).catch(() => null);
-        if (price == null || !(price > 0)) continue; // retry — quote feed warms up
+        if (price == null || !(price > 0)) { console.log(`[TradeMirror] retry ${sym}: no price`); continue; } // retry — quote feed warms up
         // Same sizing/risk rules as the developer's auto engine and the manual
         // ticket: crypto → tiered balance-scaled lot + percentage SL/TP;
         // other categories → fixed values (when ON) or dynamic $ risk.
         const q = tradeQtyFor(cat, sym, balance);
         const requiredMargin = notionalInUSD(cat, sym, price, q) / leverage;
-        if (requiredMargin > balance) continue; // retry — balance may free up
+        if (requiredMargin > balance) { console.log(`[TradeMirror] retry ${sym}: insufficient margin (${requiredMargin.toFixed(2)} > ${balance.toFixed(2)})`); continue; } // retry — balance may free up
         const side: 'buy' | 'sell' = isBuy ? 'buy' : 'sell';
         const levels = resolveRiskLevels({
           category: cat, symbol: sym, entry: price, isBuy, qty: q, balance,

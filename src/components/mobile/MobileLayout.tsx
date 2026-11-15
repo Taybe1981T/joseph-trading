@@ -968,7 +968,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       } catch {} finally { busy = false; }
     };
     void tick();
-    const iv = setInterval(tick, 10000);
+    const iv = setInterval(tick, 5000);
     let dispose: VoidFunction | null = null;
     try { dispose = listenMirrorEvents(opts()); } catch {}
     return () => {
@@ -988,7 +988,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     let alive = true;
     const publish = async () => { if (alive) await publishMobileDevBook(); };
     void publish();
-    const iv = setInterval(publish, 20000);
+    const iv = setInterval(publish, 10000);
     return () => { alive = false; clearInterval(iv); };
   }, [isDev]);
 
