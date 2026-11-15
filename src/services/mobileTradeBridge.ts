@@ -26,8 +26,36 @@ import {
   baseUnitForTrade,
 } from './tradingValues';
 import { currentTradeMode, stampLegacyTradeModes } from '../lib/tradeMode';
+import { isDeveloperEmail } from '../lib/clientIds';
+import { broadcastMirrorEvent, closeEventFor, openEventFor, publishDevBook } from './tradeMirror';
 
 export const MOBILE_AUTO_TRADE_KEY = 'paper_trading_auto_trade';
+
+/** Email of the signed-in mobile session (developer detection). */
+function mobileSessionEmail(): string {
+  try {
+    const raw = localStorage.getItem('finalyze_user');
+    const o = raw ? JSON.parse(raw) : {};
+    return String(o?.email || '').toLowerCase().trim();
+  } catch { return ''; }
+}
+
+/**
+ * DEVELOPER DEVICE ONLY — publish the live book (symbols currently held open).
+ * Free/guest views are a pure mirror of the developer's account, so the book
+ * must stay accurate even when the developer only uses the phone: without this
+ * a phone-opened trade would be deleted by free devices on their next
+ * reconcile, and a phone reset could not be confirmed.
+ */
+export async function publishMobileDevBook(): Promise<void> {
+  try {
+    const email = mobileSessionEmail();
+    if (!isDeveloperEmail(email)) return;
+    const store = getTradeStore(mobileTradeUser() as any);
+    const list = await store.listTrades();
+    await publishDevBook(list as any, email);
+  } catch { /* best effort */ }
+}
 
 export function isMobileAutoTradeOn(): boolean {
   try { return localStorage.getItem(MOBILE_AUTO_TRADE_KEY) !== '0'; } catch { return true; }
@@ -126,6 +154,17 @@ export async function openMobileManualTrade(
     mode: currentTradeMode(),
   };
   const id = await store.addTrade(row);
+  // Developer phone: broadcast the open + refresh the book so every free/guest
+  // view (website and phone) mirrors this trade exactly like a desktop open.
+  const devEmail = mobileSessionEmail();
+  if (isDeveloperEmail(devEmail)) {
+    try {
+      await broadcastMirrorEvent(openEventFor(sym, side, String(signal?.signal || ''), row.openedAt, {
+        devEntry: price, devSl: sl, devTp: tp, origin: devEmail,
+      }));
+    } catch {}
+    await publishMobileDevBook();
+  }
   try { window.dispatchEvent(new CustomEvent('mobile-trades-changed', { detail: { action: 'open', id, symbol: sym } })); } catch {}
   return { ...row, id };
 }
@@ -160,6 +199,12 @@ export async function closeMobileTrade(id: string): Promise<void> {
       } catch {}
     }
   } catch { /* best effort */ }
+  // Developer phone: a close must reach every free/guest mirror immediately.
+  const devEmail = mobileSessionEmail();
+  if (isDeveloperEmail(devEmail)) {
+    try { await broadcastMirrorEvent(closeEventFor(String(t?.symbol || ''), 'manual', devEmail)); } catch {}
+    await publishMobileDevBook();
+  }
   try { window.dispatchEvent(new CustomEvent('mobile-trades-changed', { detail: { action: 'close', id } })); } catch {}
 }
 
@@ -251,6 +296,12 @@ async function mobileManagePositions(): Promise<void> {
         await store.saveBalance(balance + pnl);
         balance += pnl;
         changed = true;
+        // Developer phone: TP/SL closes must mirror to every free/guest view.
+        const devEmail = mobileSessionEmail();
+        if (isDeveloperEmail(devEmail)) {
+          try { await broadcastMirrorEvent(closeEventFor(t.symbol, reason, devEmail)); } catch {}
+          await publishMobileDevBook();
+        }
       } catch {}
       continue;
     }

@@ -200,6 +200,7 @@ export function MobileHome({
               onDetail={onDetail}
               onTrade={onTrade}
               onRemove={onRemove}
+              canManage={isDev || hasPlan}
               onToggleFavorite={toggleFavorite}
               isFavorite={true}
             />
@@ -222,6 +223,7 @@ export function MobileHome({
               onDetail={onDetail}
               onTrade={onTrade}
               onRemove={onRemove}
+              canManage={isDev || hasPlan}
               onToggleFavorite={toggleFavorite}
               isFavorite={favorites.includes(r.symbol)}
             />

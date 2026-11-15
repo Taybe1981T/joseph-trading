@@ -1192,6 +1192,25 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     setTimeout(() => setToast(null), 2000);
   }
 
+  // Delete a single closed trade from history (own account; paid-mode client/dev).
+  async function deleteHistoryTrade(id: string) {
+    if (!canTrade) { denyViewOnly(); return; }
+    setBusy(true);
+    try {
+      await store.deleteTrades([id]);
+    } catch {
+      try {
+        const raw = JSON.parse(localStorage.getItem('paper_trading_data') || '{"balance":10000,"trades":[]}');
+        raw.trades = (raw.trades || []).filter((x: any) => x.id !== id);
+        localStorage.setItem('paper_trading_data', JSON.stringify(raw));
+      } catch {}
+    }
+    setTrades((prev) => prev.filter((x) => x.id !== id));
+    setBusy(false);
+    setToast(isAr ? 'تم حذف السجل' : 'Entry deleted');
+    setTimeout(() => setToast(null), 2000);
+  }
+
   // Toggle the chart panel between normal and fullscreen (native browser fullscreen on the panel).
   async function toggleChartFullscreen() {
     const el = chartPanelRef.current;
@@ -2220,6 +2239,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
                     <th className="px-4 py-3">{isAr ? 'وقت الإغلاق' : 'Closed'}</th>
                     <th className="px-4 py-3">{isAr ? 'السبب' : 'Reason'}</th>
                     <th className="px-4 py-3">{isAr ? 'النتيجة' : 'Result'}</th>
+                    {canTrade && <th className="px-4 py-3">{isAr ? 'حذف' : 'Delete'}</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -2243,6 +2263,18 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
                         {t.closeReason === 'tp' ? 'TP' : t.closeReason === 'sl' ? 'SL' : (isAr ? 'يدوي' : 'Manual')}
                       </td>
                       <td className={`px-4 py-3 text-xl font-black ${(t.pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`} dir="ltr">{fmtMoney(t.pnl ?? 0)}</td>
+                      {canTrade && (
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => deleteHistoryTrade(t.id)}
+                            disabled={busy}
+                            className="p-2 rounded-lg text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-40"
+                            title={isAr ? 'حذف من السجل' : 'Delete from history'}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

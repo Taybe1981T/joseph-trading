@@ -47,6 +47,7 @@ import {
   openMobileManualTrade,
   stampMobileLegacyTradeModes,
   mobileTradeUser,
+  publishMobileDevBook,
 } from '../../services/mobileTradeBridge';
 import { auth, db } from '../../lib/firebase';
 import { signInWithRedirect, getRedirectResult, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
@@ -56,8 +57,8 @@ import PaymentModal from '../PaymentModal';
 import type { StoreBot } from '../../services/storeService';
 import { fetchStoreBots } from '../../services/storeService';
 import type { PaymentSession } from '../../services/paymentSession';
-import { getLivePrices, calcPnl, isMarketOpen } from '../../services/paperTradingService';
-import { pollMirrorEvents, listenMirrorEvents } from '../../services/tradeMirror';
+import { getLivePrices, calcPnl, isMarketOpen, getTradeStore } from '../../services/paperTradingService';
+import { pollMirrorEvents, listenMirrorEvents, broadcastMirrorEvent, clearEventFor } from '../../services/tradeMirror';
 import { rememberBuyerEmail, setCurrentUserEmail } from '../../lib/clientScope';
 import { stackedPlanExpiry } from '../../lib/planPeriod';
 
@@ -979,6 +980,18 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isDev, isPlanClient, loadAll]);
 
+  // DEVELOPER PHONE: keep the shared book (open symbols) fresh so every
+  // free/guest device converges on this account even when the desktop app is
+  // closed. The book is the safety net behind close/clear events.
+  useEffect(() => {
+    if (!isDev) return;
+    let alive = true;
+    const publish = async () => { if (alive) await publishMobileDevBook(); };
+    void publish();
+    const iv = setInterval(publish, 20000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [isDev]);
+
   const ping = (freq: number) => {
     if (!sound) return;
     try {
@@ -1059,6 +1072,28 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAll, lang]);
+
+  const deleteHistoryTradeMobile = useCallback(async (id: string) => {
+    if (!isDev && !isPlanClient) return;
+    try {
+      const store = getTradeStore(mobileTradeUser() as any);
+      await store.deleteTrades([id]);
+    } catch {}
+    loadAll();
+  }, [isDev, isPlanClient, loadAll]);
+
+  const clearHistoryMobile = useCallback(async () => {
+    if (!isDev && !isPlanClient) return;
+    try {
+      const store = getTradeStore(mobileTradeUser() as any);
+      await store.clearHistory();
+    } catch {}
+    // Developer device: mirror history clear to every free/guest view.
+    if (isDev) {
+      try { await broadcastMirrorEvent(clearEventFor(user?.email || email || '')); } catch {}
+    }
+    loadAll();
+  }, [isDev, isPlanClient, loadAll, user, email]);
 
   // A plan/product was chosen in the store: open the same PaymentModal the
   // desktop site opens for the very same choice.
@@ -1279,6 +1314,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
 
   /** Clear every displayed signal — developer's clear propagates to all views. */
   const clearAllSignalsMobile = () => {
+    // Free/guest accounts are view-only (desktop parity): no clearing.
+    if (!isDev && !isPlanClient) return;
     setFullSignals([]);
     try { localStorage.setItem(mobileSignalsStorageKey(), '[]'); } catch {}
     try { localStorage.setItem('manual_results', '[]'); } catch {}
@@ -1383,7 +1420,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
         {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} onRemoveAll={clearAllSignalsMobile} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} radarProgress={radarProgress} signalsAllowed={canViewSignals} />}
         {tab === 'quotes' && isDev && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
-        {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} canTrade={isDev || isPlanClient} />}
+        {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} canTrade={isDev || isPlanClient} onDeleteHistory={deleteHistoryTradeMobile} onClearHistory={clearHistoryMobile} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} canTrade={isDev || isPlanClient} canOpenManual={isDev || isPlanClient} isDeveloper={isDev} devEmail={user?.email || email || ''} />}
         {/* Desktop parity: a paid-plan client in paid mode gets Auto + Manual too. */}
         {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} />}

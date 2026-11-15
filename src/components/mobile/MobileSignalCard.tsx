@@ -11,6 +11,8 @@ interface Props {
   onDetail: (r: AnalysisResult) => void;
   onTrade: (symbol: string) => void;
   onRemove?: (symbol: string) => void;
+  /** Paid-mode client (or dev) can delete their own displayed signals. */
+  canManage?: boolean;
   onToggleFavorite?: (symbol: string) => void;
   isFavorite?: boolean;
 }
@@ -42,7 +44,7 @@ export function fmtDate(ts: string, lang: Language): string {
   } catch { return ''; }
 }
 
-export function MobileSignalCard({ res, lang, isDev, isClient, onDetail, onTrade, onRemove, onToggleFavorite, isFavorite }: Props) {
+export function MobileSignalCard({ res, lang, isDev, isClient, onDetail, onTrade, onRemove, canManage = false, onToggleFavorite, isFavorite }: Props) {
   const isAr = lang === 'ar';
   const color = sigColor(String(res.signal));
   const isJPY = res.symbol.includes('JPY');
@@ -55,7 +57,7 @@ export function MobileSignalCard({ res, lang, isDev, isClient, onDetail, onTrade
           <Star size={20} fill="#fff" color="#fff" />
         </div>
       )}
-      {isDev && onRemove && (
+      {(isDev || canManage) && onRemove && (
         <button onClick={() => onRemove(res.symbol)}
           style={{ position: 'absolute', top: 4, left: 6, background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.3)', cursor: 'pointer', padding: 4 }} aria-label="Delete">
           <Trash2 size={14} />

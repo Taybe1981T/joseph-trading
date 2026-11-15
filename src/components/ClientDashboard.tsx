@@ -224,7 +224,7 @@ export default function ClientDashboard({ results, lang, hasActivePlan = false, 
           {isAr ? 'أفضل فرص التداول' : 'Top Trading Opportunities'}
           <span className="text-[10px] text-white/40 font-mono">({allFiltered.length})</span>
         </span>
-        {onClearAll && hasActivePlan && (
+        {onClearAll && showPlanActions && (
           <button 
             onClick={onClearAll}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-xl text-red-400 hover:text-red-300 text-[11px] font-black uppercase tracking-wider transition-all active:scale-95"
@@ -241,10 +241,11 @@ export default function ClientDashboard({ results, lang, hasActivePlan = false, 
         {activeCategories.map(cat => {
           const catSignals = grouped[cat];
           const cfg = CATEGORY_CONFIG[cat];
-          const strong = catSignals.filter(s => s.signal === SignalType.STRONG_BUY || s.signal === SignalType.STRONG_SELL);
-          const regular = catSignals.filter(s => s.signal === SignalType.BUY || s.signal === SignalType.SELL);
-          const top3 = regular.sort((a, b) => b.confidence - a.confidence).slice(0, 3);
-          const displaySignals = [...strong, ...top3];
+          // Display the 3 best analyzed signals per category (strong prioritized, then confidence).
+          const rank = (s: AnalysisResult) => (s.signal === SignalType.STRONG_BUY || s.signal === SignalType.STRONG_SELL) ? 2 : 1;
+          const displaySignals = [...catSignals]
+            .sort((a, b) => rank(b) - rank(a) || (b.confidence || 0) - (a.confidence || 0) || new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime())
+            .slice(0, 3);
           return (
             <div key={cat} className="space-y-2">
               <div className="flex items-center gap-2 px-2 py-1">
@@ -277,6 +278,7 @@ export default function ClientDashboard({ results, lang, hasActivePlan = false, 
                     onClick={handleClick}
                     onTrade={onTrade}
                     onRemove={onRemove}
+                    canManage={showPlanActions}
                   />
                 ))}
               </div>
@@ -306,11 +308,13 @@ export default function ClientDashboard({ results, lang, hasActivePlan = false, 
   );
 }
 
-function ClientSignalCard({ res, isAr, lang, selectedSymbol, onSelect, onDetail, hasActivePlan, formatPublishDate, cardKey, onClick, onTrade, onRemove }: {
+function ClientSignalCard({ res, isAr, lang, selectedSymbol, onSelect, onDetail, hasActivePlan, formatPublishDate, cardKey, onClick, onTrade, onRemove, canManage = false }: {
   res: AnalysisResult; isAr: boolean; lang: Language; selectedSymbol: string | null;
   onSelect: (sym: string) => void; onDetail?: (r: AnalysisResult) => void; hasActivePlan: boolean;
   formatPublishDate: (ts: string, lang: string) => string; cardKey: string;
   onClick?: () => void; onTrade?: (symbol: string) => void; onRemove?: (symbol: string) => void;
+  /** Paid-mode client: may delete their own displayed signals. */
+  canManage?: boolean;
 }) {
   const meta = SIGNAL_META[res.signal] || SIGNAL_META[SignalType.BUY];
   const isSelected = selectedSymbol === res.symbol;
@@ -330,8 +334,8 @@ function ClientSignalCard({ res, isAr, lang, selectedSymbol, onSelect, onDetail,
         </div>
       )}
 
-      {/* Remove button (X) */}
-      {onRemove && hasActivePlan && (
+      {/* Remove button (X) — paid-mode client can manage their own signals */}
+      {onRemove && canManage && (
         <button
           onClick={(e) => { e.stopPropagation(); onRemove(res.symbol); }}
           className="absolute top-1 left-1 p-1 hover:bg-red-500/20 rounded-md text-white/30 hover:text-red-400 transition-colors z-20"

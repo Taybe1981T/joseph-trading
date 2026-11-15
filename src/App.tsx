@@ -1865,12 +1865,17 @@ const isDeveloperSession = () => {
     const scanResults: AnalysisResult[] = [];
     let scanFailed = 0;
 
+    const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    const toEngineSig = (r: any) => ({ symbol: r.symbol, signal: r.signal, entryPrice: (r as any).entryPrice ?? null, stopLoss: (r as any).stopLoss ?? null, takeProfit: (r as any).takeProfit ?? null });
+    // Across this scan: signals settled (top-3 per completed category) allowed to auto-open.
+    const settledOpenSigs: Array<{ symbol: string; signal: any; entryPrice?: number | null; stopLoss?: number | null; takeProfit?: number | null }> = [];
+
     for (let jobIdx = 0; jobIdx < openJobs.length; jobIdx++) {
       if (!autoSettingsRef.current.isEnabled) break;
       const { cat, region, exchange } = openJobs[jobIdx];
       // Results for THIS category only. Collected here so that the moment the
       // category's symbols are all analyzed we can DISPLAY its filtered signals
-      // (kickEngine=false) — without waiting for the remaining categories.
+      // and settle the best 3 — without waiting for the remaining categories.
       const jobResults: AnalysisResult[] = [];
       // Alert 3: Category complete and beginning of next category analysis
       if (jobIdx > 0) {
@@ -1978,15 +1983,49 @@ const isDeveloperSession = () => {
         }
       }
 
-      // ── PER-CATEGORY: DISPLAY + OPEN (immediate) ──
-      // All of THIS category's symbols are analyzed and its results filtered.
-      // Show them now AND open the trade now (kickEngine=true) — the user wants
-      // a position opened the moment a category's signal is displayed, not held
-      // back until every other category finishes. The engine's persistent guard
-      // already prevents double-opening the same symbol, so opening per-category
-      // is safe and matches the pre-regression behaviour.
-      updateTopSignals(jobResults, true);
+      // ── PER-CATEGORY: DISPLAY + DEFERRED OPEN (after category complete) ──
+      // All of THIS category's symbols are analyzed. Display its signals now,
+      // but DO NOT open trades during analysis: settle the TOP 3 for this
+      // category, then open them in "first presented" order (earliest timestamp)
+      // with a 2-second gap between each open. This guarantees only the best 3
+      // per completed category are traded, in order.
+      updateTopSignals(jobResults, false);
+      try {
+        const actionable = jobResults.filter((r) => r && r.signal && r.signal !== 'no_entry' && r.signal !== 'neutral' && !(r as any).isSideways);
+        const ranked = [...actionable].sort((a, b) =>
+          (b.confidence || 0) - (a.confidence || 0) ||
+          (new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()) ||
+          String(a.symbol).localeCompare(String(b.symbol))
+        );
+        const top3 = ranked.slice(0, 3);
+        // Open order: first presented/offered (earliest timestamp) first.
+        const openOrder = [...top3].sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+        for (let oi = 0; oi < openOrder.length; oi++) {
+          if (!autoSettingsRef.current.isEnabled) break;
+          const sig = openOrder[oi];
+          settledOpenSigs.push(toEngineSig(sig));
+          const eng = (autoEngineRef as any)?.current;
+          if (eng && typeof eng.scanNow === 'function') {
+            try {
+              eng.updateConfig?.({ signals: [...settledOpenSigs] });
+              eng.scanNow();
+            } catch {}
+          } else {
+            // Engine not ready: ensure it (re)starts with the settled signals.
+            try { setAutoTradeGen((n) => n + 1); } catch {}
+          }
+          if (oi < openOrder.length - 1) await delay(2000);
+        }
+      } catch (e) { console.warn('[radar] deferred open failed:', e); }
     }
+    // Restore engine to the full displayed signal set after the scan.
+    try {
+      const eng = (autoEngineRef as any)?.current;
+      if (eng && typeof eng.updateConfig === 'function') {
+        const all = (signalsRef.current || []).map((s: any) => toEngineSig(s));
+        eng.updateConfig({ signals: all });
+      }
+    } catch {}
 
     // NOTE: no second topSignals write / engine kick here anymore. Every category
     // already displayed + opened its own signals above (sequential order), so a

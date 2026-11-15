@@ -171,7 +171,7 @@ export function resetEventFor(origin: string, newBalance?: number): Omit<MirrorT
   return {
     id: 'clear:reset',
     kind: 'clear', symbol: '', scope: 'all', openedAt: Date.now(), origin,
-    ...(typeof newBalance === 'number' && newBalance > 0 ? { resetBalance: newBalance } : {}),
+    ...(typeof newBalance === 'number' && isFinite(newBalance) && newBalance >= 0 ? { resetBalance: newBalance } : {}),
   };
 }
 
@@ -420,7 +420,7 @@ async function runMirrorPass(opts: {
             }
           }
           // A developer RESET also resets the copied balance (their new start).
-          if (scope === 'all' && typeof ev.resetBalance === 'number' && ev.resetBalance > 0) {
+          if (scope === 'all' && typeof ev.resetBalance === 'number' && isFinite(ev.resetBalance) && ev.resetBalance >= 0) {
             const nb = ev.resetBalance;
             await store.saveBalance(nb).catch(() => {});
             balance = nb;
@@ -442,8 +442,9 @@ async function runMirrorPass(opts: {
     // BOOK GATE (free mode): never open a copy for a symbol the developer does
     // not currently hold. Stale OPEN events from before a reset are dropped; a
     // brand-new open is retried for up to 2 minutes while the book catches up.
+    const inDevBook = devHeld ? devHeld.has(String(sym).toUpperCase()) : false;
     if (ev.kind === 'open' && devHeld) {
-      if (!devHeld.has(String(sym).toUpperCase())) {
+      if (!inDevBook) {
         const age = now - Number(ev.publishedAt || 0);
         if (age > 2 * 60 * 1000) markSeen(ev.id);
         continue;
@@ -452,12 +453,16 @@ async function runMirrorPass(opts: {
     // ANALYSIS-ONLY FENCE: mirror OPENs only for symbols with a displayed
     // signal (auto radar OR manual analysis). Developer hand-opened tickets
     // never appear in the signal lists, so they are never mirrored.
+    // FREE/GUEST mirror exception: if the developer's live book confirms they
+    // currently hold this symbol, the copy MUST open so free views match the
+    // developer account exactly (all open trades visible), even if the displayed
+    // signal list lags.
     // NOTE: a fence rejection does NOT mark the event as seen — the client's
     // shared_results poll (signals) can LAG the trade event, so the signal
     // may appear a few seconds later; the event must be retried until then.
     if (ev.kind === 'open' && opts.displayedSymbols && opts.displayedSymbols.length > 0) {
       const ok = opts.displayedSymbols.some((s) => String(s || '').toUpperCase() === String(sym).toUpperCase());
-      if (!ok) {
+      if (!ok && !(opts.mode === 'free' && inDevBook)) {
         console.log(`[TradeMirror] skip ${sym}: not in displayed signals (analysis-only) — will retry`);
         continue;
       }

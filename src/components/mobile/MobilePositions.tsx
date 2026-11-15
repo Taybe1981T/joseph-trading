@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Check } from 'lucide-react';
+import { X, Check, Trash2 } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT } from '../../lib/mobileMode';
 import { updateMobileTradeLevels, detectMobileTradeCategory } from '../../services/mobileTradeBridge';
@@ -46,11 +46,15 @@ interface MobilePositionsProps {
   closed?: ClosedPosition[];
   onClose: (id: string) => void;
   onSelect?: (symbol: string) => void;
-  /** Free/guest accounts are view-only. */
+  /** Free/guest accounts are view-only. Paid-mode clients can manage their own. */
   canTrade?: boolean;
+  /** Delete a single closed trade from history (own account). */
+  onDeleteHistory?: (id: string) => void;
+  /** Clear all closed history (own account). */
+  onClearHistory?: () => void;
 }
 
-export function MobilePositions({ positions, closed, onClose, onSelect, canTrade = true }: MobilePositionsProps) {
+export function MobilePositions({ positions, closed, onClose, onSelect, canTrade = true, onDeleteHistory, onClearHistory }: MobilePositionsProps) {
   const lang: Language = (() => { try { const s = localStorage.getItem('language'); return (s === 'ar' ? 'ar' : 'en') as Language; } catch { return 'en'; } })();
   const [live, setLive] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -325,11 +329,20 @@ export function MobilePositions({ positions, closed, onClose, onSelect, canTrade
 
       {tab === 'history' && (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, fontSize: 12, fontWeight: 800 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, fontSize: 12, fontWeight: 800, gap: 8 }}>
             <span style={{ color: '#888' }}>{mobileT(lang, 'Closed P&L', 'ربح/خسارة المغلقة')}</span>
             <span style={{ color: closedPnl >= 0 ? '#00ff88' : '#ff5555' }}>
               {closedPnl >= 0 ? '+' : ''}{closedPnl.toFixed(2)}$
             </span>
+            {canTrade && closedList.length > 0 && onClearHistory && (
+              <button
+                type="button"
+                onClick={onClearHistory}
+                style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.12)', color: '#f87171', fontSize: 11, fontWeight: 800, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Trash2 size={13} /> {mobileT(lang, 'Clear', 'مسح السجل')}
+              </button>
+            )}
           </div>
           {closedList.length === 0 && (
             <div className="mt5-empty-state">
@@ -364,10 +377,20 @@ export function MobilePositions({ positions, closed, onClose, onSelect, canTrade
                     {c.openPrice.toFixed(dec)} → {c.exitPrice.toFixed(dec)}
                   </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
+                <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
                   <div className={`mt5-position-profit ${c.profit >= 0 ? 'positive' : 'negative'}`}>
                     {c.profit >= 0 ? '+' : ''}{c.profit.toFixed(2)}$
                   </div>
+                  {canTrade && onDeleteHistory && (
+                    <button
+                      type="button"
+                      onClick={() => onDeleteHistory(c.id)}
+                      style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.1)', color: '#f87171', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+                      title={mobileT(lang, 'Delete', 'حذف')}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
                 </div>
               </div>
             );
