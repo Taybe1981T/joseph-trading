@@ -24,7 +24,7 @@ import {
   CRYPTO_TP_PCT,
 } from '../services/tradingValues';
 import { clearOpened as clearAutoOpened, resetGuard as resetAutoGuard } from '../services/autoGuard';
-import { openEventFor, closeEventFor, clearEventFor, broadcastMirrorEvent } from '../services/tradeMirror';
+import { openEventFor, closeEventFor, clearEventFor, resetEventFor, broadcastMirrorEvent, publishDevBook } from '../services/tradeMirror';
 import MT5ConnectModal from './MT5ConnectModal';
 import { loadConnection, mt5Bridge, MT5Connection } from '../services/mt5Bridge';
 import { isDeveloperEmail } from '../lib/clientIds';
@@ -1336,6 +1336,12 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     // global engine still believes those symbols have a live position and refuses
     // to ever re-open their signals after the reset.
     resetAutoGuard();
+    // Developer device: a reset wipes the shared book — free/guest mirrors drop
+    // their open copies AND history on their next poll (paid data untouched).
+    if (isDevUser) {
+      try { await broadcastMirrorEvent(resetEventFor(user?.email || '', val)); } catch {}
+      try { await publishDevBook([], user?.email || ''); } catch {}
+    }
     setShowReset(false);
     setResetInput('');
     setQty(getDefaultQty(detectCategory(symbol || ''), val));

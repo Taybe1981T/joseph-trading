@@ -14,6 +14,7 @@ import {
   mobileTradeUser,
 } from '../../services/mobileTradeBridge';
 import { getTradeStore, calcPnl, START_BALANCE, getLivePrices, isMarketOpen } from '../../services/paperTradingService';
+import { broadcastMirrorEvent, resetEventFor, publishDevBook } from '../../services/tradeMirror';
 import { notionalInUSD, usdToPrice } from '../../lib/positionMath';
 import { calcTrailingStop } from '../../lib/trailingStop';
 import type { PaperTrade } from '../../services/paperTradingService';
@@ -31,9 +32,13 @@ interface MobileNewTradeProps {
   canTrade?: boolean;
   /** Signed-in users (incl. free registered clients) may open manual trades. */
   canOpenManual?: boolean;
+  /** Developer device: a balance reset also wipes the shared book (guests follow). */
+  isDeveloper?: boolean;
+  /** Developer account email (event origin). */
+  devEmail?: string;
 }
 
-export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor, onOpen, canTrade = true, canOpenManual = true }: MobileNewTradeProps) {
+export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor, onOpen, canTrade = true, canOpenManual = true, isDeveloper = false, devEmail = '' }: MobileNewTradeProps) {
   const isAr = lang === 'ar';
   // Same categories/symbols as the Manual Analysis section (unified source, incl. future adds).
   const groups = useMemo(() => getMobileSymbolGroups(), []);
@@ -225,6 +230,12 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
     try {
       const store = getTradeStore(mobileTradeUser() as any);
       await store.resetAccount(START_BALANCE);
+      // Developer device: the reset clears the SHARED book — every free/guest
+      // mirror drops its open copies and history on its next poll.
+      if (isDeveloper) {
+        try { await broadcastMirrorEvent(resetEventFor(devEmail, START_BALANCE)); } catch {}
+        try { await publishDevBook([], devEmail); } catch {}
+      }
       try { window.dispatchEvent(new CustomEvent('mobile-trades-changed', { detail: { action: 'reset' } })); } catch {}
       await refreshAccount();
     } catch {}

@@ -42,7 +42,8 @@ import SuggestionsPage from './components/SuggestionsPage';
 import TradeNowPage from './components/TradeNowPage';
 import { AutoTradeEngine, AUTO_OPEN_SOUND_EVENT } from './services/autoTradeEngine';
 import { playChampagnePop } from './lib/tradeSounds';
-import { pollMirrorEvents, listenMirrorEvents, isMirrorEnabled, setMirrorEnabled } from './services/tradeMirror';
+import { pollMirrorEvents, listenMirrorEvents, isMirrorEnabled, setMirrorEnabled, publishDevBook } from './services/tradeMirror';
+import { getTradeStore } from './services/paperTradingService';
 import StorePage from './components/StorePage';
 import SeoPricesPage from './pages/SeoPricesPage';
 import StoreSettingsPage from './components/StoreSettingsPage';
@@ -1233,9 +1234,11 @@ const isDeveloperSession = () => {
     // PAID clients keep control of their own account: copy-trading is opt-in.
     // FREE / GUEST accounts are a pure mirror of the developer's book, so they
     // follow automatically (only the developer kill-switch can stop them).
-    if (isPlanClient) {
-      if (!mirrorEnabledState) return;
-    } else if (!mirrorFreeAllowed) return;
+    // PAID clients keep control of their own account: copy-trading is opt-in.
+    // FREE / GUEST accounts ALWAYS run the mirror: only closes, clears, resets
+    // and book reconciliation matter for them (the developer kill-switch below
+    // gates NEW opens only), so their book can never drift from the developer's.
+    if (isPlanClient && !mirrorEnabledState) return;
     let alive = true;
     let busy = false;
     const displayed = () => {
@@ -1255,6 +1258,8 @@ const isDeveloperSession = () => {
       mode: (isDeveloperSession() || isPlanClient ? 'paid' : 'free') as 'free' | 'paid',
       // Free/guest mirror is automatic — no per-client toggle.
       force: !isPlanClient,
+      // Kill-switch (developer → Client Monitor) gates new open copies only.
+      allowOpen: isDeveloperSession() || isPlanClient ? true : mirrorFreeAllowed,
       playChampagne: () => {
         try { playChampagnePop(Math.max(0, Math.min(1, autoSettingsRef.current?.volume ?? 0.7))); } catch {}
       },
@@ -1288,6 +1293,40 @@ const isDeveloperSession = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isPlanClient, mirrorFreeAllowed, topSignals, clientSignals, mirrorEnabledState]);
+
+  // DEVELOPER: publish the LIVE BOOK (symbols currently held open) so free/guest
+  // mirrors converge on it. This is the safety net behind close/clear events: a
+  // developer reset — from the desktop OR the phone — empties this book, and
+  // every free/guest device drops stale open copies on its next poll, even if
+  // it was offline when the event was broadcast.
+  const devBookSigRef = useRef('');
+  const devBookAtRef = useRef(0);
+  useEffect(() => {
+    if (!isDeveloperSession() || !user) return;
+    let alive = true;
+    const publish = async () => {
+      try {
+        const store = getTradeStore(user);
+        const list = await store.listTrades();
+        if (!alive) return;
+        const sig = list
+          .filter((t: any) => t.status === 'open')
+          .map((t: any) => String(t.symbol || '').toUpperCase())
+          .sort()
+          .join(',');
+        // Write only when the open book changed, plus a 10-minute heartbeat so
+        // clients never treat the book as abandoned while the dev is idle.
+        if (sig !== devBookSigRef.current || Date.now() - devBookAtRef.current > 10 * 60 * 1000) {
+          devBookSigRef.current = sig;
+          devBookAtRef.current = Date.now();
+          await publishDevBook(list as any, user.email || '');
+        }
+      } catch { /* keep the previous book on transient errors */ }
+    };
+    void publish();
+    const iv = setInterval(publish, 20000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [user]);
 
   useEffect(() => {
     signalsRef.current = topSignals;

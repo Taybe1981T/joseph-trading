@@ -934,11 +934,23 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     if (isDev || isPlanClient) return;
     let alive = true;
     let busy = false;
+    // Developer kill-switch (shared config) — gates NEW open copies only.
+    let allowOpen = true;
+    const loadCfg = async () => {
+      try {
+        const snap = await getDoc(doc(db, 'config', 'mirror'));
+        const d: any = snap.exists() ? snap.data() : null;
+        if (d && typeof d.freeAllowed === 'boolean') allowOpen = d.freeAllowed;
+      } catch {}
+    };
+    void loadCfg();
+    const cfgIv = setInterval(loadCfg, 60000);
     const opts = () => ({
       // Same session source the mobile store uses, so a mirrored trade lands in
       // exactly the account this screen reads (never a stale guest store).
       user: mobileTradeUser(),
       force: true,
+      allowOpen,
       mode: 'free' as const,
       playChampagne: () => {},
       notify: () => {},
@@ -961,6 +973,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     return () => {
       alive = false;
       clearInterval(iv);
+      clearInterval(cfgIv);
       try { dispose?.(); } catch {}
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1240,7 +1253,36 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       const next = (Array.isArray(arr) ? arr : []).filter((s: any) => String(s.symbol) !== sym);
       localStorage.setItem('manual_results', JSON.stringify(next));
     } catch {}
+    // Developer phone: the published feed is the single source for every free /
+    // guest view, so a deletion here must reach the website and all devices.
+    if (isDev) {
+      const next = fullSignalsRef.current.filter((s: any) => String(s?.symbol) !== sym);
+      void publishDevSignals(next);
+    }
     loadAll();
+  };
+
+  /** Publish the developer's displayed signals (shared_results) from mobile. */
+  const publishDevSignals = async (list: any[]) => {
+    if (!isDev) return;
+    try {
+      const safe = JSON.parse(JSON.stringify(Array.isArray(list) ? list : []));
+      await setDoc(doc(db, 'shared_results', 'latest'), {
+        results: safe,
+        timestamp: new Date().toISOString(),
+        developerEmail: user?.email || email || '',
+      });
+    } catch (e) {
+      console.warn('[DEV] mobile signal publish failed:', e);
+    }
+  };
+
+  /** Clear every displayed signal — developer's clear propagates to all views. */
+  const clearAllSignalsMobile = () => {
+    setFullSignals([]);
+    try { localStorage.setItem(mobileSignalsStorageKey(), '[]'); } catch {}
+    try { localStorage.setItem('manual_results', '[]'); } catch {}
+    if (isDev) void publishDevSignals([]);
   };
 
   const signalFor = useCallback((sym: string) => fullSignals.find((r) => r.symbol === sym), [fullSignals]);
@@ -1339,10 +1381,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         </div>
       )}
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
-        {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} onRemoveAll={() => setFullSignals([])} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} radarProgress={radarProgress} signalsAllowed={canViewSignals} />}
+        {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} onRemoveAll={clearAllSignalsMobile} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} radarProgress={radarProgress} signalsAllowed={canViewSignals} />}
         {tab === 'quotes' && isDev && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} canTrade={isDev || isPlanClient} />}
-        {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} canTrade={isDev || isPlanClient} canOpenManual={isDev || isPlanClient} />}
+        {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} canTrade={isDev || isPlanClient} canOpenManual={isDev || isPlanClient} isDeveloper={isDev} devEmail={user?.email || email || ''} />}
         {/* Desktop parity: a paid-plan client in paid mode gets Auto + Manual too. */}
         {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} />}
         {tab === 'manual' && canUseAnalysis && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}

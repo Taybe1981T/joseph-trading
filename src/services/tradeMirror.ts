@@ -18,7 +18,7 @@
  */
 
 import { db } from '../lib/firebase';
-import { collection, doc, getDocs, onSnapshot, setDoc, Timestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, setDoc, Timestamp } from 'firebase/firestore';
 import {
   calcPnl,
   isMarketOpen,
@@ -37,7 +37,7 @@ import {
 } from './autoGuard';
 
 export interface MirrorTradeEvent {
-  /** Stable unique id: `open:<symbol>:<openedAt>` or `close:<symbol>:<ts>` or `clear:history` */
+  /** Stable unique id: `open:<symbol>:<openedAt>` or `close:<symbol>:<ts>` or `clear:history`/`clear:reset` */
   id: string;
   kind: 'open' | 'close' | 'clear';
   symbol: string;
@@ -48,6 +48,10 @@ export interface MirrorTradeEvent {
   devSl?: number | null;
   devTp?: number | null;
   closeReason?: 'tp' | 'sl' | 'manual';
+  /** For `kind: 'clear'`: clear the closed history only, or the WHOLE free book. */
+  scope?: 'history' | 'all';
+  /** For a FULL RESET: the developer's new balance (free mirrors follow it). */
+  resetBalance?: number;
   origin: string;
   publishedAt: number;
 }
@@ -58,6 +62,18 @@ export const MIRROR_SEEN_KEY = 'finalyze_mirror_seen_v1';
 export const MIRROR_ENABLED_KEY = 'finalyze_client_mirror_enabled';
 /** Last developer "clear history" timestamp applied on this device. */
 export const MIRROR_CLEARED_KEY = 'finalyze_mirror_cleared_at_v1';
+/** Last developer FULL RESET (open + closed book wiped) applied on this device. */
+export const MIRROR_RESET_KEY = 'finalyze_mirror_reset_at_v1';
+/**
+ * Developer's live book mirror (public read): `shared_status/book` holds the
+ * symbols the developer currently holds open. FREE-mode accounts reconcile
+ * against it, so a developer reset/clear can never leave stale open copies.
+ */
+export const DEV_BOOK_DOC = { collection: 'shared_status', id: 'book' } as const;
+/** Ignore a book older than this — the developer has not published recently. */
+const DEV_BOOK_MAX_AGE_MS = 24 * 3600 * 1000;
+/** Grace period before a copy counts as "stale" (book publish lags by ~15s). */
+const RECONCILE_GRACE_MS = 90 * 1000;
 
 export function readMirrorSeen(): Set<string> {
   try {
@@ -142,8 +158,46 @@ export function closeEventFor(symbol: string, reason: 'tp' | 'sl' | 'manual', or
 export function clearEventFor(origin: string): Omit<MirrorTradeEvent, 'publishedAt'> {
   return {
     id: 'clear:history',
-    kind: 'clear', symbol: '', openedAt: Date.now(), origin,
+    kind: 'clear', symbol: '', scope: 'history', openedAt: Date.now(), origin,
   };
+}
+
+/**
+ * Build a FULL RESET event (developer "reset account" / wipe everything).
+ * Free/guest accounts drop their whole mirrored book: open copies AND history.
+ * A paid client's own trades and signals are never touched.
+ */
+export function resetEventFor(origin: string, newBalance?: number): Omit<MirrorTradeEvent, 'publishedAt'> {
+  return {
+    id: 'clear:reset',
+    kind: 'clear', symbol: '', scope: 'all', openedAt: Date.now(), origin,
+    ...(typeof newBalance === 'number' && newBalance > 0 ? { resetBalance: newBalance } : {}),
+  };
+}
+
+/**
+ * DEVELOPER SIDE — publish the live book (open symbols) so free/guest accounts
+ * can reconcile: any mirrored position the developer no longer holds is
+ * removed automatically, even if its close event was missed.
+ */
+export async function publishDevBook(
+  trades: { symbol?: string; status?: string }[],
+  origin: string,
+): Promise<void> {
+  try {
+    const openSymbols = [...new Set(
+      (trades || [])
+        .filter((t) => t && t.status === 'open' && t.symbol)
+        .map((t) => String(t.symbol).toUpperCase()),
+    )];
+    await setDoc(doc(db, DEV_BOOK_DOC.collection, DEV_BOOK_DOC.id), {
+      openSymbols,
+      updatedAt: Date.now(),
+      origin,
+    }, { merge: true });
+  } catch (e) {
+    console.warn('[TradeMirror] book publish failed:', (e as any)?.message || e);
+  }
 }
 
 export function detectMirrorCategory(sym: string): string {
@@ -179,6 +233,12 @@ export async function pollMirrorEvents(opts: {
    * control over open/close/history.
    */
   force?: boolean;
+  /**
+   * Whether NEW developer opens may be copied. Defaults to true. The
+   * developer's free-mirror kill-switch only gates opens — closes, history
+   * clears and full resets ALWAYS apply so a free book can never drift.
+   */
+  allowOpen?: boolean;
 }): Promise<MirrorTradeEvent[]> {
   const executed: MirrorTradeEvent[] = [];
   // Respect the user's mirror toggle — both the 10s poll and the real-time
@@ -205,11 +265,12 @@ export async function pollMirrorEvents(opts: {
     })
     .filter((d) => d.kind === 'clear' || !seen.has(d.id))
     .sort((a, b) => (a.publishedAt || 0) - (b.publishedAt || 0));
-  if (fresh.length === 0) return executed;
 
   const store = getTradeStore(opts.user);
-  // Per-account marker: several accounts may share this browser/phone.
-  const clearKey = `${MIRROR_CLEARED_KEY}__${String(opts.user?.uid || 'guest')}`;
+  // Per-account markers: several accounts may share this browser/phone.
+  const acctKey = String(opts.user?.uid || 'guest');
+  const clearKey = `${MIRROR_CLEARED_KEY}__${acctKey}`;
+  const resetKey = `${MIRROR_RESET_KEY}__${acctKey}`;
   let balance = 10000;
   let leverage = 100;
   let allTrades: any[] = [];
@@ -220,13 +281,48 @@ export async function pollMirrorEvents(opts: {
     allTrades = await store.listTrades();
   } catch { /* local defaults */ }
 
+  // ── RECONCILE with the developer's live book (FREE mode only) ──────────────
+  // The developer publishes the symbols they currently hold open. Any copy
+  // this account still shows that the developer no longer holds is removed —
+  // this is what makes a developer reset/clear apply even to clients that were
+  // offline when the close event was broadcast (or copies opened by an old
+  // build that never broadcast closes).
+  if (opts.mode === 'free') {
+    try {
+      const bookSnap = await getDoc(doc(db, DEV_BOOK_DOC.collection, DEV_BOOK_DOC.id));
+      const book: any = bookSnap.exists() ? bookSnap.data() : null;
+      const bookFresh = !!book && typeof book.updatedAt === 'number' && now - book.updatedAt < DEV_BOOK_MAX_AGE_MS;
+      if (bookFresh && Array.isArray(book.openSymbols)) {
+        const held = new Set(book.openSymbols.map((s: any) => String(s || '').toUpperCase()));
+        const stale = allTrades.filter((t: any) =>
+          t && t.status === 'open' && t.mode !== 'paid' &&
+          !held.has(String(t.symbol || '').toUpperCase()) &&
+          Number(t.openedAt || 0) < now - RECONCILE_GRACE_MS);
+        if (stale.length) {
+          await store.deleteTrades(stale.map((t: any) => t.id));
+          const drop = new Set(stale.map((t: any) => t.id));
+          allTrades = allTrades.filter((t: any) => !drop.has(t.id));
+          for (const t of stale) guardClearOpened(String(t.symbol || ''));
+          console.log(`[TradeMirror] removed ${stale.length} stale copy(ies) not in developer book`);
+        }
+      }
+    } catch (e) {
+      console.warn('[TradeMirror] book reconcile failed:', (e as any)?.message || e);
+    }
+  }
+
+  if (fresh.length === 0) return executed;
+
   const openFor = (sym: string) => allTrades.find((t: any) => t.status === 'open' && t.symbol === sym);
   // Close only a position that actually came from the developer's book:
   //   • new mirrored trades carry `mirrored: true`;
-  //   • legacy copies (pre-flag) are recognised by their free mode.
-  const mirroredFor = (sym: string) => allTrades.find((t: any) =>
-    t.status === 'open' && t.symbol === sym &&
-    (t.mirrored === true || (opts.mode === 'free' && t.mode === 'free')));
+  //   • in FREE mode every non-paid row is a copy (free accounts cannot open);
+  //   • legacy copies (pre-flag) are therefore matched via their free mode.
+  const mirroredFor = (sym: string) => allTrades.find((t: any) => {
+    if (t.status !== 'open' || t.symbol !== sym) return false;
+    if (opts.mode === 'free') return t.mode !== 'paid';
+    return t.mirrored === true;
+  });
 
   // Track symbols mirrored-opened during THIS poll pass so we don't clear
   // their guard mid-loop (allTrades may be stale if listTrades() failed
@@ -235,26 +331,48 @@ export async function pollMirrorEvents(opts: {
   const openedThisPoll = new Set<string>();
 
   for (const ev of fresh) {
-    // HISTORY CLEAR: free/guest accounts mirror the developer's history exactly.
-    // Paid clients own their history, so they are never touched here.
+    // CLEAR (history or FULL RESET): free/guest accounts mirror the developer's
+    // book exactly — closed history and/or the whole book is dropped. Paid
+    // clients own their account: their own trades and history are never touched
+    // (mode 'paid' rows are always preserved).
     if (ev.kind === 'clear') {
       if (opts.mode !== 'free') continue;
+      const scope: 'history' | 'all' = ev.scope === 'all' ? 'all' : 'history';
+      const key = scope === 'all' ? resetKey : clearKey;
       try {
-        const applied = Number(localStorage.getItem(clearKey) || 0);
+        const applied = Number(localStorage.getItem(key) || 0);
         const stamp = Number(ev.publishedAt || 0);
         if (stamp > applied) {
-          await store.clearHistory();
-          try { localStorage.setItem(clearKey, String(stamp)); } catch {}
+          const doomed = allTrades.filter((t: any) =>
+            t && t.mode !== 'paid' && (scope === 'all' || t.status !== 'open'));
+          if (doomed.length) {
+            await store.deleteTrades(doomed.map((t: any) => t.id));
+            const drop = new Set(doomed.map((t: any) => t.id));
+            allTrades = allTrades.filter((t: any) => !drop.has(t.id));
+            for (const t of doomed) {
+              if (t.status === 'open') guardClearOpened(String(t.symbol || ''));
+            }
+          }
+          // A developer RESET also resets the copied balance (their new start).
+          if (scope === 'all' && typeof ev.resetBalance === 'number' && ev.resetBalance > 0) {
+            const nb = ev.resetBalance;
+            await store.saveBalance(nb).catch(() => {});
+            balance = nb;
+          }
+          try { localStorage.setItem(key, String(stamp)); } catch {}
           executed.push(ev);
-          console.log('[TradeMirror] mirrored history clear from developer');
+          console.log(`[TradeMirror] mirrored ${scope === 'all' ? 'FULL RESET' : 'history clear'} from developer`);
         }
       } catch (e) {
-        console.warn('[TradeMirror] history clear failed:', (e as any)?.message || e);
+        console.warn('[TradeMirror] clear failed:', (e as any)?.message || e);
       }
       continue;
     }
     const sym: string = ev.symbol;
     if (!sym) { seen.add(ev.id); continue; } // malformed event — definitive
+    // Developer kill-switch: do not OPEN new free copies. Closes/history/reset
+    // above are never gated, so the free book always matches the developer's.
+    if (ev.kind === 'open' && opts.allowOpen === false) continue;
     // ANALYSIS-ONLY FENCE: mirror OPENs only for symbols with a displayed
     // signal (auto radar OR manual analysis). Developer hand-opened tickets
     // never appear in the signal lists, so they are never mirrored.
@@ -361,6 +479,7 @@ export function listenMirrorEvents(opts: {
   displayedSymbols?: string[];
   mode?: 'free' | 'paid';
   force?: boolean;
+  allowOpen?: boolean;
 }): VoidFunction {
   let busy = false;
   const trigger = () => {

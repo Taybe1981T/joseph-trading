@@ -428,6 +428,8 @@ interface TradeStore {
   listTrades(): Promise<PaperTrade[]>;
   addTrade(t: Omit<PaperTrade, 'id'>): Promise<string>;
   updateTrade(id: string, patch: Partial<PaperTrade>): Promise<void>;
+  /** Remove trades permanently (mirror reset — no P&L, no history entry). */
+  deleteTrades(ids: string[]): Promise<void>;
   resetAccount(newBalance: number): Promise<void>;
   clearHistory(): Promise<void>;
 }
@@ -458,6 +460,13 @@ class LocalStore implements TradeStore {
     const d = this.read();
     const idx = d.trades.findIndex((t) => t.id === id);
     if (idx >= 0) { d.trades[idx] = { ...d.trades[idx], ...patch }; this.write(d); }
+  }
+  async deleteTrades(ids: string[]) {
+    if (!ids.length) return;
+    const drop = new Set(ids);
+    const d = this.read();
+    d.trades = d.trades.filter((t) => !drop.has(t.id));
+    this.write(d);
   }
   async resetAccount(newBalance: number) {
     this.write({ balance: newBalance, leverage: DEFAULT_LEVERAGE, trades: [] });
@@ -496,6 +505,12 @@ class FirestoreStore implements TradeStore {
   }
   async updateTrade(id: string, patch: Partial<PaperTrade>) {
     await updateDoc(doc(db, 'paper_trades', id), patch as any);
+  }
+  async deleteTrades(ids: string[]) {
+    if (!ids.length) return;
+    const batch = writeBatch(db);
+    for (const id of ids) batch.delete(doc(db, 'paper_trades', id));
+    await batch.commit();
   }
   async resetAccount(newBalance: number) {
     await setDoc(doc(db, 'paper_accounts', this.uid), { balance: newBalance, startBalance: newBalance, leverage: DEFAULT_LEVERAGE, updatedAt: Timestamp.now() }, { merge: true });
