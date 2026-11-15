@@ -212,8 +212,14 @@ export function detectMirrorCategory(sym: string): string {
  * CLIENT SIDE — pull unseen mirror events and execute them in the client's
  * OWN account with the client's OWN balance/sizing and guards.
  * Returns the executed events (for sound/toast wiring).
+ *
+ * A pass is SERIALIZED across this page (promise chain) and, when the browser
+ * supports it, across every tab of this origin (Web Locks). Without this, the
+ * 10s poll and the realtime listener (and several mounted components) could all
+ * read the same "unseen" event before any of them persisted it, opening the
+ * SAME position several times.
  */
-export async function pollMirrorEvents(opts: {
+export function pollMirrorEvents(opts: {
   user: any;
   playChampagne: () => void;
   notify: (msg: string) => void;
@@ -240,12 +246,49 @@ export async function pollMirrorEvents(opts: {
    */
   allowOpen?: boolean;
 }): Promise<MirrorTradeEvent[]> {
+  const exec = (): Promise<MirrorTradeEvent[]> => {
+    const run = _mirrorChain
+      .then(() => runMirrorPass(opts))
+      .catch((e) => {
+        console.warn('[TradeMirror] pass failed:', (e as any)?.message || e);
+        return [] as MirrorTradeEvent[];
+      });
+    _mirrorChain = run.then(() => undefined, () => undefined);
+    return run;
+  };
+  const locks = typeof navigator !== 'undefined' ? (navigator as any).locks : null;
+  if (locks && typeof locks.request === 'function') {
+    return locks.request('finalyze_mirror_pass', () => exec());
+  }
+  return exec();
+}
+
+/** Serializes mirror passes inside this page. */
+let _mirrorChain: Promise<any> = Promise.resolve();
+
+async function runMirrorPass(opts: {
+  user: any;
+  playChampagne: () => void;
+  notify: (msg: string) => void;
+  displayedSymbols?: string[];
+  mode?: 'free' | 'paid';
+  force?: boolean;
+  allowOpen?: boolean;
+}): Promise<MirrorTradeEvent[]> {
   const executed: MirrorTradeEvent[] = [];
   // Respect the user's mirror toggle — both the 10s poll and the real-time
   // onSnapshot listener route through here, so this guards both paths.
   // A forced (free/guest) mirror ignores the per-client switch.
   if (!opts.force && !isMirrorEnabled()) return executed;
   const seen = readMirrorSeen();
+  // Write `seen` IMMEDIATELY: a poll and a realtime listener (or two mounted
+  // components) can overlap, and only persistence prevents a second pass from
+  // opening the same position again.
+  const markSeen = (id: string) => {
+    if (!id) return;
+    seen.add(id);
+    writeMirrorSeen(seen);
+  };
   let docs: any[] = [];
   try {
     const snap = await getDocs(collection(db, MIRROR_COLLECTION));
@@ -288,6 +331,25 @@ export async function pollMirrorEvents(opts: {
   // offline when the close event was broadcast (or copies opened by an old
   // build that never broadcast closes).
   if (opts.mode === 'free') {
+    // ONE COPY PER SYMBOL: an older build could let overlapping passes open the
+    // same symbol several times. Keep the earliest copy, drop the extras.
+    try {
+      const openFree = allTrades
+        .filter((t: any) => t && t.status === 'open' && t.mode !== 'paid')
+        .sort((a: any, b: any) => Number(a.openedAt || 0) - Number(b.openedAt || 0));
+      const firstBySym = new Set<string>();
+      const dups: any[] = [];
+      for (const t of openFree) {
+        const s = String(t.symbol || '').toUpperCase();
+        if (firstBySym.has(s)) dups.push(t); else firstBySym.add(s);
+      }
+      if (dups.length) {
+        await store.deleteTrades(dups.map((t: any) => t.id));
+        const drop = new Set(dups.map((t: any) => t.id));
+        allTrades = allTrades.filter((t: any) => !drop.has(t.id));
+        console.log(`[TradeMirror] removed ${dups.length} duplicate copy(ies)`);
+      }
+    } catch { /* retry next poll */ }
     try {
       const bookSnap = await getDoc(doc(db, DEV_BOOK_DOC.collection, DEV_BOOK_DOC.id));
       const book: any = bookSnap.exists() ? bookSnap.data() : null;
@@ -369,7 +431,7 @@ export async function pollMirrorEvents(opts: {
       continue;
     }
     const sym: string = ev.symbol;
-    if (!sym) { seen.add(ev.id); continue; } // malformed event — definitive
+    if (!sym) { markSeen(ev.id); continue; } // malformed event — definitive
     // Developer kill-switch: do not OPEN new free copies. Closes/history/reset
     // above are never gated, so the free book always matches the developer's.
     if (ev.kind === 'open' && opts.allowOpen === false) continue;
@@ -391,14 +453,14 @@ export async function pollMirrorEvents(opts: {
         const sig = String(ev.signal || '');
         const isBuy = sig === 'strong_buy' || sig === 'buy' || ev.side === 'buy';
         const isSell = sig === 'strong_sell' || sig === 'sell' || ev.side === 'sell';
-        if (!isBuy && !isSell) { seen.add(ev.id); continue; } // invalid signal — definitive
-        if (openFor(sym)) { seen.add(ev.id); continue; } // already have the position
+        if (!isBuy && !isSell) { markSeen(ev.id); continue; } // invalid signal — definitive
+        if (openFor(sym)) { markSeen(ev.id); continue; } // already have the position
         // At this point openFor(sym) already returned null (no open position).
         // If the guard still says "opened", it's a stuck guard from a position
         // that was closed manually without the engine clearing the flag.
         // If we opened it earlier THIS poll pass, skip to avoid a duplicate.
         // Otherwise, clear the stale guard so the mirror open can proceed.
-        if (guardIsOpened(sym) && openedThisPoll.has(sym)) { seen.add(ev.id); continue; } // just opened this pass — skip duplicate
+        if (guardIsOpened(sym) && openedThisPoll.has(sym)) { markSeen(ev.id); continue; } // just opened this pass — skip duplicate
         if (guardIsOpened(sym)) {
           guardClearOpened(sym);
           console.warn(`[TradeMirror] stuck guard for ${sym} — clearing so mirror open can proceed`);
@@ -432,7 +494,7 @@ export async function pollMirrorEvents(opts: {
         });
         guardMarkOpened(sym);
         openedThisPoll.add(sym);
-        seen.add(ev.id); // executed — never reprocess
+        markSeen(ev.id); // executed — never reprocess
         allTrades = await store.listTrades().catch(() => allTrades);
         const acc2 = await store.getAccount().catch(() => null);
         if (acc2) { balance = acc2.balance; leverage = acc2.leverage; }
@@ -442,14 +504,14 @@ export async function pollMirrorEvents(opts: {
         console.log(`[TradeMirror] mirrored open ${side} ${sym} (dev event ${ev.id})`);
       } else if (ev.kind === 'close') {
         const mine = mirroredFor(sym);
-        if (!mine) { guardClearOpened(sym); seen.add(ev.id); continue; } // nothing to close
+        if (!mine) { guardClearOpened(sym); markSeen(ev.id); continue; } // nothing to close
         const price = await getLivePrice(sym).catch(() => null);
         if (price == null || !(price > 0)) continue; // retry — quote feed warms up
         const pnl = calcPnl(mine, price);
         await store.updateTrade(mine.id, { status: 'closed', exitPrice: price, pnl, closeReason: ev.closeReason === 'manual' ? 'manual' : ((ev.closeReason as any) || 'manual'), closedAt: Date.now() });
         await store.saveBalance(balance + pnl).catch(() => {});
         guardMarkClosed(sym);
-        seen.add(ev.id); // executed — never reprocess
+        markSeen(ev.id); // executed — never reprocess
         balance = balance + pnl;
         allTrades = await store.listTrades().catch(() => allTrades);
         executed.push(ev);
