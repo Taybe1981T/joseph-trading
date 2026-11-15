@@ -24,7 +24,7 @@ import {
   CRYPTO_TP_PCT,
 } from '../services/tradingValues';
 import { clearOpened as clearAutoOpened, resetGuard as resetAutoGuard } from '../services/autoGuard';
-import { openEventFor, broadcastMirrorEvent } from '../services/tradeMirror';
+import { openEventFor, closeEventFor, clearEventFor, broadcastMirrorEvent } from '../services/tradeMirror';
 import MT5ConnectModal from './MT5ConnectModal';
 import { loadConnection, mt5Bridge, MT5Connection } from '../services/mt5Bridge';
 import { isDeveloperEmail } from '../lib/clientIds';
@@ -181,6 +181,9 @@ const normalizeDecimal = (raw: string): string =>
 export default function TradeNowPage({ lang, user, signals = [], canTrade = true, canOpenManual = true, tradeMode, showAllTradeModes = false }: TradeNowPageProps) {
   const isAr = lang === 'ar';
   const activeTradeMode: TradeMode = tradeMode ?? currentTradeMode(user?.email);
+  // The developer's device is the SOURCE of the shared book: closes and history
+  // clears are broadcast so guest/free mirrors follow automatically.
+  const isDevUser = isDeveloperEmail(user?.email || '');
   const [category, setCategory] = useState<string>('forex');
   const [symbol, setSymbol] = useState<string>('EURUSD');
   const isCryptoTicket = detectCategory(symbol) === 'crypto';
@@ -470,6 +473,19 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
         setBalance(acc.balance);
         setLeverage(acc.leverage);
         setTrades(list.sort((a, b) => b.openedAt - a.openedAt));
+        // One-time post-upgrade sync: if the developer's history is ALREADY
+        // empty, publish a clear once now so guest/free mirrors drop the stale
+        // history they kept before this feature existed.
+        if (isDevUser && !list.some((t) => t.status === 'closed')) {
+          try {
+            const safe = (user?.email || 'dev').toLowerCase().replace(/[^a-z0-9@._-]/g, '_');
+            const marker = `finalyze_dev_history_clear_broadcast_v1__${safe}`;
+            if (localStorage.getItem(marker) !== '1') {
+              localStorage.setItem(marker, '1');
+              void broadcastMirrorEvent(clearEventFor(user?.email || ''));
+            }
+          } catch {}
+        }
       } catch {
         // Fallback: load from localStorage
         try {
@@ -677,6 +693,11 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     }
     setBalance(newBalance);
     setTrades((prev) => prev.map((x) => x.id === t.id ? { ...x, status: 'closed', exitPrice, pnl, closeReason: reason, closedAt: Date.now() } : x));
+    // Developer device: broadcast the close so guest/free mirror accounts close
+    // the same position automatically (they never control their own book).
+    if (isDevUser) {
+      try { await broadcastMirrorEvent(closeEventFor(t.symbol, reason, user?.email || '')); } catch {}
+    }
     playCloseSound();
     // Keep the GLOBAL auto-trade guard in sync with reality. Whatever closed this
     // position (manual, tp, or sl), it is no longer open — so its persistent
@@ -1131,6 +1152,12 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     }
     setBalance(newBalance);
     setTrades((prev) => prev.map((x) => closedMap[x.id] ? { ...x, ...closedMap[x.id] } : x));
+    // Developer device: mirror the bulk close to guest/free accounts.
+    if (isDevUser) {
+      for (const t of closable) {
+        try { await broadcastMirrorEvent(closeEventFor(t.symbol, 'manual', user?.email || '')); } catch {}
+      }
+    }
     // Every symbol just closed is no longer open — clear its persistent auto-trade
     // guard so the global engine can re-open a still-valid signal later.
     closable.forEach((t) => clearAutoOpened(t.symbol));
@@ -1142,6 +1169,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
 
   // Clear the closed-trades history (keeps open trades and balance unchanged).
   async function clearHistory() {
+    if (!canTrade) { denyViewOnly(); return; }
     if (closedTrades.length === 0) return;
     setBusy(true);
     try {
@@ -1152,6 +1180,10 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
         raw.trades = (raw.trades || []).filter((x: any) => x.status !== 'closed');
         localStorage.setItem('paper_trading_data', JSON.stringify(raw));
       } catch {}
+    }
+    // Developer device: clear the mirrored history on every guest/free account.
+    if (isDevUser) {
+      try { await broadcastMirrorEvent(clearEventFor(user?.email || '')); } catch {}
     }
     setTrades((prev) => prev.filter((x) => x.status !== 'closed'));
     setBusy(false);
@@ -1955,7 +1987,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
               <span className="text-sm font-bold text-brand-text/50">
                 {isAr ? `إجمالي السجل: ${closedTrades.length}` : `History entries: ${closedTrades.length}`}
               </span>
-              {closedTrades.length > 0 && (
+              {closedTrades.length > 0 && canTrade && (
                 <button
                   onClick={() => {
                     if (!confirmClear) {

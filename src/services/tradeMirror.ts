@@ -37,9 +37,9 @@ import {
 } from './autoGuard';
 
 export interface MirrorTradeEvent {
-  /** Stable unique id: `open:<symbol>:<openedAt>` or `close:<symbol>:<ts>` */
+  /** Stable unique id: `open:<symbol>:<openedAt>` or `close:<symbol>:<ts>` or `clear:history` */
   id: string;
-  kind: 'open' | 'close';
+  kind: 'open' | 'close' | 'clear';
   symbol: string;
   side?: 'buy' | 'sell';
   signal?: string;
@@ -56,6 +56,8 @@ export const MIRROR_COLLECTION = 'shared_trades';
 export const MIRROR_TTL_MS = 6 * 3600 * 1000;
 export const MIRROR_SEEN_KEY = 'finalyze_mirror_seen_v1';
 export const MIRROR_ENABLED_KEY = 'finalyze_client_mirror_enabled';
+/** Last developer "clear history" timestamp applied on this device. */
+export const MIRROR_CLEARED_KEY = 'finalyze_mirror_cleared_at_v1';
 
 export function readMirrorSeen(): Set<string> {
   try {
@@ -132,6 +134,18 @@ export function closeEventFor(symbol: string, reason: 'tp' | 'sl' | 'manual', or
   };
 }
 
+/**
+ * Build a CLEAR-HISTORY event. One fixed document id is reused (merge), so a
+ * device that was offline still sees the LATEST clear timestamp on its next
+ * poll and drops its stale closed history. The event carries no TTL.
+ */
+export function clearEventFor(origin: string): Omit<MirrorTradeEvent, 'publishedAt'> {
+  return {
+    id: 'clear:history',
+    kind: 'clear', symbol: '', openedAt: Date.now(), origin,
+  };
+}
+
 export function detectMirrorCategory(sym: string): string {
   const s = sym.toUpperCase().replace(/[-_=]/g, '');
   if (/^(BTC|ETH|XRP|SOL|DOGE|ADA|DOT|LINK|MATIC|AVAX|ATOM|NEAR|LTC|TRX|BNB|ARB|OP|PEPE|SHIB)/.test(s)) return 'crypto';
@@ -159,11 +173,18 @@ export async function pollMirrorEvents(opts: {
   displayedSymbols?: string[];
   /** Display mode the mirrored trades belong to (free view vs paid). */
   mode?: 'free' | 'paid';
+  /**
+   * Bypass the per-client mirror toggle. FREE / GUEST accounts are a mirror of
+   * the developer's book and must follow it automatically — they have no
+   * control over open/close/history.
+   */
+  force?: boolean;
 }): Promise<MirrorTradeEvent[]> {
   const executed: MirrorTradeEvent[] = [];
   // Respect the user's mirror toggle — both the 10s poll and the real-time
   // onSnapshot listener route through here, so this guards both paths.
-  if (!isMirrorEnabled()) return executed;
+  // A forced (free/guest) mirror ignores the per-client switch.
+  if (!opts.force && !isMirrorEnabled()) return executed;
   const seen = readMirrorSeen();
   let docs: any[] = [];
   try {
@@ -175,13 +196,20 @@ export async function pollMirrorEvents(opts: {
   }
   const now = Date.now();
   const fresh = docs
-    .filter((d) => d && typeof d.id === 'string' && (d.kind === 'open' || d.kind === 'close'))
-    .filter((d) => typeof d.publishedAt === 'number' && now - d.publishedAt < MIRROR_TTL_MS)
-    .filter((d) => !seen.has(d.id))
+    .filter((d) => d && typeof d.id === 'string' && (d.kind === 'open' || d.kind === 'close' || d.kind === 'clear'))
+    .filter((d) => {
+      // History-clear events are persistent state (fixed id) — never TTL'd or
+      // deduped by `seen`; the applied timestamp decides whether to run them.
+      if (d.kind === 'clear') return true;
+      return typeof d.publishedAt === 'number' && now - d.publishedAt < MIRROR_TTL_MS;
+    })
+    .filter((d) => d.kind === 'clear' || !seen.has(d.id))
     .sort((a, b) => (a.publishedAt || 0) - (b.publishedAt || 0));
   if (fresh.length === 0) return executed;
 
   const store = getTradeStore(opts.user);
+  // Per-account marker: several accounts may share this browser/phone.
+  const clearKey = `${MIRROR_CLEARED_KEY}__${String(opts.user?.uid || 'guest')}`;
   let balance = 10000;
   let leverage = 100;
   let allTrades: any[] = [];
@@ -193,6 +221,12 @@ export async function pollMirrorEvents(opts: {
   } catch { /* local defaults */ }
 
   const openFor = (sym: string) => allTrades.find((t: any) => t.status === 'open' && t.symbol === sym);
+  // Close only a position that actually came from the developer's book:
+  //   • new mirrored trades carry `mirrored: true`;
+  //   • legacy copies (pre-flag) are recognised by their free mode.
+  const mirroredFor = (sym: string) => allTrades.find((t: any) =>
+    t.status === 'open' && t.symbol === sym &&
+    (t.mirrored === true || (opts.mode === 'free' && t.mode === 'free')));
 
   // Track symbols mirrored-opened during THIS poll pass so we don't clear
   // their guard mid-loop (allTrades may be stale if listTrades() failed
@@ -201,6 +235,24 @@ export async function pollMirrorEvents(opts: {
   const openedThisPoll = new Set<string>();
 
   for (const ev of fresh) {
+    // HISTORY CLEAR: free/guest accounts mirror the developer's history exactly.
+    // Paid clients own their history, so they are never touched here.
+    if (ev.kind === 'clear') {
+      if (opts.mode !== 'free') continue;
+      try {
+        const applied = Number(localStorage.getItem(clearKey) || 0);
+        const stamp = Number(ev.publishedAt || 0);
+        if (stamp > applied) {
+          await store.clearHistory();
+          try { localStorage.setItem(clearKey, String(stamp)); } catch {}
+          executed.push(ev);
+          console.log('[TradeMirror] mirrored history clear from developer');
+        }
+      } catch (e) {
+        console.warn('[TradeMirror] history clear failed:', (e as any)?.message || e);
+      }
+      continue;
+    }
     const sym: string = ev.symbol;
     if (!sym) { seen.add(ev.id); continue; } // malformed event — definitive
     // ANALYSIS-ONLY FENCE: mirror OPENs only for symbols with a displayed
@@ -258,6 +310,7 @@ export async function pollMirrorEvents(opts: {
           openedAt: Date.now(),
           source: 'auto',
           mode: opts.mode || 'free',
+          mirrored: true,
         });
         guardMarkOpened(sym);
         openedThisPoll.add(sym);
@@ -270,7 +323,7 @@ export async function pollMirrorEvents(opts: {
         try { opts.notify(`نسخ تلقائي: ${side === 'buy' ? 'شراء' : 'بيع'} ${sym}`); } catch {}
         console.log(`[TradeMirror] mirrored open ${side} ${sym} (dev event ${ev.id})`);
       } else if (ev.kind === 'close') {
-        const mine = openFor(sym);
+        const mine = mirroredFor(sym);
         if (!mine) { guardClearOpened(sym); seen.add(ev.id); continue; } // nothing to close
         const price = await getLivePrice(sym).catch(() => null);
         if (price == null || !(price > 0)) continue; // retry — quote feed warms up
@@ -306,6 +359,8 @@ export function listenMirrorEvents(opts: {
   playChampagne: () => void;
   notify: (msg: string) => void;
   displayedSymbols?: string[];
+  mode?: 'free' | 'paid';
+  force?: boolean;
 }): VoidFunction {
   let busy = false;
   const trigger = () => {

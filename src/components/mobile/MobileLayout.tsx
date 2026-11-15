@@ -56,6 +56,7 @@ import type { StoreBot } from '../../services/storeService';
 import { fetchStoreBots } from '../../services/storeService';
 import type { PaymentSession } from '../../services/paymentSession';
 import { getLivePrices, calcPnl, isMarketOpen } from '../../services/paperTradingService';
+import { pollMirrorEvents, listenMirrorEvents } from '../../services/tradeMirror';
 import { rememberBuyerEmail, setCurrentUserEmail } from '../../lib/clientScope';
 import { stackedPlanExpiry } from '../../lib/planPeriod';
 
@@ -644,11 +645,13 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   }, []);
 
   // Sync the shared mobile auto engine with the SAME home-page signals (desktop parity: App.tsx).
-  // Free/guest accounts are view-only: developer signals must never feed the
-  // auto-trade engine for them (the paid client's own analysis is the only source).
+  // Only a PAID client feeds the mobile engine (their own analysis). The
+  // developer's phone must NOT auto-trade: the desktop developer engine is the
+  // single source that broadcasts to clients, so running a second engine here
+  // would open duplicate positions. Free/guest accounts never auto-trade.
   useEffect(() => {
-    syncMobileAutoEngine(isDev || isPlanClient ? fullSignals : []);
-  }, [fullSignals, isDev, isPlanClient]);
+    syncMobileAutoEngine(isPlanClient ? fullSignals : []);
+  }, [fullSignals, isPlanClient]);
 
   // The latest signals are read through a ref instead. Declared BEFORE loadAll
   // so the trade-mode migration can compare legacy auto trades against the
@@ -660,11 +663,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     try {
       const merged: any[] = [];
       if (canViewSignals) {
-        if (!isDev && !isPlanClient) {
-          // Free/guest: developer's published signals come from shared_results
-          // polling (set via effect below). Keep existing state here.
-        } else {
-          // Developer / paid-plan client: own analysis signals.
+        if (isPlanClient) {
+          // Paid-plan client: own analysis signals.
           try {
             const raw = localStorage.getItem(mobileSignalsStorageKey());
             const auto = raw ? JSON.parse(raw) : [];
@@ -691,9 +691,11 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         full.push(s);
       }
       full.sort((a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
-      // For free/guest clients, developer signals are supplied by shared_results
-      // polling (cross-device). Do not overwrite them with local storage here.
-      if (isDev || isPlanClient) {
+      // For free/guest/developer accounts, the developer feed is supplied by
+      // shared_results polling (cross-device). Do not overwrite it with local
+      // storage here — that is what made the developer's phone flash the signal
+      // for a second and then clear it.
+      if (isPlanClient) {
         const nextFull = full.slice(0, 40);
         setFullSignals((prev) => {
           // Replace even when the new list is empty: entering paid mode (or the
@@ -866,20 +868,16 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
 
 
   // The developer's published analysis (shared_results) is mirrored on mobile
-  // for GUESTS and REGISTERED CLIENTS WITHOUT AN ACTIVE PAID PLAN — never for an
-  // active paid-plan client (they run their own analysis) and never for the
-  // developer (who already owns the source data). This is the cross-device
-  // source of "main-site" signals, so a guest on the app sees the exact same
-  // developer signals as the public website.
+  // for the DEVELOPER, GUESTS and REGISTERED CLIENTS WITHOUT AN ACTIVE PAID PLAN
+  // — never for an active paid-plan client (they run their own analysis). This
+  // is the cross-device source of "main-site" signals, so the developer's phone
+  // shows exactly the same signals as the desktop instead of flashing them once.
   const canViewSignalsRef = useRef(canViewSignals);
   useEffect(() => { canViewSignalsRef.current = canViewSignals; }, [canViewSignals]);
 
   useEffect(() => {
-    const userEmail = (user?.email || email || '').toLowerCase().trim();
-    const isDev = isDeveloperEmail(userEmail);
-    // Developer owns the source data; a paid-plan client sees their own analysis.
-    // Only guests and clients without an active paid plan mirror the feed.
-    if (isDev || isPlanClient) return;
+    // A paid-plan client sees their own analysis only.
+    if (isPlanClient) return;
 
     const pollFirestore = async () => {
       try {
@@ -927,6 +925,44 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     return () => clearInterval(iv);
   }, [user, email, isPlanClient, canViewSignals]);
 
+  // FREE / GUEST ACCOUNTS MIRROR THE DEVELOPER'S BOOK AUTOMATICALLY.
+  // They have no control over their account: developer opens, closes and
+  // history clears are copied here without an opt-in toggle. Paid-plan clients
+  // own their account and are never touched by this effect.
+  useEffect(() => {
+    if (isDev || isPlanClient) return;
+    let alive = true;
+    let busy = false;
+    const opts = () => ({
+      user,
+      force: true,
+      mode: 'free' as const,
+      playChampagne: () => {},
+      notify: () => {},
+    });
+    const tick = async () => {
+      if (!alive || busy) return;
+      busy = true;
+      try {
+        const done = await pollMirrorEvents(opts());
+        if (done.length) {
+          try { window.dispatchEvent(new CustomEvent('mobile-trades-changed')); } catch {}
+          loadAll();
+        }
+      } catch {} finally { busy = false; }
+    };
+    void tick();
+    const iv = setInterval(tick, 10000);
+    let dispose: VoidFunction | null = null;
+    try { dispose = listenMirrorEvents(opts()); } catch {}
+    return () => {
+      alive = false;
+      clearInterval(iv);
+      try { dispose?.(); } catch {}
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isDev, isPlanClient, loadAll]);
+
   const ping = (freq: number) => {
     if (!sound) return;
     try {
@@ -955,7 +991,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   };
 
   const openTrade = (sym: string, type: 'buy' | 'sell', vol: number) => {
-    if (!user) return;
+    if (!user || (!isDev && !isPlanClient)) return;
     const cat = String(detectMobileTradeCategory(sym));
     if (!isMarketOpen(cat, sym)) {
       marketClosedAlert('open');
@@ -973,7 +1009,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // not just show an alert. Same bridge as the full mobile ticket, so the
   // developer fixed trading values are enforced here too.
   const executeDialogTrade = async (sym: string, type: 'buy' | 'sell', vol: number) => {
-    if (!user) return;
+    if (!user || (!isDev && !isPlanClient)) return;
     const cat = String(detectMobileTradeCategory(sym));
     if (!isMarketOpen(cat, sym)) {
       marketClosedAlert('open');
@@ -1303,7 +1339,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} onRemoveAll={() => setFullSignals([])} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} radarProgress={radarProgress} signalsAllowed={canViewSignals} />}
         {tab === 'quotes' && isDev && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} canTrade={isDev || isPlanClient} />}
-        {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} canTrade={isDev || isPlanClient} canOpenManual={!!user} />}
+        {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} canTrade={isDev || isPlanClient} canOpenManual={isDev || isPlanClient} />}
         {/* Desktop parity: a paid-plan client in paid mode gets Auto + Manual too. */}
         {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} />}
         {tab === 'manual' && canUseAnalysis && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}

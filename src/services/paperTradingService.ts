@@ -29,6 +29,9 @@ export interface PaperTrade {
   // shown while the client uses the free view, a paid one only in paid mode.
   // Legacy trades without a mode are stamped once by the mode migration.
   mode?: 'free' | 'paid';
+  // True when this position is a COPY of a developer trade (mirror engine).
+  // Developer closes/history clears only ever touch these positions.
+  mirrored?: boolean;
   // Per-position trailing-stop settings (USD) edited via the position editor
   // (pencil → modal). When set, the background position manager uses these
   // instead of the global strategy_settings defaults.

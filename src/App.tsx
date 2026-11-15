@@ -1230,8 +1230,12 @@ const isDeveloperSession = () => {
   }, []);
   useEffect(() => {
     if (isDeveloperSession()) return;
-    if (!isPlanClient && !mirrorFreeAllowed) return;
-    if (!mirrorEnabledState) return;
+    // PAID clients keep control of their own account: copy-trading is opt-in.
+    // FREE / GUEST accounts are a pure mirror of the developer's book, so they
+    // follow automatically (only the developer kill-switch can stop them).
+    if (isPlanClient) {
+      if (!mirrorEnabledState) return;
+    } else if (!mirrorFreeAllowed) return;
     let alive = true;
     let busy = false;
     const displayed = () => {
@@ -1247,6 +1251,8 @@ const isDeveloperSession = () => {
       user,
       displayedSymbols: displayed(),
       mode: (isDeveloperSession() || isPlanClient ? 'paid' : 'free') as 'free' | 'paid',
+      // Free/guest mirror is automatic — no per-client toggle.
+      force: !isPlanClient,
       playChampagne: () => {
         try { playChampagnePop(Math.max(0, Math.min(1, autoSettingsRef.current?.volume ?? 0.7))); } catch {}
       },
@@ -3445,7 +3451,7 @@ const started = planGrants
                 the user browses other pages. Opening a trade no longer requires
                 sitting on the trade page. */}
             <div className={effectivePage === 'trade' ? 'contents' : 'hidden'} aria-hidden={effectivePage !== 'trade'}>
-              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() ? topSignals : isPlanClient ? clientSignals : topSignals} canTrade={isDeveloperSession() || isPlanClient} canOpenManual={!!user} tradeMode={isDeveloperSession() || isPlanClient ? 'paid' : 'free'} showAllTradeModes={isDeveloperSession()} />
+              <TradeNowPage lang={lang} user={user} signals={isDeveloperSession() ? topSignals : isPlanClient ? clientSignals : topSignals} canTrade={isDeveloperSession() || isPlanClient} canOpenManual={isDeveloperSession() || isPlanClient} tradeMode={isDeveloperSession() || isPlanClient ? 'paid' : 'free'} showAllTradeModes={isDeveloperSession()} />
             </div>
 
             {effectivePage === 'store' && (
