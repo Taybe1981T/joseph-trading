@@ -330,6 +330,9 @@ async function runMirrorPass(opts: {
   // this is what makes a developer reset/clear apply even to clients that were
   // offline when the close event was broadcast (or copies opened by an old
   // build that never broadcast closes).
+  // Symbols the developer currently holds, when a fresh book is available. Used
+  // to skip OPEN events left over from before a reset (see the open branch).
+  let devHeld: Set<string> | null = null;
   if (opts.mode === 'free') {
     // ONE COPY PER SYMBOL: an older build could let overlapping passes open the
     // same symbol several times. Keep the earliest copy, drop the extras.
@@ -355,7 +358,8 @@ async function runMirrorPass(opts: {
       const book: any = bookSnap.exists() ? bookSnap.data() : null;
       const bookFresh = !!book && typeof book.updatedAt === 'number' && now - book.updatedAt < DEV_BOOK_MAX_AGE_MS;
       if (bookFresh && Array.isArray(book.openSymbols)) {
-        const held = new Set(book.openSymbols.map((s: any) => String(s || '').toUpperCase()));
+        const held = new Set<string>(book.openSymbols.map((s: any) => String(s || '').toUpperCase()));
+        devHeld = held;
         const stale = allTrades.filter((t: any) =>
           t && t.status === 'open' && t.mode !== 'paid' &&
           !held.has(String(t.symbol || '').toUpperCase()) &&
@@ -435,6 +439,16 @@ async function runMirrorPass(opts: {
     // Developer kill-switch: do not OPEN new free copies. Closes/history/reset
     // above are never gated, so the free book always matches the developer's.
     if (ev.kind === 'open' && opts.allowOpen === false) continue;
+    // BOOK GATE (free mode): never open a copy for a symbol the developer does
+    // not currently hold. Stale OPEN events from before a reset are dropped; a
+    // brand-new open is retried for up to 2 minutes while the book catches up.
+    if (ev.kind === 'open' && devHeld) {
+      if (!devHeld.has(String(sym).toUpperCase())) {
+        const age = now - Number(ev.publishedAt || 0);
+        if (age > 2 * 60 * 1000) markSeen(ev.id);
+        continue;
+      }
+    }
     // ANALYSIS-ONLY FENCE: mirror OPENs only for symbols with a displayed
     // signal (auto radar OR manual analysis). Developer hand-opened tickets
     // never appear in the signal lists, so they are never mirrored.
