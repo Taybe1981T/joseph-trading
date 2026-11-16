@@ -103,7 +103,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   }, []);
   const [alert, setAlert] = useState<string | null>(null);
   const [auto, setAuto] = useState(() => isMobileAutoTradeOn());
-  const [autoAnalysisOn, setAutoAnalysisOn] = useState(() => isMobileRadarOn() || readMobileAuto().isEnabled);
+  const [autoAnalysisOn, setAutoAnalysisOn] = useState(() => {
+    try {
+      if (isFreshRadarSession()) return false;
+    } catch {}
+    return isMobileRadarOn() || readMobileAuto().isEnabled;
+  });
   // Seed from the engine so a radar that was already running (resumed after a
   // tab switch / remount) still shows its progress bar immediately.
   const [radarProgress, setRadarProgress] = useState<{ current: string; total: number; index: number; category?: string } | null>(() => {
@@ -1460,6 +1465,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         avatarUrl={customAvatar || user?.photoURL || null}
         onProfileClick={() => goTab('profile')}
         autoAnalysisRunning={autoAnalysisOn}
+        radarCategory={radarProgress?.category ?? null}
         onAutoAnalysisToggle={canUseAnalysis ? toggleAutoAnalysis : undefined} />
       {tab !== 'home' && tab !== 'store' && (
         <button

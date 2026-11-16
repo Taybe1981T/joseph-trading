@@ -16,6 +16,7 @@ interface MobileHeaderProps {
   avatarUrl?: string | null;
   onProfileClick?: () => void;
   autoAnalysisRunning?: boolean;
+  radarCategory?: string | null;
   onAutoAnalysisToggle?: () => void;
 }
 
@@ -52,7 +53,7 @@ const barBtn: React.CSSProperties = {
 
 export function MobileHeader({
   title, lang, onLangChange, isDark, toggleTheme, clientCount, onClientsClick,
-  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning, onAutoAnalysisToggle,
+  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning, radarCategory, onAutoAnalysisToggle,
 }: MobileHeaderProps) {
   const [logo, setLogo] = useState<string | null>(null);
   const [showLang, setShowLang] = useState(false);
@@ -96,7 +97,7 @@ export function MobileHeader({
           style={{
             color: '#111827',
             strokeWidth: 2.6,
-            animation: autoAnalysisRunning ? 'pulse 1.2s infinite' : 'none',
+            animation: autoAnalysisRunning ? 'pulseWhite 1.2s infinite' : 'none',
           }}
         />
         <span
@@ -113,25 +114,33 @@ export function MobileHeader({
         />
       </button>
       {onAutoAnalysisToggle && (
-        <span
-          style={{
-            fontSize: 8,
-            fontWeight: 900,
-            letterSpacing: '0.05em',
-            lineHeight: 1,
-            textTransform: 'uppercase',
-            color: '#FDE047',
-          }}
-        >
-          {autoAnalysisRunning ? (isAr ? 'يعمل' : 'ON') : (isAr ? 'بدء' : 'START')}
-        </span>
+        <>
+          <span
+            style={{
+              fontSize: 8,
+              fontWeight: 900,
+              letterSpacing: '0.05em',
+              lineHeight: 1,
+              textTransform: 'uppercase',
+              color: '#FDE047',
+            }}
+          >
+            {autoAnalysisRunning ? (isAr ? 'يعمل' : 'ON') : (isAr ? 'بدء' : 'START')}
+          </span>
+          {radarCategory && (
+            <span style={{ fontSize: 8, fontWeight: 900, color: '#111827', background: 'rgba(255,255,255,0.6)', borderRadius: 4, padding: '1px 3px' }}>
+              {isAr ? ({ crypto:'كريبتو', forex:'فوركس', stocks:'أسهم', metals:'معادن' }[radarCategory] || radarCategory) : radarCategory}
+            </span>
+          )}
+        </>
       )}
     </div>
   );
 
   return (
     <>
-      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(1.18); } }`}</style>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(1.18); } }
+@keyframes pulseWhite { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.7); transform: scale(1); } 50% { box-shadow: 0 0 12px 4px rgba(255,255,255,0.9); transform: scale(1.08); } }`}</style>
       <header
         className="mt5-header"
         style={{
