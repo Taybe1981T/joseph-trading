@@ -1051,7 +1051,6 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // fully decoupled.
   useEffect(() => {
     if (!isDev) return;
-    if (isFreshRadarSession()) { setRadarProgress(null); return; }
     let alive = true;
     const poll = async () => {
       try {
