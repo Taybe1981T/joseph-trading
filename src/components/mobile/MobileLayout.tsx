@@ -1057,12 +1057,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         const snap = await getDoc(doc(db, 'shared_status', 'latest'));
         if (!alive || !snap.exists()) return;
         const d: any = snap.data();
-        const running = d?.isRunning === true;
         const p = d?.progress;
-        if (!running) {
-          setRadarProgress(null);
-          return;
-        }
         if (p && typeof p === 'object') {
           setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category ?? undefined });
         }
