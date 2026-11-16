@@ -1934,7 +1934,11 @@ const isDeveloperSession = () => {
     // continues from the symbol it was analyzing when the page was refreshed.
     const radarOwner = String(user?.email || user?.uid || '').toLowerCase().trim();
     const settingsKey = radarSettingsKey(s, hasActivePlan);
-    const saved = readRadarScanProgress(radarOwner, settingsKey);
+    // Resume-from-last-symbol applies to a PAGE REFRESH only. A fresh session
+    // (site closed and reopened) always starts analysis from the very first
+    // symbol — the user starts auto-analysis manually.
+    const freshSession = isFreshRadarSession();
+    const saved = freshSession ? null : readRadarScanProgress(radarOwner, settingsKey);
     const jobs: { cat: string; region?: StockExchangeKey }[] = saved && saved.jobs.length
       ? saved.jobs.map((j) => ({ cat: j.cat, region: j.region as StockExchangeKey | undefined }))
       : openJobs;
@@ -2282,7 +2286,10 @@ const isDeveloperSession = () => {
     // A scan that was running when the page was refreshed left its position in
     // localStorage. Resume it IMMEDIATELY instead of waiting for the interval
     // (and regardless of the manual-arm rule — it was already running).
-    const canResume = hasRadarScanProgress(
+    // On a FRESH session (site closed and reopened) we never resume — analysis
+    // starts from zero only when the user presses ON manually.
+    const freshSession = isFreshRadarSession();
+    const canResume = !freshSession && hasRadarScanProgress(
       String(user?.email || user?.uid || ''),
       radarSettingsKey(autoSettingsRef.current, ownsPaidPlan),
     );
@@ -2312,6 +2319,12 @@ const isDeveloperSession = () => {
     // briefly instead of starting a second scan.
     const scheduleNext = (immediate: boolean) => {
       if (token !== radarTokenRef.current) return;
+      // Fresh session (site reopened): never auto-start analysis. The user
+      // starts it manually; the interval loop takes over after that.
+      if (freshSession && !isRadarArmed() && !canResume) {
+        setIsScanningFinished(true);
+        return;
+      }
       if (radarBusyRef.current) {
         radarTimerRef.current = setTimeout(() => {
           radarTimerRef.current = null;
