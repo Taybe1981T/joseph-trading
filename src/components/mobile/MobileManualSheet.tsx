@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { X, Play, Search, Loader2, CheckCircle2, XCircle, Plus, Trash2, Zap, Clock } from 'lucide-react';
-import { AnalysisResult, TradingStyle } from '../../types';
-import { MobileProgress, runMobileManual, getMobileSymbolGroups, getMobileAllSymbols, addMobileCustomSymbol, unhideMobileSymbol } from '../../services/mobileAnalysisEngine';
+import { AnalysisResult, MarketType, TradingStyle } from '../../types';
+import { MobileProgress, runMobileManual, getMobileSymbolGroups, getMobileAllSymbols, addMobileCustomSymbol, unhideMobileSymbol, detectMobileType } from '../../services/mobileAnalysisEngine';
 import { TIMEFRAMES, TRADING_STYLES, FREE_SYMBOLS, ALL_SYMBOLS_DB } from '../../constants';
 import { Language } from '../../lib/i18n';
 import { mobileT, isMobilePlanClient, useMobileMode } from '../../lib/mobileMode';
 import { consumeSymbolAnalyses } from '../../services/manualQuota';
+import { normalizeSymbolInput, registerCustomSymbol, removeCustomTvEntry } from '../../lib/customSymbols';
 
 interface Props { lang: Language; onClose: () => void; onDone: (r: AnalysisResult[]) => void; }
 
@@ -75,7 +76,8 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
 
   // Expanded suggestions: ALL symbols across the 4 category markets + custom + hidden (desktop parity)
   const suggestions = useMemo(() => {
-    const term = customInput.trim().toUpperCase();
+    const rawTerm = customInput.trim();
+    const term = rawTerm.toUpperCase();
     if (!term) return [] as { sym: string; hidden: boolean; known: boolean }[];
     const hiddenSet = new Set(hidden);
     const visibleSet = new Set(allCategorySymbols);
@@ -83,19 +85,30 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
       .filter((s) => s.includes(term) && !visibleSet.has(s))
       .slice(0, 24)
       .map((s) => ({ sym: s, hidden: hiddenSet.has(s), known: true }));
-    // brand-new ticker (not in any market DB) — allow adding it anyway
-    if (!out.some((o) => o.sym === term) && !getMobileAllSymbols().includes(term) && /^[A-Z0-9.\-=]+$/.test(term)) {
-      out.unshift({ sym: term, hidden: false, known: false });
+    // Brand-new symbol: normalize Binance/TradingView forms (BTCUSDT,
+    // BINANCE:ETHBTC, NASDAQ:TSLA, ...) so the added symbol is the clean app
+    // symbol with its exact chart mapping registered.
+    const cat = (['forex', 'crypto', 'stocks', 'metals'].includes(selectedType)
+      ? selectedType
+      : detectMobileType(rawTerm)) as MarketType;
+    const norm = normalizeSymbolInput(rawTerm, cat);
+    const addSym = norm?.symbol || term.replace(/[^A-Z0-9.\-=]/g, '');
+    if (addSym && !out.some((o) => o.sym === addSym) && !getMobileAllSymbols().includes(addSym)) {
+      out.unshift({ sym: addSym, hidden: false, known: false });
     }
     return out;
-  }, [customInput, hidden, allCategorySymbols]);
+  }, [customInput, hidden, allCategorySymbols, selectedType]);
 
   // Add a symbol: restore it if hidden, persist as custom, select it for analysis
   const addSymbol = (raw: string) => {
-    const s = (raw || '').trim().toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+    const cat = (['forex', 'crypto', 'stocks', 'metals'].includes(selectedType)
+      ? selectedType
+      : detectMobileType(raw)) as MarketType;
+    const norm = registerCustomSymbol(raw, cat);
+    const s = norm?.symbol || (raw || '').trim().toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
     if (!s) return;
     try { unhideMobileSymbol(s); } catch {}
-    try { addMobileCustomSymbol(s); } catch {}
+    try { addMobileCustomSymbol(s, cat); } catch {}
     setGroups(getMobileSymbolGroups());
     setSelectedSymbols((prev) => (prev.includes(s) ? prev : [...prev, s]));
     setCustomInput('');
@@ -119,6 +132,7 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
 
   const removeSymbol = (sym: string) => {
     setSelectedSymbols(prev => prev.filter(s => s !== sym));
+    try { removeCustomTvEntry(sym); } catch {}
     try {
       const custom: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');
       if (custom.includes(sym)) {

@@ -1,5 +1,5 @@
 // Popular TradingView symbols database for search suggestions
-import { TOP_CRYPTO_150 } from '../data/topCrypto150';
+import { TOP_CRYPTO_100 } from '../data/topCrypto100';
 
 export interface SuggestedSymbol {
   symbol: string;      // short display: TSLA
@@ -11,9 +11,9 @@ export interface SuggestedSymbol {
 const S = (symbol: string, tv: string, name: string, cat: SuggestedSymbol['cat']): SuggestedSymbol =>
   ({ symbol, tv, name, cat });
 
-// Crypto suggestions are generated from the single top-150 liquidity list so
+// Crypto suggestions are generated from the single curated top-100 list so
 // search, charts and both analysis modes can never drift apart again.
-const CRYPTO_SUGGESTIONS: SuggestedSymbol[] = TOP_CRYPTO_150.map((c) =>
+const CRYPTO_SUGGESTIONS: SuggestedSymbol[] = TOP_CRYPTO_100.map((c) =>
   S(c.symbol, `BINANCE:${c.symbol.replace(/USD$/, '')}USDT`, `${c.name} / Dollar`, 'crypto'),
 );
 

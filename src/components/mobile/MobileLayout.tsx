@@ -13,6 +13,7 @@ import { MobileTradeDialog } from './MobileTradeDialog';
 import { MobileSignalDetail } from './MobileSignalDetail';
 import AnalysisDetailPage from '../AnalysisDetailPage';
 import { Language } from '../../lib/i18n';
+import { dedupeSignals } from '../../lib/signalFeed';
 import { isDeveloperEmail, DEVELOPER_EMAILS, clientDocId } from '../../lib/clientIds';
 import { isGoogleOrMicrosoftEmail } from '../../lib/authPolicy';
 import { installUiClickSound } from '../../lib/uiClickSound';
@@ -59,6 +60,7 @@ import { fetchStoreBots } from '../../services/storeService';
 import type { PaymentSession } from '../../services/paymentSession';
 import { getLivePrices, calcPnl, isMarketOpen, getTradeStore } from '../../services/paperTradingService';
 import { pollMirrorEvents, listenMirrorEvents, broadcastMirrorEvent, clearEventFor } from '../../services/tradeMirror';
+import { startDevSettingsSync, DEV_SETTINGS_EVENT } from '../../services/devSettingsSync';
 import { rememberBuyerEmail, setCurrentUserEmail } from '../../lib/clientScope';
 import { stackedPlanExpiry } from '../../lib/planPeriod';
 
@@ -124,9 +126,17 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         // shadowed the `email` state with itself ("Cannot access 'email' before
         // initialization"), which crashed the toggle on first use.
         const info = detectMobileMode();
-        startMobileRadar(info.uid, info.email, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
+        // The developer account is ONE shared settings account, but the desktop
+        // is the single analysis engine: a phone toggle only changes the shared
+        // setting (the desktop picks it up in ~1 s) and never starts a second
+        // engine here.
+        if (info.mode !== 'developer') {
+          startMobileRadar(info.uid, info.email, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
+            setRadarProgress(null);
+          }, { immediate: true });
+        } else {
           setRadarProgress(null);
-        }, { immediate: true });
+        }
       } else {
         stopMobileRadar();
         setRadarProgress(null);
@@ -137,7 +147,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   useEffect(() => {
     const sync = () => {
       try {
-        setAutoAnalysisOn(isMobileRadarOn() && readMobileAuto().isEnabled);
+        // Developer = shared settings only; the desktop runs the engine. Show
+        // the synced ON/OFF state so both devices agree.
+        const devNow = detectMobileMode().mode === 'developer';
+        setAutoAnalysisOn(devNow ? readMobileAuto().isEnabled : (isMobileRadarOn() && readMobileAuto().isEnabled));
         // Keep the bar in step with the engine (it may have been started by the
         // auto-restart effect, not by this screen's toggle).
         if (isMobileRadarOn()) {
@@ -193,6 +206,36 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [planPaid, setPlanPaid] = useState<boolean>(() => mobilePaidMode());
   const [freeChosen, setFreeChosen] = useState<boolean>(() => mobileFreeModeChosen());
   const [isDev, setIsDev] = useState(false);
+  // ── Developer settings: ONE account across phone + desktop ───────────────
+  // A manual change on either device is published to `shared_settings/dev_sync`
+  // and applied here within ~1 s. Clients never start this sync.
+  useEffect(() => {
+    if (!isDev) return;
+    return startDevSettingsSync({ isDeveloper: true });
+  }, [isDev]);
+  useEffect(() => {
+    const onRemote = (ev: Event) => {
+      const keys = ((ev as CustomEvent)?.detail?.keys || []) as string[];
+      if (keys.length === 0) return;
+      const has = (k: string) => keys.includes(k);
+      if (has('auto_settings')) {
+        setAutoAnalysisOn(readMobileAuto().isEnabled);
+        try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
+      }
+      if (has('paper_trading_auto_trade')) setAuto(isMobileAutoTradeOn());
+      if (has('language')) {
+        try {
+          const v = localStorage.getItem('language');
+          if (v === 'ar' || v === 'en') setLang(v as Language);
+        } catch {}
+      }
+      if (has('theme')) {
+        try { setIsDark(localStorage.getItem('theme') !== 'light'); } catch {}
+      }
+    };
+    window.addEventListener(DEV_SETTINGS_EVENT, onRemote as EventListener);
+    return () => window.removeEventListener(DEV_SETTINGS_EVENT, onRemote as EventListener);
+  }, []);
   // Initialise from storage (not '') so the plan-restore effect sees the real
   // identity on the very first render instead of treating a returning client as
   // a guest and wiping their stored plan.
@@ -543,6 +586,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         // keeps resuming (unlimited), detected synchronously from storage so the
         // first render cannot mistake a developer for a client.
         const devNow = isDev || detectMobileMode().mode === 'developer';
+        if (devNow) {
+          // Shared developer account: the desktop is the single engine. The
+          // phone mirrors the setting but must not start a duplicate radar.
+          setAutoAnalysisOn(s.isEnabled);
+          return;
+        }
         if (!devNow && !isRadarArmed()) {
           const off = { ...s, isEnabled: false };
           try { localStorage.setItem('auto_settings', JSON.stringify(off)); } catch {}
@@ -905,10 +954,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
           return;
         }
         // The developer feed is authoritative for these accounts: replace (not
-        // merge) so removed developer signals also disappear here.
-        const firestoreSignals = latestData.results
+        // merge) so removed developer signals also disappear here. De-dupe by
+        // symbol+timeframe: several desktop publishers write shared_results, and
+        // a duplicate entry used to render as two identical cards on the phone.
+        const firestoreSignals = dedupeSignals(latestData.results
           .filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways)
-          .map((s: any) => ({ ...s, source: s.source || 'auto' }))
+          .map((s: any) => ({ ...s, source: s.source || 'auto' })))
           .sort((a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
           .slice(0, 40);
         setFullSignals((prev) => {

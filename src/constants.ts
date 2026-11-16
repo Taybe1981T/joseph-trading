@@ -1,5 +1,5 @@
 import { StrategySettings, MarketType, TradingStyle } from "./types";
-import { TOP_CRYPTO_SYMBOLS } from './data/topCrypto150';
+import { TOP_CRYPTO_SYMBOLS } from './data/topCrypto100';
 
 export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   momentumThreshold: 70,
@@ -209,12 +209,13 @@ export const SYMBOL_GROUPS: Record<string, { label: string, symbols: string[] }[
     { label: 'chfCadPairs', symbols: ['CADJPY', 'CADCHF', 'CHFJPY'] },
   ],
   crypto: [
-    // The full top-150 list is split into its liquidity bands so every symbol
-    // is visible in both manual and automatic analysis (no symbol is orphaned).
-    { label: 'topCrypto', symbols: TOP_CRYPTO_SYMBOLS.slice(0, 20) },
-    { label: 'momentumCrypto', symbols: TOP_CRYPTO_SYMBOLS.slice(20, 50) },
-    { label: 'altCrypto', symbols: TOP_CRYPTO_SYMBOLS.slice(50, 100) },
-    { label: 'layer2', symbols: TOP_CRYPTO_SYMBOLS.slice(100, 150) },
+    // The curated top-100 list is split into 25-symbol bands so every symbol is
+    // visible in both manual and automatic analysis (no symbol is orphaned).
+    // Any other Binance pair can be added manually from the symbol picker.
+    { label: 'topCrypto', symbols: TOP_CRYPTO_SYMBOLS.slice(0, 25) },
+    { label: 'momentumCrypto', symbols: TOP_CRYPTO_SYMBOLS.slice(25, 50) },
+    { label: 'altCrypto', symbols: TOP_CRYPTO_SYMBOLS.slice(50, 75) },
+    { label: 'layer2', symbols: TOP_CRYPTO_SYMBOLS.slice(75, 100) },
   ],
   stocks: [
     { label: 'techStocks', symbols: ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'NFLX'] },

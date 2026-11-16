@@ -3,6 +3,7 @@ import { Zap, Lock } from 'lucide-react';
 import { AnalysisResult } from '../../types';
 import { Language } from '../../lib/i18n';
 import { useMobileMode, mobileT } from '../../lib/mobileMode';
+import { dedupeSignals, getSymbolCategory } from '../../lib/signalFeed';
 import { MobileSignalCard } from './MobileSignalCard';
 
 interface MobileHomeProps {
@@ -49,10 +50,23 @@ export function MobileHome({
   // Group by category → Top 3 by confidence (same rule as desktop finalyze:top_signals).
   // FIX: stable fixed order + stable inner order so categories never flicker
   // while the radar is still scanning (no re-ordering mid-analysis).
+  //
+  // DUPLICATE FIX: a signal must never be rendered twice on this screen. Two
+  // independent causes existed:
+  //   1. the feed could carry the same symbol+timeframe more than once (several
+  //      desktop publishers write shared_results), so we de-dupe here too;
+  //   2. favorites are rendered in their own block at the top, and they used to
+  //      be rendered AGAIN inside their category group — the reported "one
+  //      crypto signal displayed twice in every mode". Favorited symbols are
+  //      now excluded from the category groups (they stay in favorites).
   const grouped = React.useMemo(() => {
+    const unique = dedupeSignals(fullSignals);
+    const favSet = new Set(favorites.map((s) => String(s).toUpperCase()));
     const map: Record<string, AnalysisResult[]> = {};
-    for (const s of fullSignals) {
-      const cat = String((s as unknown as Record<string, unknown>).category || 'other');
+    for (const s of unique) {
+      const sym = String(s.symbol || '').toUpperCase();
+      if (favSet.has(sym)) continue;
+      const cat = String((s as unknown as Record<string, unknown>).category || getSymbolCategory(sym));
       (map[cat] = map[cat] || []).push(s);
     }
     const out: { cat: string; list: AnalysisResult[] }[] = [];
@@ -69,7 +83,12 @@ export function MobileHome({
       if (list.length) out.push({ cat, list });
     }
     return out;
-  }, [fullSignals]);
+  }, [fullSignals, favorites]);
+  // Favorites block: one card per symbol+timeframe as well.
+  const favoriteSignals = React.useMemo(() => {
+    const unique = dedupeSignals(fullSignals);
+    return unique.filter((s) => favorites.includes(s.symbol));
+  }, [fullSignals, favorites]);
   return (
     <div className="mt5-page-container">
       <style>{`@keyframes mt5-radar-stripes { from { background-position: 0 0; } to { background-position: 28px 0; } }`}</style>
@@ -190,7 +209,7 @@ export function MobileHome({
           <div className="mt5-section-title" style={{ fontSize: 13, padding: '4px 0', opacity: 0.9 }}>
             ⭐ {isAr ? 'المفضلة' : 'Favorites'} ({favorites.length})
           </div>
-          {fullSignals.filter((s) => favorites.includes(s.symbol)).map((r) => (
+          {favoriteSignals.map((r) => (
             <MobileSignalCard
               key={'fav_' + r.symbol + '_' + (r.timeframe || '')}
               res={r}

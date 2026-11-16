@@ -12,6 +12,7 @@
 // previously bare symbols like BTCUSD/EURUSD produced an empty TradingView
 // search box instead of candles.
 import { SYMBOL_DB } from '../services/symbolSuggestions';
+import { getCustomTvSymbol } from './customSymbols';
 
 const SYMBOL_TV: Record<string, string> = (() => {
   const map: Record<string, string> = {};
@@ -100,6 +101,11 @@ function looksLikeNonStock(sym: string): boolean {
 export function toTvSymbol(symbol: string): string {
   const sym = (symbol || '').trim();
   if (!sym) return sym;
+
+  // A symbol added manually (any Binance pair / any TradingView exchange) keeps
+  // exactly the chart symbol it was registered with.
+  const customTv = getCustomTvSymbol(sym);
+  if (customTv) return customTv;
 
   // Already has an exchange prefix (e.g. "TSE:7203", "BINANCE:BTCUSDT").
   if (sym.includes(':')) return sym;

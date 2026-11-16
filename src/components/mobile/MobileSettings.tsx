@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Bell, Volume2, Globe, Shield, LogOut, LogIn, Loader2, RefreshCw, User, Camera, ChevronLeft } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { useMobileMode } from '../../lib/mobileMode';
@@ -6,6 +6,7 @@ import TradingValuesPanel from '../TradingValuesPanel';
 import { StrategySettings } from '../../types';
 import { DEFAULT_STRATEGY_SETTINGS } from '../../constants';
 import { RETRACE_TIMEFRAMES } from '../../services/retraceFilter';
+import { DEV_SETTINGS_EVENT } from '../../services/devSettingsSync';
 
 // Western digits only in numeric fields (Arabic-Indic digits → ASCII).
 function toWesternDigits(raw: string): string {
@@ -75,6 +76,22 @@ export function MobileSettings({
       return next;
     });
   };
+  // Live developer-settings sync (desktop ↔ phone): when the other device
+  // changes the analysis filters while this page is open, re-read them.
+  useEffect(() => {
+    const sync = () => {
+      try {
+        const raw = localStorage.getItem('strategy_settings');
+        if (raw) setStrategy({ ...DEFAULT_STRATEGY_SETTINGS, ...JSON.parse(raw) });
+      } catch {}
+    };
+    window.addEventListener(DEV_SETTINGS_EVENT, sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener(DEV_SETTINGS_EVENT, sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
   const [retraceDrafts, setRetraceDrafts] = useState<Record<string, string>>({});
 
   const retraceRows: Array<{ suffix: 'Forex' | 'Crypto' | 'Stocks' | 'Metals'; ar: string; en: string }> = [

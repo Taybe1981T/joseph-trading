@@ -43,6 +43,7 @@ import TradeNowPage from './components/TradeNowPage';
 import { AutoTradeEngine, AUTO_OPEN_SOUND_EVENT } from './services/autoTradeEngine';
 import { playChampagnePop } from './lib/tradeSounds';
 import { pollMirrorEvents, listenMirrorEvents, isMirrorEnabled, setMirrorEnabled, publishDevBook } from './services/tradeMirror';
+import { startDevSettingsSync, DEV_SETTINGS_EVENT } from './services/devSettingsSync';
 import { getTradeStore } from './services/paperTradingService';
 import StorePage from './components/StorePage';
 import SeoPricesPage from './pages/SeoPricesPage';
@@ -77,6 +78,7 @@ import { clientScopeKey, writeClientOwnKey, readClientOwnKey, clearClientOwnKey,
 import { isGoogleOrMicrosoftEmail, AuthProviderId } from './lib/authPolicy';
 import { readProfileAsset } from './lib/profileAssets';
 import { rememberSavedEmail } from './lib/savedAccounts';
+import { dedupeSignals } from './lib/signalFeed';
 
 
 export type PageType = 'main' | 'settings' | 'apiKey' | 'plans' | 'radar' | 'paymentSettings' | 'clientMonitor' | 'profile' | 'about' | 'suggestions' | 'ads' | 'siteStats' | 'trade' | 'manualAnalysis' | 'manualResults' | 'store' | 'storeSettings' | 'transactions' | 'prices' | 'myPlan';
@@ -1044,7 +1046,7 @@ const isDeveloperSession = () => {
     }
     try {
       const stored = JSON.parse(localStorage.getItem(signalsStorageKey()) || '[]');
-      setTopSignals(Array.isArray(stored) ? stored.filter((s: AnalysisResult) => s.signal !== 'neutral' && s.signal !== 'no_entry') : []);
+      setTopSignals(Array.isArray(stored) ? dedupeSignals(stored.filter((s: AnalysisResult) => s.signal !== 'neutral' && s.signal !== 'no_entry')) : []);
     } catch { setTopSignals([]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, user?.email, isPlanClient]);
@@ -1357,7 +1359,7 @@ const isDeveloperSession = () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
       syncTimeoutRef.current = setTimeout(() => {
         setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-          results: topSignals,
+          results: dedupeSignals(topSignals),
           timestamp: new Date().toISOString(),
           developerEmail: user?.email || '',
         })).then(() => {
@@ -1378,7 +1380,7 @@ const isDeveloperSession = () => {
     if (current.length === 0) return;
     console.log('[DEV] Startup sync — pushing', current.length, 'signals to Firestore');
     setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-      results: current,
+      results: dedupeSignals(current),
       timestamp: new Date().toISOString(),
       developerEmail: user?.email || '',
     })).then(() => {
@@ -1415,6 +1417,55 @@ const isDeveloperSession = () => {
   useEffect(() => {
     localStorage.setItem('strategy_settings', JSON.stringify(settings));
   }, [settings]);
+
+  // ── Developer settings: ONE account across desktop + phone ───────────────
+  // Manual changes made on either device are published to
+  // `shared_settings/dev_sync` and applied here in ~1 s (desktop ↔ mobile).
+  useEffect(() => {
+    if (!isDeveloperSession()) return;
+    return startDevSettingsSync({ isDeveloper: true });
+  }, [user?.uid, user?.email]);
+
+  // React state re-reads the freshly applied localStorage values so every open
+  // screen updates immediately, not only after a reload.
+  useEffect(() => {
+    const onRemote = (ev: Event) => {
+      const keys = ((ev as CustomEvent)?.detail?.keys || []) as string[];
+      if (keys.length === 0) return;
+      const has = (k: string) => keys.includes(k);
+      const read = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
+
+      if (has('strategy_settings')) {
+        try {
+          const raw = read('strategy_settings');
+          if (raw) setSettings((prev) => ({ ...prev, ...JSON.parse(raw) }));
+        } catch {}
+      }
+      if (has('auto_settings')) {
+        try {
+          const raw = read('auto_settings');
+          if (raw) setAutoSettings((prev) => ({ ...prev, ...JSON.parse(raw) }));
+        } catch {}
+      }
+      if (has('language')) {
+        const v = read('language');
+        if (v === 'ar' || v === 'en') setLang(v);
+      }
+      if (has('theme')) setIsDark(read('theme') !== 'light');
+      if (has('card_color')) {
+        const c = read('card_color');
+        if (c && /^#[0-9a-f]{6}$/i.test(c)) setCardColor(c);
+      }
+      if (has('finalyze_freemium_disabled')) setFreemiumDisabled(read('finalyze_freemium_disabled') === 'true');
+      if (has('finalyze_client_login_required')) setClientLoginRequired(read('finalyze_client_login_required') === 'true');
+      if (has('finalyze_mirror_free_allowed')) {
+        const raw = read('finalyze_mirror_free_allowed');
+        setMirrorFreeAllowed(raw == null ? true : raw !== '0');
+      }
+    };
+    window.addEventListener(DEV_SETTINGS_EVENT, onRemote as EventListener);
+    return () => window.removeEventListener(DEV_SETTINGS_EVENT, onRemote as EventListener);
+  }, []);
 
   const saveStrategySettings = () => {
     localStorage.setItem('strategy_settings', JSON.stringify(settings));
@@ -1478,7 +1529,7 @@ const isDeveloperSession = () => {
     };
 
     // Purge signals that exceeded max age
-    let updated = signalsRef.current.filter(s => {
+    let updated = dedupeSignals(signalsRef.current.filter(s => {
       const { maxAge } = getHoldPeriods(s.timeframe);
       const age = now - new Date(s.timestamp).getTime();
       if (age >= maxAge) {
@@ -1486,7 +1537,7 @@ const isDeveloperSession = () => {
         return false;
       }
       return true;
-    });
+    }));
 
     results.forEach(res => {
       if (res.signal === 'neutral' || res.signal === 'no_entry') return; // neutral hidden
@@ -1578,7 +1629,9 @@ const isDeveloperSession = () => {
       
       // Pass all signals - TopSignals component handles category-based display
       // Each category independently shows its strong signals + top 3 regular
-      const published = [...strong, ...regular];
+      // De-dupe by symbol+timeframe so the shared feed can never carry the same
+      // signal twice (the phone renders whatever is published).
+      const published = dedupeSignals([...strong, ...regular]);
       setTopSignals(published);
       // Keep the ref in sync IMMEDIATELY (not just via the [topSignals] effect,
       // which only runs after the next render). The radar calls this
@@ -1797,7 +1850,7 @@ const isDeveloperSession = () => {
       try {
         const resetToken = Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
         await setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-          results: filtered,
+          results: dedupeSignals(filtered),
           resetToken,
           timestamp: new Date().toISOString(),
           developerEmail: user?.email || '',
@@ -2069,16 +2122,17 @@ const isDeveloperSession = () => {
     try {
       const merged = signalsRef.current || [];
       if (merged.length > 0) {
+        const unique = dedupeSignals(merged);
         await Promise.race([
           setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-            results: merged.slice(-100),
+            results: unique.slice(-100),
             timestamp: new Date().toISOString(),
             developerEmail: user?.email || '',
           })),
           new Promise<null>((_, rej) => setTimeout(() => rej(new Error('shared_results timeout')), 15000))
         ]);
-        setLastSyncStatus({ ok: true, count: merged.length, time: Date.now() });
-        console.log('Radar scan synced to Firestore, count:', merged.length);
+        setLastSyncStatus({ ok: true, count: unique.length, time: Date.now() });
+        console.log('Radar scan synced to Firestore, count:', unique.length);
       }
     } catch (e) {
       console.warn('Firestore sync failed:', e);

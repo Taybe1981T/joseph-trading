@@ -14,6 +14,7 @@ import { getStatus, subscribe } from '../services/rateLimitTracker';
 import { getOpenStockExchanges } from '../lib/marketHours';
 import { isDeveloperEmail } from '../lib/clientIds';
 import { consumeSymbolAnalyses } from '../services/manualQuota';
+import { normalizeSymbolInput, registerCustomSymbol, readCustomTvMap } from '../lib/customSymbols';
 
 interface AnalysisFormProps {
   user: User | null;
@@ -192,10 +193,22 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
       return;
     }
 
-    const manualSymbols = data.symbol.split(/[,\s]+/)
+    const manualRaw = data.symbol.split(/[,\s]+/)
       .map(s => s.trim())
       .filter(s => s !== "");
-    
+
+    // Any symbol typed manually is normalized and registered: Binance pairs
+    // (BTCUSDT, BTC/USDT, BINANCE:BTCUSDT) become clean app symbols and any
+    // TradingView symbol keeps its exact chart/exchange mapping.
+    const manualSymbols: string[] = [];
+    for (const raw of manualRaw) {
+      const norm = registerCustomSymbol(raw, data.type);
+      const sym = norm?.symbol || raw.toUpperCase();
+      if (sym && !manualSymbols.includes(sym)) manualSymbols.push(sym);
+    }
+    const newCustom = manualSymbols.filter(s => !customSymbols.includes(s));
+    if (newCustom.length > 0) setCustomSymbols(prev => [...new Set([...prev, ...newCustom])]);
+
     const allSymbolsToAnalyze = [...new Set([...selectedSymbols, ...manualSymbols])]
       .filter(s => s && s.length > 1);
 
@@ -489,6 +502,38 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
                                             {lang === 'ar' ? 'لا توجد رموز إضافية مطابقة للبحث' : 'No additional matching symbols found'}
                                           </p>
                                         )}
+                                        {/* Any Binance pair / any TradingView symbol can be added here */}
+                                        {(() => {
+                                          const term = dropdownSearch.trim();
+                                          if (term.length < 2) return null;
+                                          const norm = normalizeSymbolInput(term, cat.id as MarketType);
+                                          if (!norm) return null;
+                                          return (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                if (!hasActivePlan) { setShowUpgradeOverlay(true); return; }
+                                                registerCustomSymbol(term, cat.id as MarketType);
+                                                setHiddenSymbols(prev => prev.filter(s => s !== norm.symbol));
+                                                setCustomSymbols(prev => prev.includes(norm.symbol) ? prev : [...prev, norm.symbol]);
+                                                setDropdownSearch("");
+                                                setActiveDropdown(null);
+                                                setValue("type", cat.id);
+                                              }}
+                                              className={cn(
+                                                "col-span-full flex items-center justify-center gap-2 p-3 rounded-xl text-xs font-black transition-all border border-dashed",
+                                                hasActivePlan
+                                                  ? "bg-emerald-400/10 border-emerald-400/40 text-emerald-300 hover:bg-emerald-400/20"
+                                                  : "bg-brand-text/5 border-brand-text/20 text-brand-muted opacity-60 cursor-not-allowed"
+                                              )}
+                                              dir="ltr"
+                                            >
+                                              <Plus size={12} />
+                                              {lang === 'ar' ? 'إضافة رمز' : 'Add symbol'}: {norm.symbol}
+                                              {norm.tv ? ` (${norm.tv})` : ''}
+                                            </button>
+                                          );
+                                        })()}
                                       </>
                                     );
                                   })()}
@@ -566,11 +611,16 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
                 // Append custom symbols to the last group of the category (only for active plan)
                 if (index === arr.length - 1 && hasActivePlan) {
                   const allGroupsSymbols = SYMBOL_GROUPS[selectedType]?.flatMap(g => g.symbols) || [];
-                  const customForType = customSymbols.filter(s => 
-                    (ALL_SYMBOLS_DB[selectedType] || []).includes(s) &&
-                    !hiddenSymbols.includes(s) &&
-                    !allGroupsSymbols.includes(s)
-                  );
+                  const allDbSymbols = new Set(Object.values(ALL_SYMBOLS_DB).flat());
+                  const tvMap = readCustomTvMap();
+                  const customForType = customSymbols.filter(s => {
+                    if (hiddenSymbols.includes(s) || allGroupsSymbols.includes(s)) return false;
+                    if ((ALL_SYMBOLS_DB[selectedType] || []).includes(s)) return true;
+                    // Truly new symbol: show it in the category it was added to.
+                    if (allDbSymbols.has(s)) return false;
+                    const cat = tvMap[s.toUpperCase()]?.category;
+                    return !cat || cat === selectedType;
+                  });
                   groupSymbols = [...groupSymbols, ...customForType];
                 }
 

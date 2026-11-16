@@ -4,6 +4,7 @@ import { Language } from '../../lib/i18n';
 import { mobileT, useMobileMode, isMobilePlanClient } from '../../lib/mobileMode';
 import { flagManualRadarStart } from '../../services/radarSession';
 import { getMobileSymbolGroups } from '../../services/mobileAnalysisEngine';
+import { DEV_SETTINGS_EVENT } from '../../services/devSettingsSync';
 
 interface AutoSettings {
   isEnabled: boolean; interval: number; timeframe: string; category: string;
@@ -40,6 +41,17 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
   const styleOptions = isDev ? STYLES : STYLES.filter((st) => st.id === 'day_trading');
   const [s, setS] = useState<AutoSettings>(readAuto);
   const [groups, setGroups] = useState(getMobileSymbolGroups);
+  // Developer settings are ONE shared account: a change made on the desktop
+  // (or another phone) re-reads here instantly instead of waiting for a reload.
+  useEffect(() => {
+    const sync = () => setS(readAuto());
+    window.addEventListener(DEV_SETTINGS_EVENT, sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener(DEV_SETTINGS_EVENT, sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
   const commit = (patch: Partial<AutoSettings>) => {
     const next = { ...s, ...patch }; setS(next); writeAuto(next);
     if (!s.isEnabled && patch.isEnabled) flagManualRadarStart();

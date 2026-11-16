@@ -8,6 +8,7 @@ import { db } from '../lib/firebase';
 import { Language } from '../lib/i18n';
 import { isDeveloperEmail } from '../lib/clientIds';
 import { consumeSymbolAnalyses } from './manualQuota';
+import { registerCustomSymbol, readCustomTvMap } from '../lib/customSymbols';
 import { initAudio, playStart, playCompletion, playCategoryChange } from '../lib/audioEngine';
 
 export interface MobileProgress {
@@ -68,12 +69,24 @@ export function getMobileSymbolGroups(): { id: string; label: string; symbols: s
       // Desktop parity: SYMBOL_GROUPS[cat]?.flatMap(g => g.symbols)
       symbols: ((SYMBOL_GROUPS as any)[c.id] || []).flatMap((g: any) => g.symbols || []).filter((s: string) => !hidden.includes(s)),
     })).filter((g) => g.symbols.length > 0);
-    // Desktop parity: custom symbols merged per category via ALL_SYMBOLS_DB
+    // Desktop parity: custom symbols merged per category via ALL_SYMBOLS_DB.
+    // Truly new symbols (any Binance pair / any TradingView symbol) are placed in
+    // the category they were registered under, so they never land in a bogus
+    // "custom" market group.
     const allKnown = new Set<string>();
     for (const v of Object.values(ALL_SYMBOLS_DB as any)) for (const s of (v as string[])) allKnown.add(s);
     for (const g of out) for (const s of g.symbols) allKnown.add(s);
+    const tvMap = readCustomTvMap();
     const extraCustom = custom.filter((s) => !hidden.includes(s) && !allKnown.has(s));
-    if (extraCustom.length) out.push({ id: 'custom', label: 'Custom', symbols: extraCustom });
+    for (const g of out) {
+      const extras = extraCustom.filter((s) => {
+        const cat = tvMap[s.toUpperCase()]?.category;
+        return !cat || cat === g.id;
+      });
+      if (extras.length) g.symbols = [...g.symbols, ...extras];
+    }
+    const unmapped = extraCustom.filter((s) => !tvMap[s.toUpperCase()]?.category);
+    if (unmapped.length) out.push({ id: 'custom', label: 'Custom', symbols: unmapped });
     return out;
   } catch { return []; }
 }
@@ -92,9 +105,18 @@ export function getMobileAllSymbols(): string[] {
   }
 }
 
-/** Add a custom symbol (desktop: manual add via modal) — persists to finalyze_custom_symbols. */
-export function addMobileCustomSymbol(sym: string): string[] {
-  const s = (sym || '').trim().toUpperCase().replace(/[^A-Z0-9.\-=]/g, '');
+/** Add a custom symbol (desktop: manual add via modal) — persists to finalyze_custom_symbols.
+ *  When a category is supplied, Binance/TradingView input is normalized and its
+ *  exact chart mapping is registered (any Binance pair / any TV symbol). */
+export function addMobileCustomSymbol(sym: string, category?: MarketType): string[] {
+  let s = (sym || '').trim();
+  if (!s) return getMobileAllSymbols();
+  if (category) {
+    const norm = registerCustomSymbol(s, category);
+    if (norm) s = norm.symbol;
+  } else {
+    s = s.toUpperCase().replace(/[^A-Z0-9.\-=:^]/g, '');
+  }
   if (!s) return getMobileAllSymbols();
   try {
     const raw: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');

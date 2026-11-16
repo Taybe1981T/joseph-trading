@@ -1,4 +1,5 @@
 import { getClientOwnKeyForAnalysis } from '../lib/clientScope';
+import { getCustomCryptoPair } from '../lib/customSymbols';
 
 // Remove outlier candles whose range (high-low) exceeds median*5.
 // This is a frontend safety-net: even if the API returns stale Twelve Data
@@ -42,8 +43,7 @@ function sanitizeCandles(data: any): any {
   return data;
 }
 
-const BINANCE_BASE = 'https://api.binance.com/api/v3';
-const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
+const BINANCE_BASE = 'https://api.binance.com/api/v3';const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
 const ALTERNATIVE_BASE = 'https://api.alternative.me';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
@@ -107,10 +107,18 @@ export function getApiBaseUrl(): string {
 }
 
 function findCryptoPair(symbol: string): string | null {
-  const upper = symbol.toUpperCase().replace(/ /g, '');
+  // Explicitly registered pair (any Binance market, not only USDT).
+  const customPair = getCustomCryptoPair(symbol);
+  if (customPair) return customPair;
+
+  const upper = symbol.toUpperCase().replace(/ /g, '').replace(/^[A-Z0-9._-]{2,20}:/, '').replace(/[/\\_-]/g, '');
   if (CRYPTO_MAP[upper]) return CRYPTO_MAP[upper];
-  if (upper.endsWith('USD') || upper.endsWith('USDT')) {
-    const base = upper.replace(/USD(T)?$/, '');
+  if (upper.endsWith('USDT')) {
+    const base = upper.slice(0, -4);
+    if (base && base.length <= 10) return `${base}USDT`;
+  }
+  if (upper.endsWith('USD')) {
+    const base = upper.slice(0, -3);
     if (base && base.length <= 10) return `${base}USDT`;
   }
   const knownCoins = ['BTC', 'ETH', 'SOL', 'XRP', 'DOGE', 'ADA', 'DOT', 'MATIC', 'LINK',
@@ -246,7 +254,10 @@ export async function fetchCryptoPricesDirect(): Promise<any> {
 }
 
 function symbolToYahooForex(symbol: string): string | null {
-  const upper = symbol.toUpperCase().replace(/ /g, '');
+  // Custom TradingView inputs (NASDAQ:TSLA, FX:EURUSD, TSE:7203) are stored
+  // with their exchange only for the chart; market data uses the bare ticker.
+  const stripped = symbol.toUpperCase().replace(/ /g, '').replace(/^[A-Z0-9._-]{2,20}:/, '');
+  const upper = stripped;
 
   // Metals mapping
   const metalMap: Record<string, string> = {
@@ -266,6 +277,9 @@ function symbolToYahooForex(symbol: string): string | null {
 
   // Forex pairs: EURUSD → EURUSD=X
   if (/^[A-Z]{6}$/.test(upper)) return `${upper}=X`;
+
+  // Yahoo exchange suffixes (Tokyo 7203.T, London VOD.L, Paris MC.PA, ...).
+  if (/^[A-Z0-9-]{1,20}\.[A-Z]{1,3}$/.test(upper)) return upper;
 
   // Crypto: BTCUSD → BTC-USD
   if (upper.endsWith('USD') && !upper.endsWith('USDT')) {
@@ -306,7 +320,7 @@ async function fetchYahooFinance(symbol: string, timeframe: string): Promise<any
   const range = yahooRange(timeframe);
 
   // Try multiple symbol formats like the old server did
-  const base = symbol.toUpperCase().replace(/ /g, '').replace('USD', '').replace('-USD', '').replace('=X', '');
+  const base = symbol.toUpperCase().replace(/ /g, '').replace(/^[A-Z0-9._-]{2,20}:/, '').replace('USD', '').replace('-USD', '').replace('=X', '');
   const attempts = [
     yahooSymbol,                    // EURGBP=X
     `${base}-USD`,                  // EURGBP-USD (crypto fallback)
