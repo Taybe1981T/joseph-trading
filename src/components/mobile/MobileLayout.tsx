@@ -111,6 +111,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     return p ? { current: p.current, total: p.total, index: p.index, category: p.category } : null;
   });
   const toggleAutoAnalysis = useCallback(() => {
+    if (isDev) {
+      // Developer on phone: purely local, stable toggle. Never derived from
+      // persisted storage or the desktop, so it never flickers ON/START.
+      setAutoAnalysisOn((prev) => !prev);
+      return;
+    }
     try {
       const s = readMobileAuto();
       const v = !s.isEnabled;
@@ -151,7 +157,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         // the synced ON/OFF state so both devices agree.
         const devNow = detectMobileMode().mode === 'developer';
         setAutoAnalysisOn((prev) => {
-          const v = devNow ? readMobileAuto().isEnabled : (isMobileRadarOn() && readMobileAuto().isEnabled);
+          if (devNow) return prev; // purely local for developer
+          const v = isMobileRadarOn() && readMobileAuto().isEnabled;
           return prev === v ? prev : v;
         });
         // Keep the bar in step with the engine (it may have been started by the
@@ -590,16 +597,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         // first render cannot mistake a developer for a client.
         const devNow = isDev || detectMobileMode().mode === 'developer';
         if (devNow) {
-          // Fresh session (app closed and reopened): never auto-run/show — the
-          // user starts it manually. Same rule as desktop developer.
-          if (isFreshRadarSession()) {
-            setAutoAnalysisOn(false);
-            setRadarProgress(null);
-            return;
-          }
-          // Shared developer account: the desktop is the single engine. The
-          // phone mirrors the setting but must not start a duplicate radar.
-          setAutoAnalysisOn((prev) => (prev === s.isEnabled ? prev : s.isEnabled));
+          // Developer phone: radar toggle is purely local and stable. Never
+          // derived from persisted storage or the desktop, so it never flickers.
           return;
         }
         if (!devNow && !isRadarArmed()) {
