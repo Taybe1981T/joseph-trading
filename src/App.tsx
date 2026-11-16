@@ -1413,10 +1413,11 @@ const isDeveloperSession = () => {
     const isRunning = !isScanningFinished && autoSettings.isEnabled;
     setDoc(doc(db, 'shared_status', 'latest'), {
       isRunning,
+      progress: isRunning ? (radarProgress ? { current: radarProgress.current, total: radarProgress.total, index: radarProgress.index, category: radarProgress.exchange } : null) : null,
       timestamp: new Date().toISOString(),
       developerEmail: user?.email || '',
     }).catch(e => console.warn('[DEV] Failed to sync radar status:', e));
-  }, [isScanningFinished, autoSettings.isEnabled, user]);
+  }, [isScanningFinished, autoSettings.isEnabled, user, radarProgress]);
 
   useEffect(() => {
     localStorage.setItem('language', lang);

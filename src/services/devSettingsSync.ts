@@ -159,10 +159,25 @@ export function startDevSettingsSync(opts: DevSettingsSyncOptions): () => void {
             if (!Object.prototype.hasOwnProperty.call(values, key)) continue;
             const incoming = values[key];
             if (typeof incoming !== 'string') continue;
+            let toStore = incoming;
+            // The radar on/off toggle is PER-DEVICE: a developer pressing it on
+            // the desktop must NOT start/stop the radar on the phone (and vice
+            // versa). Other auto_settings fields (interval, category, volume,
+            // ...) still sync. Preserve the local isEnabled on apply.
+            if (key === 'auto_settings') {
+              try {
+                const local = JSON.parse(localStorage.getItem(key) || '{}');
+                const remote = JSON.parse(incoming);
+                if (local && typeof local === 'object' && local.isEnabled !== undefined) {
+                  remote.isEnabled = local.isEnabled;
+                }
+                toStore = JSON.stringify(remote);
+              } catch {}
+            }
             let current: string | null = null;
             try { current = localStorage.getItem(key); } catch {}
-            if (current === incoming) continue;
-            try { localStorage.setItem(key, incoming); } catch {}
+            if (current === toStore) continue;
+            try { localStorage.setItem(key, toStore); } catch {}
             changed.push(key);
           }
           // Remote is authoritative: rebase the poll so we don't bounce it back.
