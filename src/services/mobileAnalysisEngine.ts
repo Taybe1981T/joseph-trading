@@ -13,6 +13,9 @@ import { initAudio, playStart, playCompletion, playCategoryChange } from '../lib
 
 export interface MobileProgress {
   current: string; total: number; index: number; failed: number; exchange?: string; category?: string;
+  /** Position within the CURRENT category (e.g. crypto 37/100), so the UI never
+   *  shows a global counter that looks like the category grew past its size. */
+  catIndex?: number; catTotal?: number;
 }
 
 /** Scoped per-account signal storage key (mobile parity with desktop scoping). */
@@ -47,10 +50,15 @@ export function readMobileAuto(): AutoAnalysisSettings {
   return { isEnabled: false, interval: 15, timeframe: '1d', category: 'all', tradingStyle: TradingStyle.DAY_TRADING, volume: 0.8, showAllSignals: false } as AutoAnalysisSettings;
 }
 
+/** The crypto category is a FIXED 100-symbol universe. Custom crypto entries
+ *  must never enlarge it — otherwise the radar silently scans >100 symbols. */
+export const CRYPTO_SCAN_LIMIT = 100;
+
 /** ── Category-aware symbol picker (same groups as AnalysisForm) ──
  * Ported from desktop AnalysisForm logic:
  * - same visible groups (SYMBOL_GROUPS) + same full symbol universe (ALL_SYMBOLS_DB)
  * - honors finalyze_hidden_symbols + finalyze_custom_symbols just like desktop
+ * - crypto is hard-capped at exactly 100 symbols (never grows with custom symbols)
  * - helper below to add/remove custom or hide/unhide symbols (mirrors desktop modals)
  */
 export function getMobileSymbolGroups(): { id: string; label: string; symbols: string[] }[] {
@@ -63,30 +71,38 @@ export function getMobileSymbolGroups(): { id: string; label: string; symbols: s
       { id: 'stocks', label: 'Stocks' },
       { id: 'metals', label: 'Metals' },
     ];
-    const out = cats.map((c) => ({
-      id: c.id,
-      label: c.label,
+    const out = cats.map((c) => {
       // Desktop parity: SYMBOL_GROUPS[cat]?.flatMap(g => g.symbols)
-      symbols: ((SYMBOL_GROUPS as any)[c.id] || []).flatMap((g: any) => g.symbols || []).filter((s: string) => !hidden.includes(s)),
-    })).filter((g) => g.symbols.length > 0);
+      const base = ((SYMBOL_GROUPS as any)[c.id] || []).flatMap((g: any) => g.symbols || []).filter((s: string) => !hidden.includes(s));
+      const unique = [...new Set<string>(base)];
+      return {
+        id: c.id,
+        label: c.label,
+        // Crypto can never exceed the curated 100-symbol universe.
+        symbols: c.id === 'crypto' ? unique.slice(0, CRYPTO_SCAN_LIMIT) : unique,
+      };
+    }).filter((g) => g.symbols.length > 0);
     // Desktop parity: custom symbols merged per category via ALL_SYMBOLS_DB.
     // Truly new symbols (any Binance pair / any TradingView symbol) are placed in
-    // the category they were registered under, so they never land in a bogus
-    // "custom" market group.
+    // the category they were registered under. Symbols with no registered
+    // category go to "Custom" ONLY — they used to be appended to every category,
+    // which is what pushed crypto past its 100-symbol limit.
     const allKnown = new Set<string>();
     for (const v of Object.values(ALL_SYMBOLS_DB as any)) for (const s of (v as string[])) allKnown.add(s);
     for (const g of out) for (const s of g.symbols) allKnown.add(s);
     const tvMap = readCustomTvMap();
     const extraCustom = custom.filter((s) => !hidden.includes(s) && !allKnown.has(s));
     for (const g of out) {
-      const extras = extraCustom.filter((s) => {
-        const cat = tvMap[s.toUpperCase()]?.category;
-        return !cat || cat === g.id;
-      });
+      if (g.id === 'crypto' || g.id === 'custom') continue;
+      const extras = extraCustom.filter((s) => tvMap[s.toUpperCase()]?.category === g.id);
       if (extras.length) g.symbols = [...g.symbols, ...extras];
     }
+    // Custom crypto entries stay reachable under "Custom" but never join the
+    // fixed 100-symbol crypto category.
+    const cryptoCustom = extraCustom.filter((s) => tvMap[s.toUpperCase()]?.category === 'crypto');
     const unmapped = extraCustom.filter((s) => !tvMap[s.toUpperCase()]?.category);
-    if (unmapped.length) out.push({ id: 'custom', label: 'Custom', symbols: unmapped });
+    const customSyms = [...new Set([...cryptoCustom, ...unmapped])];
+    if (customSyms.length) out.push({ id: 'custom', label: 'Custom', symbols: customSyms });
     return out;
   } catch { return []; }
 }
@@ -301,9 +317,14 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
       for (const ex of getOpenStockExchanges()) jobs.push({ cat, syms: ex.symbols as string[], exKey: ex.key });
       continue;
     }
-    // FULL category list — the crypto category is the whole top-150 liquidity
-    // list (no 15-symbol cap), exactly like the desktop radar.
-    jobs.push({ cat, syms: g.symbols });
+    // FULL category list — the crypto category is EXACTLY the curated 100-symbol
+    // universe (never more, even if custom symbols were registered).
+    if (cat === 'crypto') {
+      const cryptoSyms = [...new Set(g.symbols)].slice(0, CRYPTO_SCAN_LIMIT);
+      if (cryptoSyms.length) jobs.push({ cat, syms: cryptoSyms });
+      continue;
+    }
+    jobs.push({ cat, syms: [...new Set(g.symbols)] });
   }
   // Flatten the jobs into ONE ordered plan. The same deterministic order is
   // rebuilt on every run, so a refresh can resume at the exact symbol where the
@@ -312,6 +333,14 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
   const plan: { cat: string; sym: string; exKey?: any }[] = [];
   for (const j of jobs) for (const sym of j.syms) plan.push({ cat: j.cat, sym, exKey: j.exKey });
   const grandTotal = plan.length;
+  // Per-category offsets: the counter can show "crypto 37/100" instead of a
+  // global index that climbs past 100 while crypto is the active category.
+  const catBounds = new Map<string, { start: number; total: number }>();
+  plan.forEach((p, i) => {
+    const b = catBounds.get(p.cat);
+    if (b) b.total++;
+    else catBounds.set(p.cat, { start: i, total: 1 });
+  });
   let startIdx = 0;
   if (resumeFrom) {
     const at = plan.findIndex((p) => p.sym === String(resumeFrom).toUpperCase().trim());
@@ -337,6 +366,8 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
     const prog: MobileProgress = {
       current: sym, total: grandTotal, index: done, failed,
       exchange: exKey ? exchangeLabel(exKey, lang) : undefined, category: cat,
+      catIndex: (done - (catBounds.get(cat)?.start ?? 0)),
+      catTotal: catBounds.get(cat)?.total ?? grandTotal,
     };
     // Emit synchronously: the progress bar must paint the instant the user
     // presses START, never after the first network round-trip.
@@ -371,7 +402,7 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
     const cur = readMobileAuto();
     localStorage.setItem('auto_settings', JSON.stringify({ ...cur, lastFinishedAt: Date.now() }));
   } catch {}
-  return { scanned: scanned.length, failed, fresh };
+  return { scanned: scanned.length, failed, fresh, completed: finished };
 }
 
 // ── Mobile radar run state (single source of truth for button + bar) ─────────
@@ -402,6 +433,7 @@ export function readMobileRadarResume(): MobileRadarResume | null {
 
 let mRadarTimer: ReturnType<typeof setTimeout> | null = null;
 let mRadarOn = false;
+let mRadarRunId = 0;
 let mRadarProg: MobileProgress | null = null;
 let mRadarOnProg: ((p: MobileProgress) => void) | null = null;
 let mRadarOnDone: ((r: any) => void) | null = null;
@@ -429,6 +461,8 @@ export function subscribeMobileRadar(cb: (s: { running: boolean; progress: Mobil
 
 export function stopMobileRadar() {
   mRadarOn = false;
+  // Supersede any in-flight run so its finalizer cannot turn a NEW run off.
+  mRadarRunId++;
   if (mRadarTimer) { clearTimeout(mRadarTimer); mRadarTimer = null; }
   mRadarProg = null;
   writeSessionValue(M_RADAR_ON_KEY, null);
@@ -452,30 +486,43 @@ export async function startMobileRadar(
     return;
   }
   mRadarOn = true;
+  const runId = ++mRadarRunId;
   writeSessionValue(M_RADAR_ON_KEY, '1');
   emitMobileRadar();
 
-  // Resume only the FIRST run after a page refresh; later interval runs are
-  // full scans.
+  // Resume only the FIRST run after a page refresh; a manual start is a full scan.
   let pendingResume = opts?.resume ? readMobileRadarResume() : null;
+
+  /** End this run. Only the owning run may do it, so a stop+start during the
+   *  network call cannot have the old loop switch the new one off. */
+  const finishRun = () => {
+    if (runId !== mRadarRunId) return;
+    mRadarOn = false;
+    writeSessionValue(M_RADAR_ON_KEY, null);
+    writeMobileRadarResume(null);
+    mRadarProg = null;
+    emitMobileRadar();
+  };
 
   const loop = async () => {
     mRadarTimer = null;
-    if (!mRadarOn) { mRadarProg = null; emitMobileRadar(); return; }
+    if (!mRadarOn || runId !== mRadarRunId) { if (runId === mRadarRunId) { mRadarProg = null; emitMobileRadar(); } return; }
     const resumeSym = pendingResume?.symbol ?? null;
     pendingResume = null;
     try {
       const r = await runMobileRadar(uid, email, (p) => {
+        if (runId !== mRadarRunId) return;
         mRadarProg = p;
         mRadarOnProg?.(p);
         emitMobileRadar();
       }, resumeSym);
+      if (runId !== mRadarRunId) return;
       mRadarOnDone?.(r);
-      mRadarProg = null;
-      emitMobileRadar();
     } catch {}
-    if (!mRadarOn) { mRadarProg = null; emitMobileRadar(); return; }
-    mRadarTimer = setTimeout(() => { void loop(); }, (readMobileAuto().interval || 15) * 60000);
+    // COMPLETE-AND-STOP: a scan pass ends the radar. Auto-analysis must finish
+    // and switch OFF — it never reschedules itself on the interval timer, so it
+    // can no longer run forever.
+    finishRun();
   };
 
   const auto = readMobileAuto();

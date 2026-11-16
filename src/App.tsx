@@ -2032,7 +2032,9 @@ const isDeveloperSession = () => {
               (ALL_SYMBOLS_DB[cat] || []).includes(x) && !g.includes(x) &&
               (!region || regional.has(x))
             );
-            return [...gFiltered, ...c].filter(x => !hidden.includes(x));
+            const list = [...new Set([...gFiltered, ...c])].filter(x => !hidden.includes(x));
+            // The crypto category is a fixed 100-symbol universe — never larger.
+            return cat === 'crypto' ? list.slice(0, SYMBOL_CATEGORIES.crypto.length) : list;
           })()
         : (() => {
             const free = FREE_SYMBOLS[cat] || [];
@@ -2048,6 +2050,11 @@ const isDeveloperSession = () => {
         if (ri >= 0) startSymIdx = ri;
         else console.warn(`[radar] resume symbol ${savedResumeSymbol} not in this job — restarting the category`);
       }
+      // Per-category counter: `analyzedCount` is global across the whole scan, so
+      // using it against `syms.length` made the UI show e.g. "129/100" while the
+      // crypto category (100 symbols) was active. Offset by the count before
+      // this job so the counter never exceeds the category size.
+      const jobStartAnalyzed = analyzedCount - startSymIdx;
 
       for (let si = startSymIdx; si < syms.length; si++) {
         const sym = syms[si];
@@ -2066,7 +2073,7 @@ const isDeveloperSession = () => {
 
         // Persist BEFORE analyzing: a refresh during this symbol resumes here.
         saveProgress(jobIdx, sym);
-        setRadarProgress({ current: sym, total: syms.length, index: analyzedCount, failed: scanFailed, category: cat, exchange: exchangeLbl });
+        setRadarProgress({ current: sym, total: syms.length, index: analyzedCount - jobStartAnalyzed, failed: scanFailed, category: cat, exchange: exchangeLbl });
 
         let lastError: any = null;
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -2127,7 +2134,7 @@ const isDeveloperSession = () => {
           console.error(`Radar Error [${sym}]:`, lastError.message);
           scanFailed++;
           analyzedCount++;
-          setRadarProgress({ current: sym, total: syms.length, index: analyzedCount, failed: scanFailed, category: cat, exchange: exchangeLbl });
+          setRadarProgress({ current: sym, total: syms.length, index: analyzedCount - jobStartAnalyzed, failed: scanFailed, category: cat, exchange: exchangeLbl });
           saveProgress(jobIdx, syms[si + 1] || null);
           await new Promise(r => setTimeout(r, 3000));
         } else {
@@ -2366,11 +2373,13 @@ const isDeveloperSession = () => {
         radarBusyRef.current = false;
         // A newer schedule replaced this run: it owns the timer and the UI.
         if (token !== radarTokenRef.current) return;
-        // Save UTC timestamp so catch-up works after tab throttling
+        // Save the finish timestamp AND switch the radar OFF. Auto-analysis must
+        // complete and stop: one full pass ends the run instead of re-scanning
+        // forever on the interval timer.
         const nowTs = Date.now();
         try {
           setAutoSettings(prev => {
-            const next = { ...prev, lastFinishedAt: nowTs };
+            const next = { ...prev, isEnabled: false, lastFinishedAt: nowTs };
             localStorage.setItem('auto_settings', JSON.stringify(next));
             if (ownsPaidPlan) localStorage.setItem(cxnAutoKey, JSON.stringify(next));
             return next;
@@ -2383,16 +2392,6 @@ const isDeveloperSession = () => {
         playAudio('completion');
         setShowRadarComplete(true);
         setTimeout(() => setShowRadarComplete(false), 30000);
-
-        if (autoSettingsRef.current.isEnabled) {
-          const ms = (autoSettingsRef.current.interval || 15) * 60000;
-          radarTimerRef.current = setTimeout(() => {
-            radarTimerRef.current = null;
-            if (token !== radarTokenRef.current) return;
-            setIsScanningFinished(false);
-            void loop();
-          }, ms);
-        }
       }
     };
 

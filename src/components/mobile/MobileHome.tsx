@@ -17,7 +17,7 @@ interface MobileHomeProps {
   onAutoTradeToggle: (enabled: boolean) => void;
   radarOn: boolean;
   radarLabel: string | null;
-  radarProgress: { current: string; total: number; index: number; category?: string } | null;
+  radarProgress: { current: string; total: number; index: number; category?: string; catIndex?: number; catTotal?: number } | null;
   signalsAllowed: boolean;
 }
 
@@ -121,7 +121,7 @@ export function MobileHome({
               </span>
             )}
             <span style={{ marginLeft: 'auto', fontSize: 14, fontWeight: 900, color: '#111827', flexShrink: 0 }} dir="ltr">
-              {radarProgress.index}/{radarProgress.total}
+              {(radarProgress.catIndex ?? radarProgress.index)}/{(radarProgress.catTotal ?? radarProgress.total)}
             </span>
           </div>
 

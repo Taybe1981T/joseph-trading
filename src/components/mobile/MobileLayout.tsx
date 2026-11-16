@@ -110,9 +110,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const [autoAnalysisOn, setAutoAnalysisOn] = useState(() => isMobileRadarOn() || isMobileRadarPersisted());
   // Seed from the engine — or from the persisted resume point after a refresh —
   // so the bar is visible immediately on remount instead of after a poll.
-  const [radarProgress, setRadarProgress] = useState<{ current: string; total: number; index: number; category?: string } | null>(() => {
+  const [radarProgress, setRadarProgress] = useState<{ current: string; total: number; index: number; category?: string; catIndex?: number; catTotal?: number } | null>(() => {
     const p = getMobileRadarProgress();
-    if (p) return { current: p.current, total: p.total, index: p.index, category: p.category };
+    if (p) return { current: p.current, total: p.total, index: p.index, category: p.category, catIndex: p.catIndex, catTotal: p.catTotal };
     if (isMobileRadarPersisted()) {
       const r = readMobileRadarResume();
       if (r) return { current: r.symbol, total: r.total, index: r.index, category: r.category };
@@ -124,7 +124,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     setRadarProgress((prev) => {
       if (!progress) return prev === null ? prev : null;
       if (prev && prev.current === progress.current && prev.total === progress.total && prev.index === progress.index && prev.category === progress.category) return prev;
-      return { current: progress.current, total: progress.total, index: progress.index, category: progress.category };
+      return { current: progress.current, total: progress.total, index: progress.index, category: progress.category, catIndex: progress.catIndex, catTotal: progress.catTotal };
     });
   }), []);
   const toggleAutoAnalysis = useCallback(() => {
