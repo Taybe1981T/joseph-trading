@@ -234,7 +234,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
       // mirror drops its open copies and history on its next poll.
       if (isDeveloper) {
         try { await broadcastMirrorEvent(resetEventFor(devEmail, START_BALANCE)); } catch {}
-        try { await publishDevBook([], devEmail); } catch {}
+        try { await publishDevBook([], devEmail, { force: true }); } catch {}
       }
       try { window.dispatchEvent(new CustomEvent('mobile-trades-changed', { detail: { action: 'reset' } })); } catch {}
       await refreshAccount();

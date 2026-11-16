@@ -27,6 +27,7 @@ import {
 } from './paperTradingService';
 import { notionalInUSD } from '../lib/positionMath';
 import { tradeQtyFor, resolveRiskLevels } from './tradingValues';
+import { getSymbolCategory } from '../lib/signalFeed';
 import type { AnalysisResult } from '../types';
 import {
   isOpened as guardIsOpened,
@@ -185,6 +186,10 @@ export interface DevBookTrade {
   entry?: number | null;
   sl?: number | null;
   tp?: number | null;
+  /** The developer's own lot, copied 1:1 so free mirrors hold the SAME trade. */
+  qty?: number | null;
+  /** The developer's resolved category (indices/energy/custom included). */
+  category?: string | null;
 }
 
 /**
@@ -196,10 +201,14 @@ export interface DevBookTrade {
  * realtime snapshot, or a free device that was offline). This is what makes a
  * free/guest account end up with exactly the same open trades as the developer.
  */
+/** Pending unconfirmed shrink of the developer book (two-strike guard). */
+let _pendingBookShrink: { sig: string; at: number } | null = null;
+
 export async function publishDevBook(
-  trades: { symbol?: string; status?: string; side?: string; openedAt?: number; entryPrice?: number | null; sl?: number | null; tp?: number | null }[],
+  trades: { symbol?: string; status?: string; side?: string; openedAt?: number; entryPrice?: number | null; sl?: number | null; tp?: number | null; qty?: number | null }[],
   origin: string,
-): Promise<void> {
+  publishOpts?: { force?: boolean },
+): Promise<boolean> {
   try {
     const open = (trades || []).filter((t) => t && t.status === 'open' && t.symbol);
     const bySymbol = new Map<string, DevBookTrade>();
@@ -212,20 +221,60 @@ export async function publishDevBook(
         entry: (t as any).entryPrice ?? null,
         sl: (t as any).sl ?? null,
         tp: (t as any).tp ?? null,
+        qty: Number((t as any).qty) > 0 ? Number((t as any).qty) : null,
+        category: (t as any).category ? String((t as any).category) : null,
       };
       const prev = bySymbol.get(sym);
       if (!prev || rec.openedAt < prev.openedAt) bySymbol.set(sym, rec);
     }
-    const openTrades = [...bySymbol.values()];
+    // Deterministic ORDER across desktop + phone: oldest position first. Free
+    // mirrors adopt in this exact order, so their trade list matches the
+    // developer's instead of depending on each device's Firestore read order.
+    const openTrades = [...bySymbol.values()].sort((a, b) => a.openedAt - b.openedAt);
     const openSymbols = openTrades.map((t) => t.symbol);
+
+    // ── SHRINK GUARD ──────────────────────────────────────────────────────
+    // A device with a stale/offline Firestore cache must never broadcast a
+    // SMALLER book than the one already published: free accounts would delete
+    // perfectly valid copies (this is what made some free views show 1 or 2 of
+    // the developer's 3 trades). Removals are only written when the same
+    // smaller set is observed twice, or when the local user just closed/reset
+    // (explicit `force`).
+    let prevSymbols: string[] = [];
+    try {
+      const cur = await getDoc(doc(db, DEV_BOOK_DOC.collection, DEV_BOOK_DOC.id));
+      if (cur.exists()) {
+        const d: any = cur.data();
+        if (Array.isArray(d?.openSymbols)) prevSymbols = d.openSymbols.map((s: any) => String(s || '').toUpperCase());
+      }
+    } catch {
+      // Can't verify the current book → do not risk shrinking it.
+      return false;
+    }
+    const nextSet = new Set(openSymbols);
+    const shrinks = prevSymbols.some((s) => !nextSet.has(s));
+    if (shrinks && !publishOpts?.force) {
+      const sig = openSymbols.slice().sort().join(',');
+      const nowMs = Date.now();
+      if (!_pendingBookShrink || _pendingBookShrink.sig !== sig || nowMs - _pendingBookShrink.at < 8000) {
+        _pendingBookShrink = { sig, at: nowMs };
+        console.warn('[TradeMirror] book shrink not confirmed yet — keeping the previous developer book');
+        return false;
+      }
+    }
+    _pendingBookShrink = null;
+
     await setDoc(doc(db, DEV_BOOK_DOC.collection, DEV_BOOK_DOC.id), {
       openSymbols,
       openTrades,
+      openCount: openTrades.length,
       updatedAt: Date.now(),
       origin,
     }, { merge: true });
+    return true;
   } catch (e) {
     console.warn('[TradeMirror] book publish failed:', (e as any)?.message || e);
+    return false;
   }
 }
 
@@ -365,6 +414,7 @@ async function runMirrorPass(opts: {
   // to skip OPEN events left over from before a reset (see the open branch).
   let devHeld: Set<string> | null = null;
   let devBookTrades: DevBookTrade[] = [];
+  let devBookUpdatedAt = 0;
   if (opts.mode === 'free') {
     // ONE COPY PER SYMBOL: an older build could let overlapping passes open the
     // same symbol several times. Keep the earliest copy, drop the extras.
@@ -392,6 +442,7 @@ async function runMirrorPass(opts: {
       if (bookFresh && Array.isArray(book.openSymbols)) {
         const held = new Set<string>(book.openSymbols.map((s: any) => String(s || '').toUpperCase()));
         devHeld = held;
+        devBookUpdatedAt = Number(book.updatedAt) || 0;
         // Rich entries (side, SL/TP, openedAt) — used for ADOPTION of missed trades.
         if (Array.isArray(book.openTrades)) {
           devBookTrades = book.openTrades
@@ -402,15 +453,18 @@ async function runMirrorPass(opts: {
               entry: (e?.entry ?? e?.entryPrice ?? null) as number | null,
               sl: (e?.sl ?? null) as number | null,
               tp: (e?.tp ?? null) as number | null,
+              qty: Number(e?.qty) > 0 ? Number(e?.qty) : null,
+              category: e?.category ? String(e.category) : null,
             }))
-            .filter((e: DevBookTrade) => e.symbol);
+            .filter((e: DevBookTrade) => e.symbol)
+            .sort((a: DevBookTrade, b: DevBookTrade) => a.openedAt - b.openedAt);
         } else {
           // Legacy book (symbols only) — adopt side from displayed signals if known.
           devBookTrades = book.openSymbols.map((s: any) => {
             const sym = String(s || '').toUpperCase();
             const sig = (opts.displayedSignals || []).find((x) => String(x?.symbol || '').toUpperCase() === sym);
             const side: 'buy' | 'sell' = sig?.signal === 'sell' || sig?.signal === 'strong_sell' ? 'sell' : 'buy';
-            return { symbol: sym, side, openedAt: Date.now(), entry: sig?.entryPrice ?? null, sl: sig?.stopLoss ?? null, tp: sig?.takeProfit ?? null };
+            return { symbol: sym, side, openedAt: Date.now(), entry: sig?.entryPrice ?? null, sl: sig?.stopLoss ?? null, tp: sig?.takeProfit ?? null, category: getSymbolCategory(sym) };
           });
         }
         const stale = allTrades.filter((t: any) =>
@@ -449,32 +503,56 @@ async function runMirrorPass(opts: {
 
   // Shared open logic — used BOTH by the event loop and by the book ADOPTION
   // pass below. Returns true when a copy was actually created.
+  //
+  // `copy` carries the DEVELOPER's own trade values (entry/lot) and `loose`
+  // marks a FREE-book copy: a free/guest account is a view-only clone of the
+  // developer's book, so it must NEVER be blocked by local gates (market hours,
+  // reopen cooldown, available margin, quote-feed hiccups). Those gates only
+  // make sense when a PAID client trades their own analysis.
   const tryOpenCopy = async (
     sym: string,
     side: 'buy' | 'sell',
     devSl: number | null,
     devTp: number | null,
     eventId: string | null,
+    copy?: { entry?: number | null; qty?: number | null; loose?: boolean; category?: string | null },
   ): Promise<boolean> => {
+    const loose = copy?.loose === true;
     if (openFor(sym)) { if (eventId) markSeen(eventId); return false; }
     if (guardIsOpened(sym) && openedThisPoll.has(sym)) { if (eventId) markSeen(eventId); return false; }
     if (guardIsOpened(sym)) {
       guardClearOpened(sym);
       console.warn(`[TradeMirror] stuck guard for ${sym} — clearing so mirror open can proceed`);
     }
-    const lastClose = guardLastClosedAt(sym);
-    if (lastClose && Date.now() - lastClose < 8000) { console.log(`[TradeMirror] retry ${sym}: reopen cooldown`); return false; }
-    const cat = detectMirrorCategory(sym);
-    if (!isMarketOpen(cat, sym)) { console.log(`[TradeMirror] retry ${sym}: market closed (${cat})`); return false; }
-    const price = await getLivePrice(sym).catch(() => null);
-    if (price == null || !(price > 0)) { console.log(`[TradeMirror] retry ${sym}: no price`); return false; }
-    const q = tradeQtyFor(cat, sym, balance);
+    if (!loose) {
+      const lastClose = guardLastClosedAt(sym);
+      if (lastClose && Date.now() - lastClose < 8000) { console.log(`[TradeMirror] retry ${sym}: reopen cooldown`); return false; }
+    }
+    // The developer's own category when the book has it (indices, energy and
+    // custom symbols included); the shared resolver otherwise. This keeps the
+    // copy's P&L/sizing math identical to the developer's, not just its count.
+    const cat = (copy?.category ? String(copy.category) : '') || getSymbolCategory(sym) || detectMirrorCategory(sym);
+    if (!loose && !isMarketOpen(cat, sym)) { console.log(`[TradeMirror] retry ${sym}: market closed (${cat})`); return false; }
+    // Prefer the developer's OWN entry price: the copy must represent the same
+    // trade even when the local quote feed is slow or missing this symbol.
+    let price: number | null = Number(copy?.entry);
+    if (!(typeof price === 'number' && isFinite(price) && price > 0)) {
+      price = await getLivePrice(sym).catch(() => null);
+    }
+    if (price == null || !(price > 0)) { if (!loose) console.log(`[TradeMirror] retry ${sym}: no price`); return false; }
+    // Same sizing rule as the developer's trade when the book carries it;
+    // otherwise the standard balance-scaled lot for this account.
+    let q = Number(copy?.qty);
+    if (!(typeof q === 'number' && isFinite(q) && q > 0)) q = tradeQtyFor(cat, sym, balance);
     const requiredMargin = notionalInUSD(cat, sym, price, q) / leverage;
-    if (requiredMargin > balance) { console.log(`[TradeMirror] retry ${sym}: insufficient margin (${requiredMargin.toFixed(2)} > ${balance.toFixed(2)})`); return false; }
+    // Margin is only a sanity check here (opening never debits the paper
+    // balance). A free book must stay identical to the developer's, so it is
+    // never skipped because of it.
+    if (!loose && requiredMargin > balance) { console.log(`[TradeMirror] retry ${sym}: insufficient margin (${requiredMargin.toFixed(2)} > ${balance.toFixed(2)})`); return false; }
     const isBuy = side === 'buy';
     const levels = resolveRiskLevels({
-      category: cat, symbol: sym, entry: price, isBuy, qty: q, balance,
-      signalSl: devSl, signalTp: devTp,
+      category: cat, symbol: sym, entry: price, isBuy, qty: q,
+      balance, signalSl: devSl, signalTp: devTp,
     });
     await store.addTrade({
       symbol: sym, category: cat, side, qty: q, entryPrice: price,
@@ -492,9 +570,13 @@ async function runMirrorPass(opts: {
     allTrades = await store.listTrades().catch(() => allTrades);
     const acc2 = await store.getAccount().catch(() => null);
     if (acc2) { balance = acc2.balance; leverage = acc2.leverage; }
-    try { opts.playChampagne(); } catch {}
-    try { opts.notify(`نسخ تلقائي: ${side === 'buy' ? 'شراء' : 'بيع'} ${sym}`); } catch {}
-    console.log(`[TradeMirror] mirrored open ${side} ${sym}`);
+    // Book clones are silent: a first sync can adopt several positions at once
+    // and must not fire a burst of sounds/notifications.
+    if (!loose) {
+      try { opts.playChampagne(); } catch {}
+      try { opts.notify(`نسخ تلقائي: ${side === 'buy' ? 'شراء' : 'بيع'} ${sym}`); } catch {}
+    }
+    console.log(`[TradeMirror] mirrored open ${side} ${sym}${loose ? ' (book clone)' : ''}`);
     return true;
   };
 
@@ -503,12 +585,24 @@ async function runMirrorPass(opts: {
   // EXACTLY the same open trades as the developer, even if the open event was
   // missed, TTL'd, or the device was offline when it was broadcast.
   if (opts.mode === 'free' && devHeld && opts.allowOpen !== false) {
-    for (const entry of devBookTrades) {
+    // NEVER resurrect a book that predates the developer's last RESET. A reset
+    // empties the book too, but if this device reads the previous (still full)
+    // book first it would re-open exactly what the reset just removed.
+    const appliedResetAt = Number(localStorage.getItem(resetKey) || 0);
+    const bookIsPostReset = !appliedResetAt || devBookUpdatedAt > appliedResetAt - 5000;
+    let adopted = 0;
+    if (bookIsPostReset) for (const entry of devBookTrades) {
       const sym = entry.symbol;
       if (!sym) continue;
       if (allTrades.some((t: any) => t && t.status === 'open' && t.mode !== 'paid' && String(t.symbol || '').toUpperCase() === sym)) continue;
-      const ok = await tryOpenCopy(sym, entry.side, entry.sl ?? null, entry.tp ?? null, null);
+      const ok = await tryOpenCopy(sym, entry.side, entry.sl ?? null, entry.tp ?? null, null, {
+        entry: entry.entry ?? null,
+        qty: entry.qty ?? null,
+        category: entry.category ?? null,
+        loose: true,
+      });
       if (ok) {
+        adopted++;
         const synthetic: MirrorTradeEvent = {
           id: `book:${sym}:${entry.openedAt || Date.now()}`,
           kind: 'open', symbol: sym, side: entry.side,
@@ -522,6 +616,9 @@ async function runMirrorPass(opts: {
         };
         executed.push(synthetic);
       }
+    }
+    if (adopted) {
+      console.log(`[TradeMirror] free book parity: adopted ${adopted}/${devBookTrades.length} developer trade(s)`);
     }
   }
 
@@ -606,53 +703,22 @@ async function runMirrorPass(opts: {
         const isSell = sig === 'strong_sell' || sig === 'sell' || ev.side === 'sell';
         if (!isBuy && !isSell) { markSeen(ev.id); continue; } // invalid signal — definitive
         if (openFor(sym)) { markSeen(ev.id); continue; } // already have the position
-        // At this point openFor(sym) already returned null (no open position).
-        // If the guard still says "opened", it's a stuck guard from a position
-        // that was closed manually without the engine clearing the flag.
-        // If we opened it earlier THIS poll pass, skip to avoid a duplicate.
-        // Otherwise, clear the stale guard so the mirror open can proceed.
-        if (guardIsOpened(sym) && openedThisPoll.has(sym)) { markSeen(ev.id); continue; } // just opened this pass — skip duplicate
-        if (guardIsOpened(sym)) {
-          guardClearOpened(sym);
-          console.warn(`[TradeMirror] stuck guard for ${sym} — clearing so mirror open can proceed`);
+        // FREE mode is a clone of the developer's book: copy the developer's own
+        // entry price and bypass local gates. PAID mode keeps the strict gates
+        // (the client trades their own analysis independently).
+        const loose = opts.mode === 'free';
+        const created = await tryOpenCopy(
+          sym,
+          isBuy ? 'buy' : 'sell',
+          ev.devSl ?? null,
+          ev.devTp ?? null,
+          ev.id,
+          { entry: loose ? (ev.devEntry ?? null) : null, loose },
+        );
+        if (created) {
+          executed.push(ev);
+          console.log(`[TradeMirror] mirrored open ${sym} (dev event ${ev.id})`);
         }
-        const lastClose = guardLastClosedAt(sym);
-        if (lastClose && Date.now() - lastClose < 8000) { console.log(`[TradeMirror] retry ${sym}: reopen cooldown`); continue; } // retry after cooldown
-        const cat = detectMirrorCategory(sym);
-        if (!isMarketOpen(cat, sym)) { console.log(`[TradeMirror] retry ${sym}: market closed (${cat})`); continue; } // retry — market may open later
-        const price = await getLivePrice(sym).catch(() => null);
-        if (price == null || !(price > 0)) { console.log(`[TradeMirror] retry ${sym}: no price`); continue; } // retry — quote feed warms up
-        // Same sizing/risk rules as the developer's auto engine and the manual
-        // ticket: crypto → tiered balance-scaled lot + percentage SL/TP;
-        // other categories → fixed values (when ON) or dynamic $ risk.
-        const q = tradeQtyFor(cat, sym, balance);
-        const requiredMargin = notionalInUSD(cat, sym, price, q) / leverage;
-        if (requiredMargin > balance) { console.log(`[TradeMirror] retry ${sym}: insufficient margin (${requiredMargin.toFixed(2)} > ${balance.toFixed(2)})`); continue; } // retry — balance may free up
-        const side: 'buy' | 'sell' = isBuy ? 'buy' : 'sell';
-        const levels = resolveRiskLevels({
-          category: cat, symbol: sym, entry: price, isBuy, qty: q, balance,
-          signalSl: ev.devSl, signalTp: ev.devTp,
-        });
-        await store.addTrade({
-          symbol: sym, category: cat, side, qty: q, entryPrice: price,
-          status: 'open' as const,
-          tp: levels.tpPrice,
-          sl: levels.slPrice,
-          openedAt: Date.now(),
-          source: 'auto',
-          mode: opts.mode || 'free',
-          mirrored: true,
-        });
-        guardMarkOpened(sym);
-        openedThisPoll.add(sym);
-        markSeen(ev.id); // executed — never reprocess
-        allTrades = await store.listTrades().catch(() => allTrades);
-        const acc2 = await store.getAccount().catch(() => null);
-        if (acc2) { balance = acc2.balance; leverage = acc2.leverage; }
-        executed.push(ev);
-        try { opts.playChampagne(); } catch {}
-        try { opts.notify(`نسخ تلقائي: ${side === 'buy' ? 'شراء' : 'بيع'} ${sym}`); } catch {}
-        console.log(`[TradeMirror] mirrored open ${side} ${sym} (dev event ${ev.id})`);
       } else if (ev.kind === 'close') {
         const mine = mirroredFor(sym);
         if (!mine) { guardClearOpened(sym); markSeen(ev.id); continue; } // nothing to close
@@ -713,8 +779,20 @@ export function listenMirrorEvents(opts: {
       error: (err) => console.warn('[TradeMirror] realtime listener error:', err),
     },
   );
+  // The developer's BOOK is the authority for free/guest parity. Watching it
+  // too means a new developer position is cloned as soon as the book lands,
+  // even before its `shared_trades` event (or when the event was missed).
+  let unsubBook: VoidFunction | null = null;
+  try {
+    unsubBook = onSnapshot(
+      doc(db, DEV_BOOK_DOC.collection, DEV_BOOK_DOC.id),
+      () => trigger(),
+      (err) => console.warn('[TradeMirror] book listener error:', err),
+    );
+  } catch {}
   return () => {
     try { unsub(); } catch { /* already unsubscribed */ }
+    try { unsubBook?.(); } catch {}
   };
 }
 

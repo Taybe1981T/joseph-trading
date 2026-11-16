@@ -47,13 +47,19 @@ function mobileSessionEmail(): string {
  * a phone-opened trade would be deleted by free devices on their next
  * reconcile, and a phone reset could not be confirmed.
  */
-export async function publishMobileDevBook(): Promise<void> {
+export async function publishMobileDevBook(force = false): Promise<void> {
   try {
     const email = mobileSessionEmail();
     if (!isDeveloperEmail(email)) return;
-    const store = getTradeStore(mobileTradeUser() as any);
+    // NEVER publish from the local guest store: it holds no developer data, so
+    // writing it would broadcast an EMPTY book and free devices would delete
+    // their perfectly good copies. The book must always come from the same
+    // per-uid Firestore account the desktop publishes from.
+    const user = mobileTradeUser();
+    if (!user?.uid) return;
+    const store = getTradeStore(user as any);
     const list = await store.listTrades();
-    await publishDevBook(list as any, email);
+    await publishDevBook(list as any, email, { force });
   } catch { /* best effort */ }
 }
 
@@ -203,7 +209,7 @@ export async function closeMobileTrade(id: string): Promise<void> {
   const devEmail = mobileSessionEmail();
   if (isDeveloperEmail(devEmail)) {
     try { await broadcastMirrorEvent(closeEventFor(String(t?.symbol || ''), 'manual', devEmail)); } catch {}
-    await publishMobileDevBook();
+    await publishMobileDevBook(true);
   }
   try { window.dispatchEvent(new CustomEvent('mobile-trades-changed', { detail: { action: 'close', id } })); } catch {}
 }
@@ -300,7 +306,7 @@ async function mobileManagePositions(): Promise<void> {
         const devEmail = mobileSessionEmail();
         if (isDeveloperEmail(devEmail)) {
           try { await broadcastMirrorEvent(closeEventFor(t.symbol, reason, devEmail)); } catch {}
-          await publishMobileDevBook();
+          await publishMobileDevBook(true);
         }
       } catch {}
       continue;

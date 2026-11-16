@@ -723,7 +723,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       const visible = isDev
         ? all
         : all.filter((t: any) => !t.mode || t.mode === activeTradeMode);
-      const open = visible.filter((t: any) => t.status === 'open');
+      const open = visible
+        .filter((t: any) => t.status === 'open')
+        // Desktop parity: newest position first — identical ordering for the
+        // developer and for every clone, so free views show the same list order.
+        .slice()
+        .sort((a: any, b: any) => Number(b.openedAt || 0) - Number(a.openedAt || 0));
       // History tab: closed trades from the SAME store (desktop parity: History tab).
       const closed = visible
         .filter((t: any) => t.status === 'closed')

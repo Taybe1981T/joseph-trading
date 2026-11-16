@@ -1359,7 +1359,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     // their open copies AND history on their next poll (paid data untouched).
     if (isDevUser) {
       try { await broadcastMirrorEvent(resetEventFor(user?.email || '', val)); } catch {}
-      try { await publishDevBook([], user?.email || ''); } catch {}
+      try { await publishDevBook([], user?.email || '', { force: true }); } catch {}
     }
     setShowReset(false);
     setResetInput('');

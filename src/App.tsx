@@ -1345,9 +1345,15 @@ const isDeveloperSession = () => {
         // Write only when the open book changed, plus a 10-minute heartbeat so
         // clients never treat the book as abandoned while the dev is idle.
         if (sig !== devBookSigRef.current || Date.now() - devBookAtRef.current > 10 * 60 * 1000) {
-          devBookSigRef.current = sig;
-          devBookAtRef.current = Date.now();
-          await publishDevBook(list as any, user.email || '');
+          const wrote = await publishDevBook(list as any, user.email || '');
+          if (wrote) {
+            devBookSigRef.current = sig;
+            devBookAtRef.current = Date.now();
+          } else {
+            // A shrink was withheld by the two-strike safety guard: retry on the
+            // next 10s tick instead of waiting for the 10-minute heartbeat.
+            devBookSigRef.current = '';
+          }
         }
       } catch { /* keep the previous book on transient errors */ }
     };
