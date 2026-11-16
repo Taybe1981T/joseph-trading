@@ -28,8 +28,6 @@ export const DEV_SETTINGS_EVENT = 'finalyze:dev-settings-sync';
 export const DEV_SYNC_KEYS: string[] = [
   // Analysis engine / filters (Salman's settings)
   'strategy_settings',
-  // Radar (auto analysis) settings
-  'auto_settings',
   // Auto trade master switch
   'paper_trading_auto_trade',
   // Store / client access switches

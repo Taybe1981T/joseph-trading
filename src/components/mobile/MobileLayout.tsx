@@ -1036,28 +1036,13 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isDev, isPlanClient, loadAll]);
 
-  // DEVELOPER PHONE: show the desktop engine's live progress bar (single source).
+  // DEVELOPER PHONE: no auto-analysis runs here (desktop is the single engine).
+  // Radar progress is not mirrored, so the phone never shows a running bar for
+  // the desktop's scan — the two devices are fully decoupled.
   useEffect(() => {
     if (!isDev) return;
-    let alive = true;
-    const poll = async () => {
-      try {
-        const snap = await getDoc(doc(db, 'shared_status', 'latest'));
-        if (!alive || !snap.exists()) return;
-        const d: any = snap.data();
-        if (d?.developerEmail && String(d.developerEmail).toLowerCase() !== (user?.email || email || '').toLowerCase()) return;
-        const p = d?.progress;
-        if (p && typeof p === 'object') {
-          setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category ?? undefined });
-        } else {
-          setRadarProgress(null);
-        }
-      } catch {}
-    };
-    void poll();
-    const iv = setInterval(poll, 3000);
-    return () => { alive = false; clearInterval(iv); };
-  }, [isDev, user, email]);
+    setRadarProgress(null);
+  }, [isDev]);
   useEffect(() => {
     if (!isDev) return;
     let alive = true;
