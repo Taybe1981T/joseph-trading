@@ -2265,6 +2265,7 @@ const isDeveloperSession = () => {
       radarTimerRef.current = null;
     }
 
+    if (!user) return; // wait for auth to resolve — never disable auto on a null user (refresh race)
     if (!allowed) {
       // A free account must never stay "ON": a plan that just expired resolves
       // to OFF on both platforms instead of silently doing nothing.
@@ -2288,7 +2289,7 @@ const isDeveloperSession = () => {
     // Clients: a NEW scan never starts from storage after a page load or
     // refresh — they turn it ON manually. But an INTERRUPTED scan resumes from
     // where it stopped, exactly as requested.
-    if (!isDeveloperSession() && !isRadarArmed() && !canResume) {
+    if (user && !isDeveloperSession() && !isRadarArmed() && !canResume) {
       setAutoSettings((prev) => {
         if (!prev.isEnabled) return prev;
         const next = { ...prev, isEnabled: false };
