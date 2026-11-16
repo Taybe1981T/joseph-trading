@@ -155,7 +155,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         // Developer = shared settings only; the desktop runs the engine. Show
         // the synced ON/OFF state so both devices agree.
         const devNow = detectMobileMode().mode === 'developer';
-        setAutoAnalysisOn(devNow ? readMobileAuto().isEnabled : (isMobileRadarOn() && readMobileAuto().isEnabled));
+        setAutoAnalysisOn((prev) => {
+          const v = devNow ? readMobileAuto().isEnabled : (isMobileRadarOn() && readMobileAuto().isEnabled);
+          return prev === v ? prev : v;
+        });
         // Keep the bar in step with the engine (it may have been started by the
         // auto-restart effect, not by this screen's toggle).
         if (isMobileRadarOn()) {
@@ -601,7 +604,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
           }
           // Shared developer account: the desktop is the single engine. The
           // phone mirrors the setting but must not start a duplicate radar.
-          setAutoAnalysisOn(s.isEnabled);
+          setAutoAnalysisOn((prev) => (prev === s.isEnabled ? prev : s.isEnabled));
           return;
         }
         if (!devNow && !isRadarArmed()) {
@@ -1061,7 +1064,6 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         const snap = await getDoc(doc(db, 'shared_status', 'latest'));
         if (!alive || !snap.exists()) return;
         const d: any = snap.data();
-        if (d?.developerEmail && String(d.developerEmail).toLowerCase() !== (user?.email || email || '').toLowerCase()) return;
         const p = d?.progress;
         if (p && typeof p === 'object') {
           setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category ?? undefined });

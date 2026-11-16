@@ -1010,7 +1010,7 @@ const isDeveloperSession = () => {
   // progress. Both used to share `progress`, so running a manual analysis lit
   // the "auto analysis" icon in the Header by mistake. The radar writes here;
   // the Header reads from here. Manual analysis keeps using `progress` only.
-  const [radarProgress, setRadarProgress] = useState<{ current: string, total: number, index: number, failed?: number, exchange?: string } | null>(null);
+  const [radarProgress, setRadarProgress] = useState<{ current: string, total: number, index: number, failed?: number, category?: string, exchange?: string } | null>(null);
   // Signal storage is SCOPED per user account so one account never sees
   // another account's signals (signals stay "clean" per account).
   const signalsStorageKey = () => {
@@ -1413,7 +1413,7 @@ const isDeveloperSession = () => {
     const isRunning = !isScanningFinished && autoSettings.isEnabled;
     setDoc(doc(db, 'shared_status', 'latest'), {
       isRunning,
-      progress: isRunning ? (radarProgress ? { current: radarProgress.current, total: radarProgress.total, index: radarProgress.index, category: radarProgress.exchange ?? null } : null) : null,
+      progress: isRunning ? (radarProgress ? { current: radarProgress.current, total: radarProgress.total, index: radarProgress.index, category: radarProgress.category ?? null } : null) : null,
       timestamp: new Date().toISOString(),
       developerEmail: user?.email || '',
     }).catch(e => console.warn('[DEV] Failed to sync radar status:', e));
@@ -2060,7 +2060,7 @@ const isDeveloperSession = () => {
 
         // Persist BEFORE analyzing: a refresh during this symbol resumes here.
         saveProgress(jobIdx, sym);
-        setRadarProgress({ current: sym, total: syms.length, index: analyzedCount, failed: scanFailed, exchange: exchangeLbl });
+        setRadarProgress({ current: sym, total: syms.length, index: analyzedCount, failed: scanFailed, category: cat, exchange: exchangeLbl });
 
         let lastError: any = null;
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -2121,7 +2121,7 @@ const isDeveloperSession = () => {
           console.error(`Radar Error [${sym}]:`, lastError.message);
           scanFailed++;
           analyzedCount++;
-          setRadarProgress({ current: sym, total: syms.length, index: analyzedCount, failed: scanFailed, exchange: exchangeLbl });
+          setRadarProgress({ current: sym, total: syms.length, index: analyzedCount, failed: scanFailed, category: cat, exchange: exchangeLbl });
           saveProgress(jobIdx, syms[si + 1] || null);
           await new Promise(r => setTimeout(r, 3000));
         } else {
