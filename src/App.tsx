@@ -22,7 +22,7 @@ import AnalysisDetailPage from './components/AnalysisDetailPage';
 
 import { AnalysisResult, StrategySettings, AutoAnalysisSettings, MarketType, TradingStyle } from './types';
 import { DEFAULT_STRATEGY_SETTINGS, DEFAULT_AUTO_SETTINGS, SYMBOL_CATEGORIES, ALL_SYMBOLS_DB, SYMBOL_GROUPS, FREE_SYMBOLS, STOCKS_BY_EXCHANGE } from './constants';
-import { getOpenStockExchanges, exchangeLabel, StockExchangeKey, OpenExchange } from './lib/marketHours';
+import { getOpenStockExchanges, exchangeLabel, StockExchangeKey } from './lib/marketHours';
 import { Language, translations } from './lib/i18n';
 import { analyzeMarket } from './services/geminiService';
 import { waitIfRateLimited } from './services/rateLimitTracker';
@@ -33,6 +33,7 @@ import SubscriptionModal from './components/SubscriptionModal';
 import PaymentModal from './components/PaymentModal';
 import { stackedPlanExpiry } from './lib/planPeriod';
 import { isFreshRadarSession, takeRadarStartNow, flagManualRadarStart, isRadarArmed, disarmRadar } from './services/radarSession';
+import { radarSettingsKey, readRadarScanProgress, saveRadarScanProgress, clearRadarScanProgress, hasRadarScanProgress } from './services/radarScanState';
 import AuthModal from './components/AuthModal';
 import { getUnreadDevNotificationCount, getUnreadSiteRequestCount, fetchUserGrants, fetchUserGrantsForEmails, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from './services/paymentRequests';
 import ProfilePage from './components/ProfilePage';
@@ -78,7 +79,7 @@ import { clientScopeKey, writeClientOwnKey, readClientOwnKey, clearClientOwnKey,
 import { isGoogleOrMicrosoftEmail, AuthProviderId } from './lib/authPolicy';
 import { readProfileAsset } from './lib/profileAssets';
 import { rememberSavedEmail } from './lib/savedAccounts';
-import { dedupeSignals } from './lib/signalFeed';
+import { dedupeSignals, topPerCategory, getSymbolCategory, attachCategories } from './lib/signalFeed';
 
 
 export type PageType = 'main' | 'settings' | 'apiKey' | 'plans' | 'radar' | 'paymentSettings' | 'clientMonitor' | 'profile' | 'about' | 'suggestions' | 'ads' | 'siteStats' | 'trade' | 'manualAnalysis' | 'manualResults' | 'store' | 'storeSettings' | 'transactions' | 'prices' | 'myPlan';
@@ -519,7 +520,7 @@ const isDeveloperSession = () => {
         const results = latestData.results;
         if (!results || !Array.isArray(results) || results.length === 0) { setTopSignals([]); return; }
         const filtered = results.filter((r: any) => r && r.signal !== 'neutral' && r.signal !== 'no_entry' && !r.isSideways);
-        setTopSignals(filtered);
+        setTopSignals(topPerCategory(attachCategories(filtered), 3));
       } catch {
         // ignore poll errors
       }
@@ -1046,7 +1047,7 @@ const isDeveloperSession = () => {
     }
     try {
       const stored = JSON.parse(localStorage.getItem(signalsStorageKey()) || '[]');
-      setTopSignals(Array.isArray(stored) ? dedupeSignals(stored.filter((s: AnalysisResult) => s.signal !== 'neutral' && s.signal !== 'no_entry')) : []);
+      setTopSignals(Array.isArray(stored) ? topPerCategory(dedupeSignals(stored.filter((s: AnalysisResult) => s.signal !== 'neutral' && s.signal !== 'no_entry')), 3) : []);
     } catch { setTopSignals([]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, user?.email, isPlanClient]);
@@ -1144,6 +1145,16 @@ const isDeveloperSession = () => {
     // client trades ONLY their own analysed signals, a free/guest account never
     // feeds the engine (developer signals are read-only for them).
     const entitledFeed = isDeveloperSession() ? topSignals : isPlanClient ? clientSignals : [];
+    // Feed the engine the EXACT set the UI displays: Top 3 per category
+    // (strong first, then confidence). No more opening extra trades outside the
+    // displayed signals — and no displayed signal left without its trade.
+    const feedSignals = topPerCategory(entitledFeed, 3).map((s: any) => ({
+      symbol: s.symbol,
+      signal: s.signal,
+      entryPrice: s.entryPrice ?? null,
+      stopLoss: s.stopLoss ?? null,
+      takeProfit: s.takeProfit ?? null,
+    }));
     const tradeMode: 'free' | 'paid' = isDeveloperSession() || isPlanClient ? 'paid' : 'free';
     // During radar scan, never feed ALL displayed signals to the engine — only the
     // settled top-3-per-category set (so no trade opens until its category is
@@ -1158,7 +1169,7 @@ const isDeveloperSession = () => {
       autoEngineRef.current = new AutoTradeEngine({
         user,
         leverage: currentLeverage,
-        signals: entitledFeed.filter((s: any) => !s?.isSideways).map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
+        signals: feedSignals,
         isDeveloper: isDeveloperSession(),
         origin: user?.uid || user?.email || '',
         tradeMode,
@@ -1168,7 +1179,7 @@ const isDeveloperSession = () => {
       autoEngineRef.current.updateConfig({
         user,
         leverage: currentLeverage,
-        signals: entitledFeed.filter((s: any) => !s?.isSideways).map((s) => ({ symbol: s.symbol, signal: s.signal, entryPrice: (s as any).entryPrice ?? null, stopLoss: (s as any).stopLoss ?? null, takeProfit: (s as any).takeProfit ?? null })),
+        signals: feedSignals,
         isDeveloper: isDeveloperSession(),
         origin: user?.uid || user?.email || '',
         tradeMode,
@@ -1268,6 +1279,10 @@ const isDeveloperSession = () => {
     const mirrorOpts = () => ({
       user,
       displayedSymbols: displayed(),
+      displayedSignals: [
+        ...(Array.isArray(topSignals) ? topSignals : []),
+        ...(Array.isArray(clientSignals) ? clientSignals : []),
+      ].map((s: any) => ({ symbol: s?.symbol, signal: s?.signal, entryPrice: s?.entryPrice ?? null, stopLoss: s?.stopLoss ?? null, takeProfit: s?.takeProfit ?? null })),
       mode: (isDeveloperSession() || isPlanClient ? 'paid' : 'free') as 'free' | 'paid',
       // Free/guest mirror is automatic — no per-client toggle.
       force: !isPlanClient,
@@ -1359,7 +1374,7 @@ const isDeveloperSession = () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
       syncTimeoutRef.current = setTimeout(() => {
         setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-          results: dedupeSignals(topSignals),
+          results: attachCategories(dedupeSignals(topSignals)),
           timestamp: new Date().toISOString(),
           developerEmail: user?.email || '',
         })).then(() => {
@@ -1380,7 +1395,7 @@ const isDeveloperSession = () => {
     if (current.length === 0) return;
     console.log('[DEV] Startup sync — pushing', current.length, 'signals to Firestore');
     setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-      results: dedupeSignals(current),
+      results: attachCategories(dedupeSignals(current)),
       timestamp: new Date().toISOString(),
       developerEmail: user?.email || '',
     })).then(() => {
@@ -1623,15 +1638,12 @@ const isDeveloperSession = () => {
         }
       }
 
-      // Separate strong and regular signals (exclude sideways)
-      const strong = resolved.filter(s => (s.signal === 'strong_buy' || s.signal === 'strong_sell') && !s.isSideways);
-      const regular = resolved.filter(s => (s.signal === 'buy' || s.signal === 'sell') && !s.isSideways);
-      
-      // Pass all signals - TopSignals component handles category-based display
-      // Each category independently shows its strong signals + top 3 regular
-      // De-dupe by symbol+timeframe so the shared feed can never carry the same
-      // signal twice (the phone renders whatever is published).
-      const published = dedupeSignals([...strong, ...regular]);
+      // Canonical display rule: the SAME "Top 3 per category" set that
+      // auto-trading uses (strong first, then confidence). De-dupe by
+      // symbol+timeframe so the shared feed can never carry a signal twice
+      // (the phone renders whatever is published). Capping here also keeps the
+      // number of auto-opened trades equal to the number of displayed signals.
+      const published = topPerCategory(resolved, 3);
       setTopSignals(published);
       // Keep the ref in sync IMMEDIATELY (not just via the [topSignals] effect,
       // which only runs after the next render). The radar calls this
@@ -1717,7 +1729,7 @@ const isDeveloperSession = () => {
     if (isDeveloperSession()) {
       try {
         await setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-          results: updated,
+          results: attachCategories(updated),
           timestamp: new Date().toISOString(),
           developerEmail: user?.email || '',
         }));
@@ -1850,7 +1862,7 @@ const isDeveloperSession = () => {
       try {
         const resetToken = Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
         await setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-          results: dedupeSignals(filtered),
+          results: attachCategories(dedupeSignals(filtered)),
           resetToken,
           timestamp: new Date().toISOString(),
           developerEmail: user?.email || '',
@@ -1903,18 +1915,54 @@ const isDeveloperSession = () => {
       }) as (keyof typeof SYMBOL_CATEGORIES)[];
 
     // Expand "stocks" into only the exchanges that are OPEN right now.
-    // Each job carries the region + label so the UI can show which exchange is being scanned.
-    const openJobs: { cat: string; region?: StockExchangeKey; exchange?: OpenExchange }[] = [];
+    // Each job carries the region so the UI can show which exchange is being scanned.
+    const openJobs: { cat: string; region?: StockExchangeKey }[] = [];
     for (const cat of cats) {
       if (cat === 'stocks') {
         for (const ex of getOpenStockExchanges()) {
-          openJobs.push({ cat, region: ex.key, exchange: ex });
+          openJobs.push({ cat, region: ex.key });
         }
       } else if (isMarketOpen(cat)) {
-        openJobs.push({ cat, region: undefined, exchange: undefined });
+        openJobs.push({ cat, region: undefined });
       }
     }
-    if (openJobs.length === 0) return;
+
+    // ── RESUME AFTER A PAGE REFRESH ──
+    // A running scan persists its position after every symbol. On reload we
+    // restore the job list + position instead of starting over, so the radar
+    // continues from the symbol it was analyzing when the page was refreshed.
+    const radarOwner = String(user?.email || user?.uid || '').toLowerCase().trim();
+    const settingsKey = radarSettingsKey(s, hasActivePlan);
+    const saved = readRadarScanProgress(radarOwner, settingsKey);
+    const jobs: { cat: string; region?: StockExchangeKey }[] = saved && saved.jobs.length
+      ? saved.jobs.map((j) => ({ cat: j.cat, region: j.region as StockExchangeKey | undefined }))
+      : openJobs;
+    if (jobs.length === 0) { clearRadarScanProgress(); return; }
+    const startJobIdx = saved ? Math.max(0, Math.min(saved.jobIdx, jobs.length)) : 0;
+    const savedResumeSymbol = saved?.resumeSymbol || null;
+    let scanFailed = saved?.failed || 0;
+    let analyzedCount = saved?.analyzed || 0;
+    if (saved) {
+      console.log(`[radar] resuming scan at job ${startJobIdx}/${jobs.length}${savedResumeSymbol ? ` (${savedResumeSymbol})` : ''} — ${analyzedCount} symbol(s) already analyzed`);
+    }
+    // Last job index per category: the auto-open runs once, after ALL of a
+    // category's symbols are analyzed (stocks are split per exchange).
+    const lastJobByCat = new Map<string, number>();
+    jobs.forEach((j, i) => lastJobByCat.set(j.cat, i));
+    const saveProgress = (jobIdx: number, resumeSymbol: string | null) => {
+      saveRadarScanProgress({
+        owner: radarOwner,
+        settingsKey,
+        running: true,
+        startedAt: saved?.startedAt || Date.now(),
+        jobs: jobs.map((j) => ({ cat: j.cat, region: j.region })),
+        jobIdx,
+        resumeSymbol,
+        failed: scanFailed,
+        analyzed: analyzedCount,
+      });
+    };
+    saveProgress(startJobIdx, savedResumeSymbol);
 
     setIsScanningFinished(false);
     radarScanningRef.current = true;
@@ -1943,21 +1991,18 @@ const isDeveloperSession = () => {
       custom = JSON.parse(localStorage.getItem(ownsPaidPlan ? cxnCustomKey : 'finalyze_custom_symbols') || '[]');
     } catch {}
 
-    // Track ALL results from this scan directly (not via batched React state)
-    const scanResults: AnalysisResult[] = [];
-    let scanFailed = 0;
-
     const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
     const toEngineSig = (r: any) => ({ symbol: r.symbol, signal: r.signal, entryPrice: (r as any).entryPrice ?? null, stopLoss: (r as any).stopLoss ?? null, takeProfit: (r as any).takeProfit ?? null });
-    for (let jobIdx = 0; jobIdx < openJobs.length; jobIdx++) {
+    for (let jobIdx = startJobIdx; jobIdx < jobs.length; jobIdx++) {
       if (!autoSettingsRef.current.isEnabled) break;
-      const { cat, region, exchange } = openJobs[jobIdx];
+      const { cat, region } = jobs[jobIdx];
+      const exchangeLbl = region ? exchangeLabel(region, lang) : undefined;
       // Results for THIS category only. Collected here so that the moment the
       // category's symbols are all analyzed we can DISPLAY its filtered signals
       // and settle the best 3 — without waiting for the remaining categories.
       const jobResults: AnalysisResult[] = [];
       // Alert 3: Category complete and beginning of next category analysis
-      if (jobIdx > 0) {
+      if (jobIdx > startJobIdx) {
         try { initAudio(); } catch {}
         try { playCategoryChange(autoSettingsRef.current.volume || 0.6); } catch {}
       }
@@ -1983,17 +2028,34 @@ const isDeveloperSession = () => {
             return region ? free.filter(x => regional.has(x)) : free;
           })();
 
-      for (const sym of syms) {
+      // Resume exactly at the symbol that was being analyzed when the page was
+      // refreshed. If it no longer exists (settings/hidden changed), restart the
+      // category from its first symbol instead of skipping anything.
+      let startSymIdx = 0;
+      if (saved && jobIdx === startJobIdx && savedResumeSymbol) {
+        const ri = syms.indexOf(savedResumeSymbol);
+        if (ri >= 0) startSymIdx = ri;
+        else console.warn(`[radar] resume symbol ${savedResumeSymbol} not in this job — restarting the category`);
+      }
+
+      for (let si = startSymIdx; si < syms.length; si++) {
+        const sym = syms[si];
         if (!autoSettingsRef.current.isEnabled) break;
 
         // Paid-client analysis quota: 5 analyses per symbol per UTC day, shared
         // with manual analysis. Blocked symbols are skipped, not re-analyzed.
         if (hasActivePlan && !isDeveloperSession()) {
           const quota = consumeSymbolAnalyses(user?.email || null, [sym], lang);
-          if (quota.allowed.length === 0) continue;
+          if (quota.allowed.length === 0) {
+            analyzedCount++;
+            saveProgress(jobIdx, syms[si + 1] || null);
+            continue;
+          }
         }
 
-          setRadarProgress({ current: sym, total: syms.length, index: scanResults.length, failed: scanFailed, exchange: exchange ? exchangeLabel(exchange.key, lang) : undefined });
+        // Persist BEFORE analyzing: a refresh during this symbol resumes here.
+        saveProgress(jobIdx, sym);
+        setRadarProgress({ current: sym, total: syms.length, index: analyzedCount, failed: scanFailed, exchange: exchangeLbl });
 
         let lastError: any = null;
         for (let attempt = 0; attempt < 2; attempt++) {
@@ -2017,7 +2079,6 @@ const isDeveloperSession = () => {
               // is analyzed and the best-per-category filter runs. topSignals
               // is written once, authoritatively, at the end of the scan.
               if (sig && sig !== 'no_entry' && sig !== 'neutral' && !r.isSideways) {
-                scanResults.push(r);
                 jobResults.push(r);
                 setClientSignals(prev => {
                   const u = [...prev.filter(x => x.symbol !== r.symbol), r];
@@ -2054,9 +2115,13 @@ const isDeveloperSession = () => {
         if (lastError) {
           console.error(`Radar Error [${sym}]:`, lastError.message);
           scanFailed++;
-        setRadarProgress({ current: sym, total: syms.length, index: scanResults.length, failed: scanFailed, exchange: exchange ? exchangeLabel(exchange.key, lang) : undefined });
+          analyzedCount++;
+          setRadarProgress({ current: sym, total: syms.length, index: analyzedCount, failed: scanFailed, exchange: exchangeLbl });
+          saveProgress(jobIdx, syms[si + 1] || null);
           await new Promise(r => setTimeout(r, 3000));
         } else {
+          analyzedCount++;
+          saveProgress(jobIdx, syms[si + 1] || null);
           // Paced between symbols so a scan never hammers the shared key pool.
           await new Promise(r => setTimeout(r, 2500));
         }
@@ -2064,25 +2129,36 @@ const isDeveloperSession = () => {
 
       // ── PER-CATEGORY: DISPLAY + DEFERRED OPEN (after category complete) ──
       // All of THIS category's symbols are analyzed. Display its signals now,
-      // but DO NOT open trades during analysis: settle the TOP 3 for this
-      // category (by confidence + other conditions), then open them in
-      // "first presented" order (earliest timestamp) with a 2-second gap
-      // between each open. This guarantees only the best 3 per completed
-      // category are traded, gradually after the category finishes.
+      // but DO NOT open trades during analysis: take the SAME TOP 3 that are
+      // displayed for the category (strong first, then confidence) and open them
+      // in "first presented" order (earliest timestamp) with a 2-second gap.
+      // Using the displayed set guarantees the number of auto-opened trades
+      // matches the number of displayed signals.
       updateTopSignals(jobResults, false);
+      saveProgress(jobIdx + 1, null);
+      // Stocks are split into exchange jobs: wait until the LAST exchange of the
+      // category so the open matches the category's single Top-3 display.
+      if (lastJobByCat.get(cat) !== jobIdx) continue;
       try {
-        const actionable = jobResults.filter((r) => r && r.signal && r.signal !== 'no_entry' && r.signal !== 'neutral' && !(r as any).isSideways);
-        const ranked = [...actionable].sort((a, b) =>
-          (b.confidence || 0) - (a.confidence || 0) ||
-          (new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime()) ||
-          String(a.symbol).localeCompare(String(b.symbol))
-        );
-        const top3 = ranked.slice(0, 3);
-        // Open order: first presented/offered (earliest timestamp) first.
-        const openOrder = [...top3].sort((a, b) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
+        const wantCat = cat.startsWith('stocks') ? 'stocks' : cat;
+        const displayedForCat = (signalsRef.current || []).filter((r: any) => {
+          if (!r || !r.symbol || r.isSideways) return false;
+          if (r.signal === 'neutral' || r.signal === 'no_entry') return false;
+          return getSymbolCategory(String(r.symbol)) === wantCat;
+        });
+        const openOrder = topPerCategory(displayedForCat, 3)
+          .slice()
+          // Open order: first presented/offered (earliest timestamp) first.
+          .sort((a: any, b: any) => new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime());
         // Accumulate into the settled set (so the engine-feeding effect never
         // re-opens all displayed signals during the scan).
-        for (const sig of openOrder) radarSettledSignalsRef.current.push(toEngineSig(sig));
+        const settledSyms = new Set(radarSettledSignalsRef.current.map((x: any) => x.symbol));
+        for (const sig of openOrder) {
+          if (!settledSyms.has(sig.symbol)) {
+            settledSyms.add(sig.symbol);
+            radarSettledSignalsRef.current.push(toEngineSig(sig));
+          }
+        }
         const eng = (autoEngineRef as any)?.current;
         for (let oi = 0; oi < openOrder.length; oi++) {
           if (!autoSettingsRef.current.isEnabled) break;
@@ -2100,11 +2176,15 @@ const isDeveloperSession = () => {
     }
     // Scan finished: allow the engine-feeding effect to run normally again.
     radarScanningRef.current = false;
-    // Restore engine to the full displayed signal set after the scan.
+    // The scan reached its end — nothing left to resume after a refresh.
+    clearRadarScanProgress();
+    // Restore engine to the displayed (Top-3-per-category) signal set after the
+    // scan. This is the SAME set the UI shows, so auto-trading can never open a
+    // different number of trades than the signals currently displayed.
     try {
       const eng = (autoEngineRef as any)?.current;
       if (eng && typeof eng.updateConfig === 'function') {
-        const all = (signalsRef.current || []).map((s: any) => toEngineSig(s));
+        const all = topPerCategory(signalsRef.current || [], 3).map((s: any) => toEngineSig(s));
         eng.updateConfig({ signals: all });
       }
     } catch {}
@@ -2112,7 +2192,7 @@ const isDeveloperSession = () => {
     // NOTE: no second topSignals write / engine kick here anymore. Every category
     // already displayed + opened its own signals above (sequential order), so a
     // final pass would be redundant and risk opening late — exactly the bug we
-    // are fixing. `scanResults` remains only for the Firestore sync below.
+    // are fixing.
 
     // Save results to Firestore for clients — only the DEVELOPER publishes the
     // shared feed. Paid/free clients run their own analysis locally and must
@@ -2125,7 +2205,7 @@ const isDeveloperSession = () => {
         const unique = dedupeSignals(merged);
         await Promise.race([
           setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-            results: unique.slice(-100),
+            results: attachCategories(unique.slice(-100)),
             timestamp: new Date().toISOString(),
             developerEmail: user?.email || '',
           })),
@@ -2197,9 +2277,18 @@ const isDeveloperSession = () => {
       return;
     }
 
-    // Clients: auto-analysis never resumes from storage after a page load or
-    // refresh. They turn it ON manually; from then on the interval loop runs.
-    if (!isDeveloperSession() && !isRadarArmed()) {
+    // A scan that was running when the page was refreshed left its position in
+    // localStorage. Resume it IMMEDIATELY instead of waiting for the interval
+    // (and regardless of the manual-arm rule — it was already running).
+    const canResume = hasRadarScanProgress(
+      String(user?.email || user?.uid || ''),
+      radarSettingsKey(autoSettingsRef.current, ownsPaidPlan),
+    );
+
+    // Clients: a NEW scan never starts from storage after a page load or
+    // refresh — they turn it ON manually. But an INTERRUPTED scan resumes from
+    // where it stopped, exactly as requested.
+    if (!isDeveloperSession() && !isRadarArmed() && !canResume) {
       setAutoSettings((prev) => {
         if (!prev.isEnabled) return prev;
         const next = { ...prev, isEnabled: false };
@@ -2286,10 +2375,10 @@ const isDeveloperSession = () => {
       }
     };
 
-    // Only a MANUAL ON may scan immediately. Opening/refreshing the page never
-    // starts a scan: `scheduleNext(false)` runs it only when the re-analysis
-    // interval is actually due, otherwise it waits for the remaining time.
-    const startNow = wasOn ? false : takeRadarStartNow();
+    // Only a MANUAL ON may start a FRESH scan. Opening/refreshing the page only
+    // starts one immediately when an interrupted scan can be resumed. Otherwise
+    // `scheduleNext(false)` waits until the re-analysis interval is actually due.
+    const startNow = wasOn ? false : (takeRadarStartNow() || canResume);
     if (startNow) setIsScanningFinished(false);
     scheduleNext(startNow);
 

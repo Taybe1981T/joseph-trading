@@ -4,7 +4,7 @@ import { Activity, Zap, BarChart2, Info, Lock, Crown, Settings, Trash2, X } from
 import TradingViewEmbed from './TradingViewEmbed';
 import { Language, translations } from '../lib/i18n';
 import { playClick, initAudio } from '../lib/audioEngine';
-import { SYMBOL_CATEGORIES, ALL_SYMBOLS_DB } from '../constants';
+import { getSymbolCategory, compareSignalRank } from '../lib/signalFeed';
 import MarketHoursIndicator from './MarketHoursIndicator';
 import { cn } from '../lib/utils';
 
@@ -42,17 +42,8 @@ const CATEGORY_CONFIG: Record<string, { emoji: string; labelAr: string; labelEn:
   metals: { emoji: '💎', labelAr: 'المعادن', labelEn: 'Metals', color: 'text-orange-400', borderColor: 'border-orange-500/30' },
 };
 
-function getSymbolCategory(symbol: string): string {
-  const sym = symbol.toUpperCase().replace(/[-_=]/g, '');
-  for (const [cat, syms] of Object.entries(SYMBOL_CATEGORIES)) {
-    if ((syms as string[]).includes(sym)) return cat.startsWith('stocks') ? 'stocks' : cat;
-  }
-  for (const [cat, syms] of Object.entries(ALL_SYMBOLS_DB)) {
-    if ((syms as string[]).includes(sym)) return cat.startsWith('stocks') ? 'stocks' : cat;
-  }
-  if (sym.endsWith('USD') && !sym.startsWith('USD') && sym.length > 6) return 'crypto';
-  if (/\.(T|AS|PA|DE|L|SW|CO)$/.test(symbol)) return 'stocks';
-  return 'forex';
+function getResultCategory(s: AnalysisResult): string {
+  return String((s as any).category || getSymbolCategory(String(s.symbol || '')));
 }
 
 const formatPublishDate = (timestamp: string, lang: string) => {
@@ -161,7 +152,7 @@ export default function ClientDashboard({ results, lang, hasActivePlan = false, 
 
   const grouped: Record<string, AnalysisResult[]> = { forex: [], crypto: [], stocks: [], metals: [] };
   for (const s of activeResults) {
-    const cat = getSymbolCategory(s.symbol);
+    const cat = getResultCategory(s);
     if (grouped[cat]) grouped[cat].push(s);
     else grouped.forex.push(s);
   }
@@ -241,10 +232,10 @@ export default function ClientDashboard({ results, lang, hasActivePlan = false, 
         {activeCategories.map(cat => {
           const catSignals = grouped[cat];
           const cfg = CATEGORY_CONFIG[cat];
-          // Display the 3 best analyzed signals per category (strong prioritized, then confidence).
-          const rank = (s: AnalysisResult) => (s.signal === SignalType.STRONG_BUY || s.signal === SignalType.STRONG_SELL) ? 2 : 1;
+          // Display the 3 best analyzed signals per category — the SAME canonical
+          // rule (strong first, then confidence) used by the auto-trade engine.
           const displaySignals = [...catSignals]
-            .sort((a, b) => rank(b) - rank(a) || (b.confidence || 0) - (a.confidence || 0) || new Date(a.timestamp || 0).getTime() - new Date(b.timestamp || 0).getTime())
+            .sort(compareSignalRank)
             .slice(0, 3);
           return (
             <div key={cat} className="space-y-2">

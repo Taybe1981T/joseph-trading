@@ -3,7 +3,7 @@ import { AnalysisResult, SignalType } from '../types';
 import { X, Trash2, BarChart2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Language, translations } from '../lib/i18n';
-import { SYMBOL_CATEGORIES, ALL_SYMBOLS_DB } from '../constants';
+import { getSymbolCategory, compareSignalRank } from '../lib/signalFeed';
 import TradingViewEmbed from './TradingViewEmbed';
 import MarketHoursIndicator from './MarketHoursIndicator';
 
@@ -31,17 +31,8 @@ const CATEGORY_CONFIG: Record<string, { emoji: string; labelAr: string; labelEn:
   metals: { emoji: '\uD83D\uDC8E', labelAr: 'المعادن', labelEn: 'Metals', color: 'text-orange-400', borderColor: 'border-orange-500/30' },
 };
 
-function getSymbolCategory(symbol: string): string {
-  const sym = symbol.toUpperCase().replace(/[-_=]/g, '');
-  for (const [cat, syms] of Object.entries(SYMBOL_CATEGORIES)) {
-    if ((syms as string[]).includes(sym)) return cat.startsWith('stocks') ? 'stocks' : cat;
-  }
-  for (const [cat, syms] of Object.entries(ALL_SYMBOLS_DB)) {
-    if ((syms as string[]).includes(sym)) return cat.startsWith('stocks') ? 'stocks' : cat;
-  }
-  if (sym.endsWith('USD') && !sym.startsWith('USD') && sym.length > 6) return 'crypto';
-  if (/\.(T|AS|PA|DE|L|SW|CO)$/.test(symbol)) return 'stocks';
-  return 'forex';
+function getSignalCategory(s: AnalysisResult): string {
+  return String((s as any).category || getSymbolCategory(String(s.symbol || '')));
 }
 
 const formatPublishDate = (timestamp: string, lang: string) => {
@@ -89,7 +80,7 @@ export default function TopSignals({ signals, onRemove, onSelect, onDetail, onCl
 
   const grouped: Record<string, AnalysisResult[]> = { forex: [], crypto: [], stocks: [], metals: [] };
   for (const s of filteredSignals) {
-    const cat = getSymbolCategory(s.symbol);
+    const cat = getSignalCategory(s);
     if (grouped[cat]) grouped[cat].push(s);
     else grouped.forex.push(s);
   }
@@ -118,9 +109,12 @@ export default function TopSignals({ signals, onRemove, onSelect, onDetail, onCl
         const catSignals = grouped[cat];
         if (catSignals.length === 0) return null;
         const cfg = CATEGORY_CONFIG[cat];
-        const strong = catSignals.filter(s => s.signal === SignalType.STRONG_BUY || s.signal === SignalType.STRONG_SELL);
-        const regular = catSignals.filter(s => s.signal === SignalType.BUY || s.signal === SignalType.SELL);
-        const top3 = regular.sort((a, b) => b.confidence - a.confidence).slice(0, 3);
+        // EXACT parity with the auto-trade engine: the SAME canonical Top 3 for
+        // the category (strong first, then confidence) is displayed and traded.
+        // Keep the strong/regular blocks for styling, but cap the TOTAL at 3.
+        const display = [...catSignals].sort(compareSignalRank).slice(0, 3);
+        const strong = display.filter(s => s.signal === SignalType.STRONG_BUY || s.signal === SignalType.STRONG_SELL);
+        const top3 = display.filter(s => s.signal === SignalType.BUY || s.signal === SignalType.SELL);
 
         return (
           <div key={cat} className="space-y-2">
@@ -129,7 +123,7 @@ export default function TopSignals({ signals, onRemove, onSelect, onDetail, onCl
               <span className={cn("text-xs font-black uppercase tracking-widest", cfg.color)}>
                 {isAr ? cfg.labelAr : cfg.labelEn}
               </span>
-              <span className="text-[10px] text-white/30 font-bold">({catSignals.length})</span>
+              <span className="text-[10px] text-white/30 font-bold">({display.length})</span>
             </div>
 
 {strong.length > 0 && (

@@ -3,7 +3,7 @@ import { Zap, Lock } from 'lucide-react';
 import { AnalysisResult } from '../../types';
 import { Language } from '../../lib/i18n';
 import { useMobileMode, mobileT } from '../../lib/mobileMode';
-import { dedupeSignals, getSymbolCategory } from '../../lib/signalFeed';
+import { dedupeSignals, getSymbolCategory, topPerCategory } from '../../lib/signalFeed';
 import { MobileSignalCard } from './MobileSignalCard';
 
 interface MobileHomeProps {
@@ -25,8 +25,6 @@ const AR_CATS: Record<string, string> = {
   crypto: 'عملات مشفرة', forex: 'فوركس', stocks: 'أسهم', metals: 'معادن',
   energy: 'طاقة', indices: 'مؤشرات', custom: 'رموز مخصصة', other: 'أخرى',
 };
-
-const CAT_ORDER = ['forex', 'crypto', 'stocks', 'metals', 'energy', 'indices', 'custom', 'other'];
 
 export function MobileHome({
   fullSignals, lang, onDetail, onTrade, onRemove, onRemoveAll,
@@ -59,36 +57,26 @@ export function MobileHome({
   //      be rendered AGAIN inside their category group — the reported "one
   //      crypto signal displayed twice in every mode". Favorited symbols are
   //      now excluded from the category groups (they stay in favorites).
+  const canonical = React.useMemo(() => topPerCategory(dedupeSignals(fullSignals), 3), [fullSignals]);
+
   const grouped = React.useMemo(() => {
-    const unique = dedupeSignals(fullSignals);
     const favSet = new Set(favorites.map((s) => String(s).toUpperCase()));
-    const map: Record<string, AnalysisResult[]> = {};
-    for (const s of unique) {
-      const sym = String(s.symbol || '').toUpperCase();
-      if (favSet.has(sym)) continue;
-      const cat = String((s as unknown as Record<string, unknown>).category || getSymbolCategory(sym));
-      (map[cat] = map[cat] || []).push(s);
-    }
+    const visible = canonical.filter((s) => !favSet.has(String(s.symbol || '').toUpperCase()));
     const out: { cat: string; list: AnalysisResult[] }[] = [];
-    const cats = Object.keys(map).sort((a, b) => {
-      const ia = CAT_ORDER.indexOf(a);
-      const ib = CAT_ORDER.indexOf(b);
-      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
-    });
-    for (const cat of cats) {
-      const list = map[cat]
-        .slice()
-        .sort((a, b) => (b.confidence || 0) - (a.confidence || 0) || String(a.symbol).localeCompare(String(b.symbol)))
-        .slice(0, 3);
-      if (list.length) out.push({ cat, list });
+    for (const s of visible) {
+      const cat = String((s as unknown as Record<string, unknown>).category || getSymbolCategory(String(s.symbol || '')));
+      let bucket = out.find((g) => g.cat === cat);
+      if (!bucket) { bucket = { cat, list: [] }; out.push(bucket); }
+      bucket.list.push(s);
     }
     return out;
-  }, [fullSignals, favorites]);
-  // Favorites block: one card per symbol+timeframe as well.
+  }, [canonical, favorites]);
+  // Favorites block: a favorite is only displayed when it belongs to the
+  // canonical Top-3-per-category set, so the number of displayed signals always
+  // equals the number of auto-opened trades (no extra un-traded cards).
   const favoriteSignals = React.useMemo(() => {
-    const unique = dedupeSignals(fullSignals);
-    return unique.filter((s) => favorites.includes(s.symbol));
-  }, [fullSignals, favorites]);
+    return canonical.filter((s) => favorites.includes(s.symbol));
+  }, [canonical, favorites]);
   return (
     <div className="mt5-page-container">
       <style>{`@keyframes mt5-radar-stripes { from { background-position: 0 0; } to { background-position: 28px 0; } }`}</style>

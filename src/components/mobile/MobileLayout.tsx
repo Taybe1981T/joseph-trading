@@ -13,7 +13,7 @@ import { MobileTradeDialog } from './MobileTradeDialog';
 import { MobileSignalDetail } from './MobileSignalDetail';
 import AnalysisDetailPage from '../AnalysisDetailPage';
 import { Language } from '../../lib/i18n';
-import { dedupeSignals } from '../../lib/signalFeed';
+import { dedupeSignals, topPerCategory, attachCategories } from '../../lib/signalFeed';
 import { isDeveloperEmail, DEVELOPER_EMAILS, clientDocId } from '../../lib/clientIds';
 import { isGoogleOrMicrosoftEmail } from '../../lib/authPolicy';
 import { installUiClickSound } from '../../lib/uiClickSound';
@@ -957,11 +957,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         // merge) so removed developer signals also disappear here. De-dupe by
         // symbol+timeframe: several desktop publishers write shared_results, and
         // a duplicate entry used to render as two identical cards on the phone.
-        const firestoreSignals = dedupeSignals(latestData.results
-          .filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways)
-          .map((s: any) => ({ ...s, source: s.source || 'auto' })))
-          .sort((a: any, b: any) => Number(b.timestamp || 0) - Number(a.timestamp || 0))
-          .slice(0, 40);
+        const firestoreSignals = topPerCategory(
+          attachCategories(dedupeSignals(latestData.results
+            .filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways)
+            .map((s: any) => ({ ...s, source: s.source || 'auto' })))),
+          3,
+        );
         setFullSignals((prev) => {
           // The client may have entered a paid plan mid-poll: never keep a feed
           // that is no longer entitled for that account.
@@ -1004,6 +1005,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       force: true,
       allowOpen,
       mode: 'free' as const,
+      displayedSignals: (fullSignalsRef?.current || []).map((s: any) => ({
+        symbol: s?.symbol, signal: s?.signal, entryPrice: s?.entryPrice ?? null,
+        stopLoss: s?.stopLoss ?? null, takeProfit: s?.takeProfit ?? null,
+      })),
       playChampagne: () => {},
       notify: () => {},
     });
@@ -1352,7 +1357,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const publishDevSignals = async (list: any[]) => {
     if (!isDev) return;
     try {
-      const safe = JSON.parse(JSON.stringify(Array.isArray(list) ? list : []));
+      const safe = JSON.parse(JSON.stringify(Array.isArray(list) ? attachCategories(list) : []));
       await setDoc(doc(db, 'shared_results', 'latest'), {
         results: safe,
         timestamp: new Date().toISOString(),

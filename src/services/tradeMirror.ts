@@ -176,22 +176,51 @@ export function resetEventFor(origin: string, newBalance?: number): Omit<MirrorT
 }
 
 /**
+ * A single entry in the developer's published live book.
+ */
+export interface DevBookTrade {
+  symbol: string;
+  side: 'buy' | 'sell';
+  openedAt: number;
+  entry?: number | null;
+  sl?: number | null;
+  tp?: number | null;
+}
+
+/**
  * DEVELOPER SIDE — publish the live book (open symbols) so free/guest accounts
  * can reconcile: any mirrored position the developer no longer holds is
- * removed automatically, even if its close event was missed.
+ * removed automatically, even if its close event was missed. The book now also
+ * carries the open trade details (side, entry, SL/TP, openedAt) so a free/guest
+ * account can ADOPT a trade that was missed entirely (event TTL'd, missed
+ * realtime snapshot, or a free device that was offline). This is what makes a
+ * free/guest account end up with exactly the same open trades as the developer.
  */
 export async function publishDevBook(
-  trades: { symbol?: string; status?: string }[],
+  trades: { symbol?: string; status?: string; side?: string; openedAt?: number; entryPrice?: number | null; sl?: number | null; tp?: number | null }[],
   origin: string,
 ): Promise<void> {
   try {
-    const openSymbols = [...new Set(
-      (trades || [])
-        .filter((t) => t && t.status === 'open' && t.symbol)
-        .map((t) => String(t.symbol).toUpperCase()),
-    )];
+    const open = (trades || []).filter((t) => t && t.status === 'open' && t.symbol);
+    const bySymbol = new Map<string, DevBookTrade>();
+    for (const t of open) {
+      const sym = String(t.symbol).toUpperCase();
+      const rec: DevBookTrade = {
+        symbol: sym,
+        side: String(t.side || '').toLowerCase() === 'sell' ? 'sell' : 'buy',
+        openedAt: Number(t.openedAt) || Date.now(),
+        entry: (t as any).entryPrice ?? null,
+        sl: (t as any).sl ?? null,
+        tp: (t as any).tp ?? null,
+      };
+      const prev = bySymbol.get(sym);
+      if (!prev || rec.openedAt < prev.openedAt) bySymbol.set(sym, rec);
+    }
+    const openTrades = [...bySymbol.values()];
+    const openSymbols = openTrades.map((t) => t.symbol);
     await setDoc(doc(db, DEV_BOOK_DOC.collection, DEV_BOOK_DOC.id), {
       openSymbols,
+      openTrades,
       updatedAt: Date.now(),
       origin,
     }, { merge: true });
@@ -231,6 +260,7 @@ export function pollMirrorEvents(opts: {
    * honoured (closing is safe even if the signal vanished).
    */
   displayedSymbols?: string[];
+  displayedSignals?: { symbol: string; signal?: string; entryPrice?: number | null; stopLoss?: number | null; takeProfit?: number | null }[];
   /** Display mode the mirrored trades belong to (free view vs paid). */
   mode?: 'free' | 'paid';
   /**
@@ -271,6 +301,7 @@ async function runMirrorPass(opts: {
   playChampagne: () => void;
   notify: (msg: string) => void;
   displayedSymbols?: string[];
+  displayedSignals?: { symbol: string; signal?: string; entryPrice?: number | null; stopLoss?: number | null; takeProfit?: number | null }[];
   mode?: 'free' | 'paid';
   force?: boolean;
   allowOpen?: boolean;
@@ -333,6 +364,7 @@ async function runMirrorPass(opts: {
   // Symbols the developer currently holds, when a fresh book is available. Used
   // to skip OPEN events left over from before a reset (see the open branch).
   let devHeld: Set<string> | null = null;
+  let devBookTrades: DevBookTrade[] = [];
   if (opts.mode === 'free') {
     // ONE COPY PER SYMBOL: an older build could let overlapping passes open the
     // same symbol several times. Keep the earliest copy, drop the extras.
@@ -360,6 +392,27 @@ async function runMirrorPass(opts: {
       if (bookFresh && Array.isArray(book.openSymbols)) {
         const held = new Set<string>(book.openSymbols.map((s: any) => String(s || '').toUpperCase()));
         devHeld = held;
+        // Rich entries (side, SL/TP, openedAt) — used for ADOPTION of missed trades.
+        if (Array.isArray(book.openTrades)) {
+          devBookTrades = book.openTrades
+            .map((e: any) => ({
+              symbol: String(e?.symbol || '').toUpperCase(),
+              side: String(e?.side || '').toLowerCase() === 'sell' ? 'sell' : 'buy',
+              openedAt: Number(e?.openedAt) || Date.now(),
+              entry: (e?.entry ?? e?.entryPrice ?? null) as number | null,
+              sl: (e?.sl ?? null) as number | null,
+              tp: (e?.tp ?? null) as number | null,
+            }))
+            .filter((e: DevBookTrade) => e.symbol);
+        } else {
+          // Legacy book (symbols only) — adopt side from displayed signals if known.
+          devBookTrades = book.openSymbols.map((s: any) => {
+            const sym = String(s || '').toUpperCase();
+            const sig = (opts.displayedSignals || []).find((x) => String(x?.symbol || '').toUpperCase() === sym);
+            const side: 'buy' | 'sell' = sig?.signal === 'sell' || sig?.signal === 'strong_sell' ? 'sell' : 'buy';
+            return { symbol: sym, side, openedAt: Date.now(), entry: sig?.entryPrice ?? null, sl: sig?.stopLoss ?? null, tp: sig?.takeProfit ?? null };
+          });
+        }
         const stale = allTrades.filter((t: any) =>
           t && t.status === 'open' && t.mode !== 'paid' &&
           !held.has(String(t.symbol || '').toUpperCase()) &&
@@ -377,8 +430,6 @@ async function runMirrorPass(opts: {
     }
   }
 
-  if (fresh.length === 0) return executed;
-
   const openFor = (sym: string) => allTrades.find((t: any) => t.status === 'open' && t.symbol === sym);
   // Close only a position that actually came from the developer's book:
   //   • new mirrored trades carry `mirrored: true`;
@@ -395,6 +446,86 @@ async function runMirrorPass(opts: {
   // after an earlier open in this same pass). Mirrors the autoTradeEngine
   // `openedThisScan` pattern.
   const openedThisPoll = new Set<string>();
+
+  // Shared open logic — used BOTH by the event loop and by the book ADOPTION
+  // pass below. Returns true when a copy was actually created.
+  const tryOpenCopy = async (
+    sym: string,
+    side: 'buy' | 'sell',
+    devSl: number | null,
+    devTp: number | null,
+    eventId: string | null,
+  ): Promise<boolean> => {
+    if (openFor(sym)) { if (eventId) markSeen(eventId); return false; }
+    if (guardIsOpened(sym) && openedThisPoll.has(sym)) { if (eventId) markSeen(eventId); return false; }
+    if (guardIsOpened(sym)) {
+      guardClearOpened(sym);
+      console.warn(`[TradeMirror] stuck guard for ${sym} — clearing so mirror open can proceed`);
+    }
+    const lastClose = guardLastClosedAt(sym);
+    if (lastClose && Date.now() - lastClose < 8000) { console.log(`[TradeMirror] retry ${sym}: reopen cooldown`); return false; }
+    const cat = detectMirrorCategory(sym);
+    if (!isMarketOpen(cat, sym)) { console.log(`[TradeMirror] retry ${sym}: market closed (${cat})`); return false; }
+    const price = await getLivePrice(sym).catch(() => null);
+    if (price == null || !(price > 0)) { console.log(`[TradeMirror] retry ${sym}: no price`); return false; }
+    const q = tradeQtyFor(cat, sym, balance);
+    const requiredMargin = notionalInUSD(cat, sym, price, q) / leverage;
+    if (requiredMargin > balance) { console.log(`[TradeMirror] retry ${sym}: insufficient margin (${requiredMargin.toFixed(2)} > ${balance.toFixed(2)})`); return false; }
+    const isBuy = side === 'buy';
+    const levels = resolveRiskLevels({
+      category: cat, symbol: sym, entry: price, isBuy, qty: q, balance,
+      signalSl: devSl, signalTp: devTp,
+    });
+    await store.addTrade({
+      symbol: sym, category: cat, side, qty: q, entryPrice: price,
+      status: 'open' as const,
+      tp: levels.tpPrice,
+      sl: levels.slPrice,
+      openedAt: Date.now(),
+      source: 'auto',
+      mode: opts.mode || 'free',
+      mirrored: true,
+    });
+    guardMarkOpened(sym);
+    openedThisPoll.add(sym);
+    if (eventId) markSeen(eventId);
+    allTrades = await store.listTrades().catch(() => allTrades);
+    const acc2 = await store.getAccount().catch(() => null);
+    if (acc2) { balance = acc2.balance; leverage = acc2.leverage; }
+    try { opts.playChampagne(); } catch {}
+    try { opts.notify(`نسخ تلقائي: ${side === 'buy' ? 'شراء' : 'بيع'} ${sym}`); } catch {}
+    console.log(`[TradeMirror] mirrored open ${side} ${sym}`);
+    return true;
+  };
+
+  // ── ADOPT: symbols the developer currently holds that this account is missing.
+  // This is the safety net that guarantees a free/guest account ends up with
+  // EXACTLY the same open trades as the developer, even if the open event was
+  // missed, TTL'd, or the device was offline when it was broadcast.
+  if (opts.mode === 'free' && devHeld && opts.allowOpen !== false) {
+    for (const entry of devBookTrades) {
+      const sym = entry.symbol;
+      if (!sym) continue;
+      if (allTrades.some((t: any) => t && t.status === 'open' && t.mode !== 'paid' && String(t.symbol || '').toUpperCase() === sym)) continue;
+      const ok = await tryOpenCopy(sym, entry.side, entry.sl ?? null, entry.tp ?? null, null);
+      if (ok) {
+        const synthetic: MirrorTradeEvent = {
+          id: `book:${sym}:${entry.openedAt || Date.now()}`,
+          kind: 'open', symbol: sym, side: entry.side,
+          signal: entry.side === 'buy' ? 'buy' : 'sell',
+          openedAt: entry.openedAt || Date.now(),
+          devEntry: entry.entry ?? null,
+          devSl: entry.sl ?? null,
+          devTp: entry.tp ?? null,
+          origin: 'dev-book',
+          publishedAt: Date.now(),
+        };
+        executed.push(synthetic);
+      }
+    }
+  }
+
+  if (fresh.length === 0) return executed;
 
   for (const ev of fresh) {
     // CLEAR (history or FULL RESET): free/guest accounts mirror the developer's
@@ -559,6 +690,7 @@ export function listenMirrorEvents(opts: {
   playChampagne: () => void;
   notify: (msg: string) => void;
   displayedSymbols?: string[];
+  displayedSignals?: { symbol: string; signal?: string; entryPrice?: number | null; stopLoss?: number | null; takeProfit?: number | null }[];
   mode?: 'free' | 'paid';
   force?: boolean;
   allowOpen?: boolean;
