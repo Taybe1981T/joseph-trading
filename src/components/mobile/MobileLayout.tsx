@@ -29,8 +29,7 @@ import {
 } from '../../lib/mobileMode';
 import { fetchUserGrants, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from '../../services/paymentRequests';
 import { MobileAnalysis } from './MobileAnalysis';
-import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar, getMobileRadarProgress, mobileSignalsStorageKey } from '../../services/mobileAnalysisEngine';
-import { flagManualRadarStart, takeRadarStartNow, isFreshRadarSession, isRadarArmed } from '../../services/radarSession';
+import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar, getMobileRadarProgress, subscribeMobileRadar, isMobileRadarPersisted, readMobileRadarResume, mobileSignalsStorageKey } from '../../services/mobileAnalysisEngine';
 import { MobileManualSheet } from './MobileManualSheet';
 import { MobileClientMonitor } from './MobileClientMonitor';
 import TransactionsPage from '../TransactionsPage';
@@ -103,79 +102,42 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   }, []);
   const [alert, setAlert] = useState<string | null>(null);
   const [auto, setAuto] = useState(() => isMobileAutoTradeOn());
-  const [autoAnalysisOn, setAutoAnalysisOn] = useState(false);
-  // Seed from the engine so a radar that was already running (resumed after a
-  // tab switch / remount) still shows its progress bar immediately.
+  // ── Auto-analysis (radar): ONE source of truth = the mobile engine ────────
+  // The header button, the progress bar and the analysis tab all subscribe to
+  // the same engine state, so they can never disagree or flicker ON/START.
+  // Run state is persisted in sessionStorage: a refresh resumes an interrupted
+  // scan, closing the app clears it (fresh open → START and stopped).
+  const [autoAnalysisOn, setAutoAnalysisOn] = useState(() => isMobileRadarOn() || isMobileRadarPersisted());
+  // Seed from the engine — or from the persisted resume point after a refresh —
+  // so the bar is visible immediately on remount instead of after a poll.
   const [radarProgress, setRadarProgress] = useState<{ current: string; total: number; index: number; category?: string } | null>(() => {
     const p = getMobileRadarProgress();
-    return p ? { current: p.current, total: p.total, index: p.index, category: p.category } : null;
-  });
-  const toggleAutoAnalysis = useCallback(() => {
-    if (isDev) {
-      // Developer on phone: purely local, stable toggle. Never derived from
-      // persisted storage or the desktop, so it never flickers ON/START.
-      setAutoAnalysisOn((prev) => !prev);
-      return;
+    if (p) return { current: p.current, total: p.total, index: p.index, category: p.category };
+    if (isMobileRadarPersisted()) {
+      const r = readMobileRadarResume();
+      if (r) return { current: r.symbol, total: r.total, index: r.index, category: r.category };
     }
-    try {
-      const s = readMobileAuto();
-      const v = !s.isEnabled;
-      localStorage.setItem('auto_settings', JSON.stringify({ ...s, isEnabled: v }));
-      setAutoAnalysisOn(v);
-      if (v) {
-        // This is the manual ON that arms the session: only from here may the
-        // interval loop run after the client leaves the screen.
-        flagManualRadarStart();
-        setRadarProgress(null);
-        // Read the signed-in identity from storage instead of the component's
-        // state: this callback has an empty dependency list, and the old code
-        // shadowed the `email` state with itself ("Cannot access 'email' before
-        // initialization"), which crashed the toggle on first use.
-        const info = detectMobileMode();
-        // The developer account is ONE shared settings account, but the desktop
-        // is the single analysis engine: a phone toggle only changes the shared
-        // setting (the desktop picks it up in ~1 s) and never starts a second
-        // engine here.
-        if (info.mode !== 'developer') {
-          startMobileRadar(info.uid, info.email, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
-            setRadarProgress(null);
-          }, { immediate: true });
-        } else {
-          setRadarProgress(null);
-        }
-      } else {
-        stopMobileRadar();
-        setRadarProgress(null);
-      }
-      window.dispatchEvent(new CustomEvent('mobile-radar-settings'));
-    } catch {}
-  }, []);
-  useEffect(() => {
-    const sync = () => {
-      try {
-        // Developer = shared settings only; the desktop runs the engine. Show
-        // the synced ON/OFF state so both devices agree.
-        const devNow = detectMobileMode().mode === 'developer';
-        setAutoAnalysisOn((prev) => {
-          if (devNow) return prev; // purely local for developer
-          const v = isMobileRadarOn() && readMobileAuto().isEnabled;
-          return prev === v ? prev : v;
-        });
-        // Keep the bar in step with the engine (it may have been started by the
-        // auto-restart effect, not by this screen's toggle).
-        if (isMobileRadarOn()) {
-          const p = getMobileRadarProgress();
-          if (p) setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category });
-        } else if (!devNow) {
-          setRadarProgress(null);
-        }
-      } catch {}
-    };
-    sync();
-    const iv = setInterval(sync, 3000);
-    window.addEventListener('storage', sync);
-    window.addEventListener('mobile-radar-settings', sync);
-    return () => { clearInterval(iv); window.removeEventListener('storage', sync); window.removeEventListener('mobile-radar-settings', sync); };
+    return null;
+  });
+  useEffect(() => subscribeMobileRadar(({ running, progress }) => {
+    setAutoAnalysisOn((prev) => (prev === running ? prev : running));
+    setRadarProgress((prev) => {
+      if (!progress) return prev === null ? prev : null;
+      if (prev && prev.current === progress.current && prev.total === progress.total && prev.index === progress.index && prev.category === progress.category) return prev;
+      return { current: progress.current, total: progress.total, index: progress.index, category: progress.category };
+    });
+  }), []);
+  const toggleAutoAnalysis = useCallback(() => {
+    // Instant, deterministic response: the button flips on the same tap and the
+    // engine (not a storage poll) is the single source of truth afterwards.
+    if (isMobileRadarOn()) { stopMobileRadar(); return; }
+    const info = detectMobileMode();
+    // Show the bar on the same tap, before any network round-trip; the engine
+    // replaces it with the first real symbol a few milliseconds later.
+    setRadarProgress({ current: '…', total: 0, index: 0 });
+    setAutoAnalysisOn(true);
+    // Manual start always begins at symbol #1; resume only happens on refresh.
+    void startMobileRadar(info.uid, info.email, undefined, undefined, { immediate: true });
   }, []);
   const [sound, setSound] = useState(true);
   const [lang, setLang] = useState<Language>(() => {
@@ -215,7 +177,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // other side follows.
   const [planPaid, setPlanPaid] = useState<boolean>(() => mobilePaidMode());
   const [freeChosen, setFreeChosen] = useState<boolean>(() => mobileFreeModeChosen());
-  const [isDev, setIsDev] = useState(false);
+  // Seed from the cached identity so the header radar button is usable on the
+  // very first tap (before Firebase's auth round-trip resolves). The auth effect
+  // below corrects this if the real account differs.
+  const [isDev, setIsDev] = useState(() => detectMobileMode().mode === 'developer');
   // ── Developer settings: ONE account across phone + desktop ───────────────
   // A manual change on either device is published to `shared_settings/dev_sync`
   // and applied here within ~1 s. Clients never start this sync.
@@ -228,10 +193,6 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       const keys = ((ev as CustomEvent)?.detail?.keys || []) as string[];
       if (keys.length === 0) return;
       const has = (k: string) => keys.includes(k);
-      if (has('auto_settings')) {
-        setAutoAnalysisOn(readMobileAuto().isEnabled);
-        try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
-      }
       if (has('paper_trading_auto_trade')) setAuto(isMobileAutoTradeOn());
       if (has('language')) {
         try {
@@ -577,53 +538,19 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     }
   }, [canUseAnalysis, tab]);
 
-  // Establish the page-session marker once, so "refresh" and "reopened after
-  // close" are told apart the same way as on desktop.
-  useEffect(() => { isFreshRadarSession(); }, []);
-
-  // Auto-restart radar if enabled but not running (ensures analysis continues across tab navigation)
+  // Resume a scan ONLY when a page REFRESH interrupted one. The engine keeps a
+  // session marker (sessionStorage) while it runs; closing the app clears that
+  // marker, so a fresh open never starts automatically — the user must press
+  // START, which begins at the first symbol. This effect never starts a radar
+  // that was stopped or never started.
   useEffect(() => {
-    const ensureRadar = () => {
-      try {
-        // Only a developer or a paid-plan client may run the analysis engine
-        // (same entitlement that shows the Auto/Manual tabs).
-        if (!isDev && !isPlanClient) return;
-        const s = readMobileAuto();
-        if (!s.isEnabled) return;
-        // Clients: opening/refreshing the app must never resume auto-analysis
-        // from storage. They turn it ON manually (that arms this session), then
-        // the interval loop keeps re-analysing on its own. The developer account
-        // keeps resuming (unlimited), detected synchronously from storage so the
-        // first render cannot mistake a developer for a client.
-        const devNow = isDev || detectMobileMode().mode === 'developer';
-        if (devNow) {
-          // Developer phone: radar toggle is purely local and stable. Never
-          // derived from persisted storage or the desktop, so it never flickers.
-          return;
-        }
-        if (!devNow && !isRadarArmed()) {
-          const off = { ...s, isEnabled: false };
-          try { localStorage.setItem('auto_settings', JSON.stringify(off)); } catch {}
-          setAutoAnalysisOn(false);
-          try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
-          return;
-        }
-        if (isMobileRadarOn()) {
-          const p = getMobileRadarProgress();
-          if (p) setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category });
-          return;
-        }
-        const uid = (user?.uid || 'anonymous');
-        const emailVal = (user?.email || email || '');
-        const immediate = takeRadarStartNow();
-        startMobileRadar(uid, emailVal, (p) => setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category }), (r) => {
-          setRadarProgress(null);
-        }, { immediate });
-      } catch {}
-    };
-    ensureRadar();
-    const iv = setInterval(ensureRadar, 10000);
-    return () => clearInterval(iv);
+    if (!isDev && !isPlanClient) return;
+    if (isMobileRadarOn()) return;
+    if (!isMobileRadarPersisted()) return;
+    const info = detectMobileMode();
+    const uid = user?.uid || info.uid || 'anonymous';
+    const emailVal = user?.email || email || info.email || '';
+    void startMobileRadar(uid, emailVal, undefined, undefined, { resume: true });
   }, [user, email, isDev, isPlanClient]);
 
   // Login / logout helpers
@@ -650,6 +577,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   };
 
   const doLogout = async () => {
+    try { stopMobileRadar(); } catch {}
     try {
       await signOut(auth);
     } catch {}
@@ -1045,28 +973,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isDev, isPlanClient, loadAll]);
 
-  // DEVELOPER PHONE: read-only mirror of the desktop engine's live progress
-  // (category/current/total) so the phone can SHOW what is being analysed,
-  // without starting or toggling anything locally — the two devices stay
-  // fully decoupled.
-  useEffect(() => {
-    if (!isDev) return;
-    let alive = true;
-    const poll = async () => {
-      try {
-        const snap = await getDoc(doc(db, 'shared_status', 'latest'));
-        if (!alive || !snap.exists()) return;
-        const d: any = snap.data();
-        const p = d?.progress;
-        if (p && typeof p === 'object') {
-          setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category ?? undefined });
-        }
-      } catch {}
-    };
-    void poll();
-    const iv = setInterval(poll, 3000);
-    return () => { alive = false; clearInterval(iv); };
-  }, [isDev, user, email]);
+  // (Progress on the developer phone now comes from the phone's OWN engine via
+  // subscribeMobileRadar — no shared_status poll, so the bar paints instantly
+  // and cannot flicker or go stale.)
   useEffect(() => {
     if (!isDev) return;
     let alive = true;

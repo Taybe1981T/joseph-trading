@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Zap, Loader2, Settings } from 'lucide-react';
-import { MobileProgress, readMobileAuto, startMobileRadar, stopMobileRadar, getMobileRadarProgress, isMobileRadarOn } from '../../services/mobileAnalysisEngine';
-import { takeRadarStartNow, isRadarArmed, flagManualRadarStart } from '../../services/radarSession';
+import { MobileProgress, readMobileAuto, startMobileRadar, stopMobileRadar, getMobileRadarProgress, isMobileRadarOn, subscribeMobileRadar, isMobileRadarPersisted, readMobileRadarResume } from '../../services/mobileAnalysisEngine';
 import { MobileRadarSettings } from './MobileRadarSettings';
 import { Language } from '../../lib/i18n';
-import { mobileT, detectMobileMode } from '../../lib/mobileMode';
+import { mobileT } from '../../lib/mobileMode';
 
 interface Props {
   lang: Language;
@@ -12,47 +11,48 @@ interface Props {
 
 export function MobileAnalysis({ lang }: Props) {
   const isAr = lang === 'ar';
-  const [autoOn, setAutoOn] = useState(() => readMobileAuto().isEnabled);
+  const [autoOn, setAutoOn] = useState(() => isMobileRadarOn() || isMobileRadarPersisted());
   const [lastRun, setLastRun] = useState<string | null>(() => {
     const t = readMobileAuto().lastFinishedAt;
     return t ? new Date(t).toLocaleTimeString() : null;
   });
-  const [prog, setProg] = useState<MobileProgress | null>(() => getMobileRadarProgress());
+  const [prog, setProg] = useState<MobileProgress | null>(() => {
+    const p = getMobileRadarProgress();
+    if (p) return p;
+    if (isMobileRadarPersisted()) {
+      const r = readMobileRadarResume();
+      if (r) return { current: r.symbol, total: r.total, index: r.index, failed: 0, category: r.category };
+    }
+    return null;
+  });
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     const sync = () => {
       const r = readMobileAuto();
-      setAutoOn(r.isEnabled);
       setLastRun(r.lastFinishedAt ? new Date(r.lastFinishedAt).toLocaleTimeString() : null);
     };
     sync();
+    // The engine (shared with the header button) is the ONE source of truth for
+    // ON/OFF and progress. No independent storage polling: that is what made
+    // the button flip between ON/START and the bar appear only after leaving
+    // and re-entering this tab.
+    const unsubscribe = subscribeMobileRadar(({ running, progress }) => {
+      setAutoOn((prev) => (prev === running ? prev : running));
+      setProg(progress);
+    });
     const onSettings = () => sync();
     window.addEventListener('storage', sync);
     window.addEventListener('mobile-radar-settings', onSettings);
     const iv = setInterval(sync, 5000);
-    // Reconnect progress callback if radar is already running
-    if (readMobileAuto().isEnabled && !isMobileRadarOn()) {
-      const isDev = detectMobileMode().mode === 'developer';
-      if (!isDev && !isRadarArmed()) {
-        // Opening/refreshing must not resume a client's auto-analysis: only a
-        // manual ON in THIS session arms it (flagManualRadarStart).
-        try {
-          localStorage.setItem('auto_settings', JSON.stringify({ ...readMobileAuto(), isEnabled: false }));
-        } catch {}
-        setAutoOn(false);
-      } else {
-        const { uid, email } = uidEmail();
-        startMobileRadar(uid, email, (p) => setProg(p), (r) => {
-          setProg(null);
-          setLastRun(new Date().toLocaleTimeString());
-          setDoneMsg(mobileT(lang, `Done: ${r.scanned} scanned, ${r.fresh} fresh`, `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد`));
-          setTimeout(() => setDoneMsg(null), 15000);
-        }, { immediate: takeRadarStartNow() });
-      }
+    // Refresh during an active scan resumes it; a fresh open never starts.
+    if (isMobileRadarPersisted() && !isMobileRadarOn()) {
+      const { uid, email } = uidEmail();
+      void startMobileRadar(uid, email, undefined, undefined, { resume: true });
     }
     return () => {
+      unsubscribe();
       window.removeEventListener('storage', sync);
       window.removeEventListener('mobile-radar-settings', onSettings);
       clearInterval(iv);
@@ -68,29 +68,20 @@ export function MobileAnalysis({ lang }: Props) {
   };
 
   const toggleAuto = () => {
-    const v = !autoOn;
-    try {
-      const raw = localStorage.getItem('auto_settings');
-      const s = raw ? JSON.parse(raw) : {};
-      localStorage.setItem('auto_settings', JSON.stringify({ ...s, isEnabled: v }));
-    } catch {}
-    setAutoOn(v);
-    // Manual ON: arm this session and start right away (desktop parity).
-    // OFF: stop the engine.
-    if (v) {
-      flagManualRadarStart();
-      const { uid, email } = uidEmail();
-      startMobileRadar(uid, email, (p) => setProg(p), (r) => {
-        setProg(null);
-        setLastRun(new Date().toLocaleTimeString());
-        setDoneMsg(mobileT(lang, `Done: ${r.scanned} scanned, ${r.fresh} fresh`, `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد`));
-        setTimeout(() => setDoneMsg(null), 15000);
-      }, { immediate: true });
-    } else {
+    // Same engine as the header button: instant flip, no storage polling.
+    if (isMobileRadarOn()) {
       stopMobileRadar();
-      setProg(null);
+      setDoneMsg(null);
+      return;
     }
-    window.dispatchEvent(new CustomEvent('mobile-radar-settings'));
+    const { uid, email } = uidEmail();
+    setProg({ current: '…', total: 0, index: 0, failed: 0 });
+    setAutoOn(true);
+    void startMobileRadar(uid, email, undefined, (r) => {
+      setLastRun(new Date().toLocaleTimeString());
+      setDoneMsg(mobileT(lang, `Done: ${r.scanned} scanned, ${r.fresh} fresh`, `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد`));
+      setTimeout(() => setDoneMsg(null), 15000);
+    }, { immediate: true });
   };
 
   const pct = prog && prog.total > 0 ? Math.round((prog.index / prog.total) * 100) : 0;

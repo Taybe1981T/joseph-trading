@@ -95,9 +95,9 @@ export function MobileHeader({
         <Activity
           size={25}
           style={{
-            color: '#111827',
+            color: autoAnalysisRunning ? '#ffffff' : '#111827',
             strokeWidth: 2.6,
-            animation: autoAnalysisRunning ? 'pulseWhite 1.2s infinite' : 'none',
+            animation: autoAnalysisRunning ? 'pulseWhite 1s infinite' : 'none',
           }}
         />
         <span
@@ -140,7 +140,7 @@ export function MobileHeader({
   return (
     <>
       <style>{`@keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.55; transform: scale(1.18); } }
-@keyframes pulseWhite { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.7); transform: scale(1); } 50% { box-shadow: 0 0 12px 4px rgba(255,255,255,0.9); transform: scale(1.08); } }`}</style>
+@keyframes pulseWhite { 0%, 100% { opacity: 1; filter: drop-shadow(0 0 0 rgba(255,255,255,0)); } 50% { opacity: 0.3; filter: drop-shadow(0 0 7px rgba(255,255,255,0.95)); } }`}</style>
       <header
         className="mt5-header"
         style={{

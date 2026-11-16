@@ -1,9 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Zap, Layers, Sparkles, Clock, Music } from 'lucide-react';
 import { Language } from '../../lib/i18n';
-import { mobileT, useMobileMode, isMobilePlanClient } from '../../lib/mobileMode';
-import { flagManualRadarStart } from '../../services/radarSession';
-import { getMobileSymbolGroups } from '../../services/mobileAnalysisEngine';
+import { mobileT, useMobileMode, isMobilePlanClient, detectMobileMode } from '../../lib/mobileMode';
+import { getMobileSymbolGroups, isMobileRadarOn, startMobileRadar, stopMobileRadar, subscribeMobileRadar } from '../../services/mobileAnalysisEngine';
 import { DEV_SETTINGS_EVENT } from '../../services/devSettingsSync';
 
 interface AutoSettings {
@@ -40,6 +39,12 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
   // Clients (free OR paid) may use Day Trading only — desktop parity.
   const styleOptions = isDev ? STYLES : STYLES.filter((st) => st.id === 'day_trading');
   const [s, setS] = useState<AutoSettings>(readAuto);
+  // ON/OFF follows the ENGINE (same source as the header button), never the
+  // stored preference, so both controls always agree.
+  const [radarOn, setRadarOn] = useState(() => isMobileRadarOn());
+  useEffect(() => subscribeMobileRadar(({ running }) => {
+    setRadarOn((prev) => (prev === running ? prev : running));
+  }), []);
   const [groups, setGroups] = useState(getMobileSymbolGroups);
   // Developer settings are ONE shared account: a change made on the desktop
   // (or another phone) re-reads here instantly instead of waiting for a reload.
@@ -54,8 +59,14 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
   }, []);
   const commit = (patch: Partial<AutoSettings>) => {
     const next = { ...s, ...patch }; setS(next); writeAuto(next);
-    if (!s.isEnabled && patch.isEnabled) flagManualRadarStart();
     try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
+  };
+  // ON/OFF starts/stops the engine directly (no separate arming flag), so the
+  // settings card, the header button and the progress bar stay in lockstep.
+  const toggleRadar = () => {
+    if (isMobileRadarOn()) { stopMobileRadar(); return; }
+    const info = detectMobileMode();
+    void startMobileRadar(info.uid, info.email, undefined, undefined, { immediate: true });
   };
   // A stored scalping/swing value is normalized back to Day Trading for clients.
   useEffect(() => {
@@ -80,15 +91,15 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflowAnchor: 'none' }}>
-      <div className="mt5-card" style={s.isEnabled ? { borderColor: 'rgba(0,255,136,0.4)' } : undefined}>
+      <div className="mt5-card" style={radarOn ? { borderColor: 'rgba(0,255,136,0.4)' } : undefined}>
         <div className="mt5-card-header">
           <div className="mt5-card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Zap size={18} style={{ color: s.isEnabled ? '#00ff88' : '#888' }} fill={s.isEnabled ? 'currentColor' : 'none'} />
+            <Zap size={18} style={{ color: radarOn ? '#00ff88' : '#888' }} fill={radarOn ? 'currentColor' : 'none'} />
             {mobileT(lang, 'Radar System', 'نظام الرادار')}
           </div>
-          <button type="button" onMouseDown={(e) => e.preventDefault()} className={`mt5-btn ${s.isEnabled ? 'mt5-btn-primary' : 'mt5-btn-secondary'}`} style={{ padding: '8px 18px', fontSize: 13, minWidth: 72 }} onClick={() => commit({ isEnabled: !s.isEnabled })}>{s.isEnabled ? 'ON' : 'OFF'}</button>
+          <button type="button" onMouseDown={(e) => e.preventDefault()} className={`mt5-btn ${radarOn ? 'mt5-btn-primary' : 'mt5-btn-secondary'}`} style={{ padding: '8px 18px', fontSize: 13, minWidth: 72 }} onClick={toggleRadar}>{radarOn ? 'ON' : 'OFF'}</button>
         </div>
-        <div className="mt5-card-subtitle">{s.isEnabled ? mobileT(lang, 'Radar Active', 'الرادار نشط') : mobileT(lang, 'Radar Off', 'الرادار متوقف')}</div>
+        <div className="mt5-card-subtitle">{radarOn ? mobileT(lang, 'Radar Active', 'الرادار نشط') : mobileT(lang, 'Radar Off', 'الرادار متوقف')}</div>
       </div>
 
 

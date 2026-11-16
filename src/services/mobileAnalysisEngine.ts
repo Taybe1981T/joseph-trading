@@ -265,7 +265,7 @@ export async function publishMobileShared(topTen: AnalysisResult[], email: strin
   } catch {}
 }
 
-export async function runMobileRadar(uid: string, email: string, onProg?: (p: MobileProgress) => void) {
+export async function runMobileRadar(uid: string, email: string, onProg?: (p: MobileProgress) => void, resumeFrom?: string | null) {
   const auto = readMobileAuto();
   const strategy = readMobileStrategy();
   const lang = readMobileLang();
@@ -305,41 +305,60 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
     // list (no 15-symbol cap), exactly like the desktop radar.
     jobs.push({ cat, syms: g.symbols });
   }
-  // FIX: grand total across ALL categories so the progress bar never jumps
-  // backwards when the radar moves to the next category.
-  const grandTotal = jobs.reduce((n, j) => n + j.syms.length, 0);
-  let done = 0;
-  let scanned: AnalysisResult[] = [];
-  let failed = 0;
-  for (const j of jobs) {
-    if (!readMobileAuto().isEnabled) break;
-    for (const sym of j.syms) {
-      if (!readMobileAuto().isEnabled) break;
-      // Paid-client analysis quota (desktop parity): 5 analyses per symbol per
-      // UTC day, shared with manual analysis.
-      if (email && !isDeveloperEmail(email)) {
-        const q = consumeSymbolAnalyses(email, [sym], lang);
-        if (q.allowed.length === 0) continue;
-      }
-      done++;
-      onProg?.({ current: sym, total: grandTotal, index: done, failed, exchange: j.exKey ? exchangeLabel(j.exKey, lang) : undefined, category: j.cat });
-      try {
-        await waitIfRateLimited();
-        const b = await analyzeMarketBatch(
-          [{ symbol: sym, type: detectMobileType(sym), timeframe: auto.timeframe || '1d', tradingStyle: auto.tradingStyle || TradingStyle.DAY_TRADING }],
-          strategy, lang,
-          () => onProg?.({ current: sym, total: grandTotal, index: done, failed, exchange: j.exKey ? exchangeLabel(j.exKey, lang) : undefined, category: j.cat })
-        );
-        if (b.results.length > 0) {
-          for (const r of b.results) { r.userId = uid || 'anonymous'; scanned.push(r); }
-          failed += b.errors.length;
-          await persistMobileResults(b.results, uid || 'anonymous');
-        } else { failed++; }
-      } catch { failed++; await new Promise((r) => setTimeout(r, 3000)); }
-      // Desktop parity: pace the scan so the shared key pool is never hammered.
-      if (readMobileAuto().isEnabled) await new Promise((r) => setTimeout(r, 2500));
-    }
+  // Flatten the jobs into ONE ordered plan. The same deterministic order is
+  // rebuilt on every run, so a refresh can resume at the exact symbol where the
+  // previous page was interrupted. A fresh app open clears this state, so a
+  // manual start always begins from the first symbol.
+  const plan: { cat: string; sym: string; exKey?: any }[] = [];
+  for (const j of jobs) for (const sym of j.syms) plan.push({ cat: j.cat, sym, exKey: j.exKey });
+  const grandTotal = plan.length;
+  let startIdx = 0;
+  if (resumeFrom) {
+    const at = plan.findIndex((p) => p.sym === String(resumeFrom).toUpperCase().trim());
+    if (at > 0) startIdx = at;
   }
+  let done = startIdx;
+  const scanned: AnalysisResult[] = [];
+  let failed = 0;
+  let finished = true;
+  for (let i = startIdx; i < plan.length; i++) {
+    if (!mRadarOn) { finished = false; break; }
+    const { cat, sym, exKey } = plan[i];
+    // Paid-client analysis quota (desktop parity): 5 analyses per symbol per
+    // UTC day, shared with manual analysis.
+    if (email && !isDeveloperEmail(email)) {
+      const q = consumeSymbolAnalyses(email, [sym], lang);
+      if (q.allowed.length === 0) continue;
+    }
+    done = i + 1;
+    // Persist the resume point BEFORE the network call: a refresh in the middle
+    // of this symbol continues from it instead of restarting the whole scan.
+    writeMobileRadarResume({ symbol: sym, index: i, total: grandTotal, category: cat });
+    const prog: MobileProgress = {
+      current: sym, total: grandTotal, index: done, failed,
+      exchange: exKey ? exchangeLabel(exKey, lang) : undefined, category: cat,
+    };
+    // Emit synchronously: the progress bar must paint the instant the user
+    // presses START, never after the first network round-trip.
+    onProg?.(prog);
+    try {
+      await waitIfRateLimited();
+      const b = await analyzeMarketBatch(
+        [{ symbol: sym, type: detectMobileType(sym), timeframe: auto.timeframe || '1d', tradingStyle: auto.tradingStyle || TradingStyle.DAY_TRADING }],
+        strategy, lang,
+        () => onProg?.(prog)
+      );
+      if (b.results.length > 0) {
+        for (const r of b.results) { r.userId = uid || 'anonymous'; scanned.push(r); }
+        failed += b.errors.length;
+        await persistMobileResults(b.results, uid || 'anonymous');
+      } else { failed++; }
+    } catch { failed++; await new Promise((r) => setTimeout(r, 3000)); }
+    // Desktop parity: pace the scan so the shared key pool is never hammered.
+    if (mRadarOn) await new Promise((r) => setTimeout(r, 2500));
+  }
+  // A completed scan has no resume point; an interrupted one keeps it.
+  if (finished) writeMobileRadarResume(null);
   try { initAudio(); } catch {}
   try { playCompletion(Math.max(0, Math.min(1, Number((auto as any).volume ?? 0.5)))); } catch {}
   const fresh = mergeMobileTopSignals(scanned, !!auto.showAllSignals);
@@ -355,41 +374,125 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
   return { scanned: scanned.length, failed, fresh };
 }
 
+// ── Mobile radar run state (single source of truth for button + bar) ─────────
+// The ON flag lives in sessionStorage: a page REFRESH keeps it (so an
+// interrupted scan resumes from the last symbol), while closing the app clears
+// it (a fresh open always starts at START/stopped). This is what makes the
+// header button and the progress bar deterministic instead of flickering.
+const M_RADAR_ON_KEY = 'finalyze_mobile_radar_on_v1';
+const M_RADAR_RESUME_KEY = 'finalyze_mobile_radar_resume_v1';
+
+interface MobileRadarResume { symbol: string; index: number; total: number; category?: string }
+
+function readSessionValue(key: string): string | null {
+  try { return sessionStorage.getItem(key); } catch { return null; }
+}
+function writeSessionValue(key: string, value: string | null) {
+  try { if (value == null) sessionStorage.removeItem(key); else sessionStorage.setItem(key, value); } catch {}
+}
+function writeMobileRadarResume(r: MobileRadarResume | null) {
+  writeSessionValue(M_RADAR_RESUME_KEY, r ? JSON.stringify(r) : null);
+}
+export function readMobileRadarResume(): MobileRadarResume | null {
+  try {
+    const raw = readSessionValue(M_RADAR_RESUME_KEY);
+    return raw ? (JSON.parse(raw) as MobileRadarResume) : null;
+  } catch { return null; }
+}
+
 let mRadarTimer: ReturnType<typeof setTimeout> | null = null;
 let mRadarOn = false;
 let mRadarProg: MobileProgress | null = null;
 let mRadarOnProg: ((p: MobileProgress) => void) | null = null;
 let mRadarOnDone: ((r: any) => void) | null = null;
+const mRadarSubs = new Set<(s: { running: boolean; progress: MobileProgress | null }) => void>();
+
+function emitMobileRadar() {
+  const snapshot = { running: mRadarOn, progress: mRadarProg };
+  for (const cb of mRadarSubs) { try { cb(snapshot); } catch {} }
+}
+
 export function isMobileRadarOn(): boolean { return mRadarOn; }
 export function getMobileRadarProgress(): MobileProgress | null { return mRadarProg; }
-export function stopMobileRadar() { mRadarOn = false; if (mRadarTimer) { clearTimeout(mRadarTimer); mRadarTimer = null; } }
-export async function startMobileRadar(uid: string, email: string, onProg?: (p: MobileProgress) => void, onDone?: (r: any) => void, opts?: { immediate?: boolean }) {
+
+/** TRUE only when this page session already had the radar ON. A refresh keeps
+ * it; closing the app clears it. Used to know whether to resume a scan. */
+export function isMobileRadarPersisted(): boolean { return readSessionValue(M_RADAR_ON_KEY) === '1'; }
+
+/** Subscribe the button/bar to the engine. Emits the current state at once, so
+ * a remount paints the correct ON/OFF + progress without waiting. */
+export function subscribeMobileRadar(cb: (s: { running: boolean; progress: MobileProgress | null }) => void): () => void {
+  mRadarSubs.add(cb);
+  try { cb({ running: mRadarOn, progress: mRadarProg }); } catch {}
+  return () => { mRadarSubs.delete(cb); };
+}
+
+export function stopMobileRadar() {
+  mRadarOn = false;
+  if (mRadarTimer) { clearTimeout(mRadarTimer); mRadarTimer = null; }
+  mRadarProg = null;
+  writeSessionValue(M_RADAR_ON_KEY, null);
+  writeMobileRadarResume(null);
+  emitMobileRadar();
+}
+
+export async function startMobileRadar(
+  uid: string,
+  email: string,
+  onProg?: (p: MobileProgress) => void,
+  onDone?: (r: any) => void,
+  opts?: { immediate?: boolean; resume?: boolean },
+) {
   // Update callbacks even if already running
   if (onProg) mRadarOnProg = onProg;
   if (onDone) mRadarOnDone = onDone;
   if (mRadarOn) {
-    // Already running - just update callbacks, don't restart
     if (mRadarProg) mRadarOnProg?.(mRadarProg);
+    emitMobileRadar();
     return;
   }
   mRadarOn = true;
+  writeSessionValue(M_RADAR_ON_KEY, '1');
+  emitMobileRadar();
+
+  // Resume only the FIRST run after a page refresh; later interval runs are
+  // full scans.
+  let pendingResume = opts?.resume ? readMobileRadarResume() : null;
+
   const loop = async () => {
-    if (!mRadarOn || !readMobileAuto().isEnabled) { mRadarOn = false; return; }
-    try { const r = await runMobileRadar(uid, email, (p) => { mRadarProg = p; mRadarOnProg?.(p); }); mRadarOnDone?.(r); mRadarProg = null; } catch {}
-    if (!mRadarOn || !readMobileAuto().isEnabled) { mRadarOn = false; return; }
-    mRadarTimer = setTimeout(loop, (readMobileAuto().interval || 15) * 60000);
+    mRadarTimer = null;
+    if (!mRadarOn) { mRadarProg = null; emitMobileRadar(); return; }
+    const resumeSym = pendingResume?.symbol ?? null;
+    pendingResume = null;
+    try {
+      const r = await runMobileRadar(uid, email, (p) => {
+        mRadarProg = p;
+        mRadarOnProg?.(p);
+        emitMobileRadar();
+      }, resumeSym);
+      mRadarOnDone?.(r);
+      mRadarProg = null;
+      emitMobileRadar();
+    } catch {}
+    if (!mRadarOn) { mRadarProg = null; emitMobileRadar(); return; }
+    mRadarTimer = setTimeout(() => { void loop(); }, (readMobileAuto().interval || 15) * 60000);
   };
+
   const auto = readMobileAuto();
   const ms = (auto.interval || 15) * 60000;
   const last = Number(auto.lastFinishedAt || 0);
   const elapsed = last ? Date.now() - last : Infinity;
-  // Opening the app/refreshing only resumes the timer. A scan starts when the
-  // caller explicitly asks for it (manual ON) or when the re-analysis interval
-  // is actually due — never merely because the page loaded.
-  const immediate = opts?.immediate === true || elapsed >= ms;
+  // Resume an interrupted scan immediately; otherwise honour the re-analysis
+  // interval. This function is only called from a manual START or from the
+  // refresh-resume path, never from a cold app open.
+  const immediate = opts?.immediate === true || !!pendingResume || elapsed >= ms;
   if (immediate) {
     await loop();
   } else {
-    mRadarTimer = setTimeout(() => { mRadarTimer = null; void loop(); }, ms - elapsed);
+    mRadarTimer = setTimeout(() => { mRadarTimer = null; void loop(); }, Math.max(1000, ms - elapsed));
   }
 }
+
+// A fresh page with no session marker means the app was closed and reopened:
+// never keep a stale resume point (a manual start must begin at symbol #1).
+try { if (!isMobileRadarPersisted()) writeMobileRadarResume(null); } catch {}
