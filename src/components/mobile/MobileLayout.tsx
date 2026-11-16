@@ -156,7 +156,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         if (isMobileRadarOn()) {
           const p = getMobileRadarProgress();
           if (p) setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category });
-        } else {
+        } else if (!devNow) {
           setRadarProgress(null);
         }
       } catch {}
