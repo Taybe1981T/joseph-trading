@@ -79,7 +79,18 @@ type Snapshot = Record<string, string | null>;
 function readSnapshot(): Snapshot {
   const out: Snapshot = {};
   for (const key of DEV_SYNC_KEYS) {
-    try { out[key] = localStorage.getItem(key); } catch { out[key] = null; }
+    try {
+      let v = localStorage.getItem(key);
+      // The radar on/off toggle is per-device: strip it from the synced value
+      // so it can never propagate (and never triggers a sync by itself).
+      if (key === 'auto_settings' && typeof v === 'string') {
+        try {
+          const o = JSON.parse(v);
+          if (o && typeof o === 'object') { delete o.isEnabled; v = JSON.stringify(o); }
+        } catch {}
+      }
+      out[key] = v;
+    } catch { out[key] = null; }
   }
   return out;
 }
@@ -170,6 +181,8 @@ export function startDevSettingsSync(opts: DevSettingsSyncOptions): () => void {
                 const remote = JSON.parse(incoming);
                 if (local && typeof local === 'object' && local.isEnabled !== undefined) {
                   remote.isEnabled = local.isEnabled;
+                } else if (remote.isEnabled === undefined) {
+                  remote.isEnabled = false;
                 }
                 toStore = JSON.stringify(remote);
               } catch {}

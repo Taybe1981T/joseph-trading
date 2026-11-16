@@ -1048,7 +1048,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         if (d?.developerEmail && String(d.developerEmail).toLowerCase() !== (user?.email || email || '').toLowerCase()) return;
         const p = d?.progress;
         if (p && typeof p === 'object') {
-          setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category });
+          setRadarProgress({ current: p.current, total: p.total, index: p.index, category: p.category ?? undefined });
         } else {
           setRadarProgress(null);
         }
