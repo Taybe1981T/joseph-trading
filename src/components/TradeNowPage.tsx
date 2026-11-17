@@ -1184,6 +1184,8 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     // Developer device: clear the mirrored history on every guest/free account.
     if (isDevUser) {
       try { await broadcastMirrorEvent(clearEventFor(user?.email || '')); } catch {}
+      // Publish the (now empty) history snapshot as the durable confirmation.
+      try { await publishDevBook(await store.listTrades() as any, user?.email || ''); } catch {}
     }
     setTrades((prev) => prev.filter((x) => x.status !== 'closed'));
     setBusy(false);
@@ -1209,6 +1211,11 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     setBusy(false);
     setToast(isAr ? 'تم حذف السجل' : 'Entry deleted');
     setTimeout(() => setToast(null), 2000);
+    // Developer device: republish the history snapshot so every free/guest view
+    // drops the same entry automatically (background reconcile, no reload).
+    if (isDevUser) {
+      try { await publishDevBook(await store.listTrades() as any, user?.email || ''); } catch {}
+    }
   }
 
   // Toggle the chart panel between normal and fullscreen (native browser fullscreen on the panel).

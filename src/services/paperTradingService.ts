@@ -32,6 +32,8 @@ export interface PaperTrade {
   // True when this position is a COPY of a developer trade (mirror engine).
   // Developer closes/history clears only ever touch these positions.
   mirrored?: boolean;
+  /** Developer's own `openedAt` for a mirrored copy — used to match history. */
+  sourceOpenedAt?: number;
   // Per-position trailing-stop settings (USD) edited via the position editor
   // (pencil → modal). When set, the background position manager uses these
   // instead of the global strategy_settings defaults.

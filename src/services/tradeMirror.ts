@@ -75,6 +75,9 @@ export const DEV_BOOK_DOC = { collection: 'shared_status', id: 'book' } as const
 const DEV_BOOK_MAX_AGE_MS = 24 * 3600 * 1000;
 /** Grace period before a copy counts as "stale" (book publish lags by ~15s). */
 const RECONCILE_GRACE_MS = 90 * 1000;
+/** Grace before a mirrored closed row is dropped when it is missing from the
+ *  developer's published history (a close event and the book publish can race). */
+const HISTORY_RECONCILE_GRACE_MS = 30 * 1000;
 
 export function readMirrorSeen(): Set<string> {
   try {
@@ -192,6 +195,14 @@ export interface DevBookTrade {
   category?: string | null;
 }
 
+/** One closed entry in the developer's published history. */
+export interface DevClosedTrade {
+  symbol: string;
+  side: 'buy' | 'sell';
+  openedAt: number;
+  closedAt: number;
+}
+
 /**
  * DEVELOPER SIDE — publish the live book (open symbols) so free/guest accounts
  * can reconcile: any mirrored position the developer no longer holds is
@@ -205,7 +216,7 @@ export interface DevBookTrade {
 let _pendingBookShrink: { sig: string; at: number } | null = null;
 
 export async function publishDevBook(
-  trades: { symbol?: string; status?: string; side?: string; openedAt?: number; entryPrice?: number | null; sl?: number | null; tp?: number | null; qty?: number | null }[],
+  trades: { symbol?: string; status?: string; side?: string; openedAt?: number; closedAt?: number; entryPrice?: number | null; sl?: number | null; tp?: number | null; qty?: number | null }[],
   origin: string,
   publishOpts?: { force?: boolean },
 ): Promise<boolean> {
@@ -232,6 +243,22 @@ export async function publishDevBook(
     // developer's instead of depending on each device's Firestore read order.
     const openTrades = [...bySymbol.values()].sort((a, b) => a.openedAt - b.openedAt);
     const openSymbols = openTrades.map((t) => t.symbol);
+
+    // Closed history snapshot: free/guest views reconcile their mirrored history
+    // against it. When the developer deletes a single history row (or clears
+    // history), the row disappears here and every free copy drops it on the next
+    // background poll — no reload, no manual action.
+    const closedTrades: DevClosedTrade[] = (trades || [])
+      .filter((t) => t && t.status === 'closed' && t.symbol)
+      .map((t) => ({
+        symbol: String(t.symbol).toUpperCase(),
+        side: String(t.side || '').toLowerCase() === 'sell' ? 'sell' as const : 'buy' as const,
+        openedAt: Number(t.openedAt) || 0,
+        closedAt: Number(t.closedAt) || 0,
+      }))
+      .filter((t) => t.openedAt > 0)
+      .sort((a, b) => b.closedAt - a.closedAt)
+      .slice(0, 300);
 
     // ── SHRINK GUARD ──────────────────────────────────────────────────────
     // A device with a stale/offline Firestore cache must never broadcast a
@@ -268,6 +295,8 @@ export async function publishDevBook(
       openSymbols,
       openTrades,
       openCount: openTrades.length,
+      closedTrades,
+      closedCount: closedTrades.length,
       updatedAt: Date.now(),
       origin,
     }, { merge: true });
@@ -478,6 +507,43 @@ async function runMirrorPass(opts: {
           for (const t of stale) guardClearOpened(String(t.symbol || ''));
           console.log(`[TradeMirror] removed ${stale.length} stale copy(ies) not in developer book`);
         }
+
+        // ── HISTORY RECONCILE ──────────────────────────────────────────────
+        // The developer's closed history is published in the same book. Single
+        // history deletes / "clear history" on the developer device therefore
+        // remove the matching mirrored rows automatically, even if the clear
+        // event was missed. Copies opened by this build carry the developer's
+        // `openedAt` as `sourceOpenedAt`, so entries match 1:1. Legacy copies
+        // (no marker) are only dropped when the developer has no history for
+        // that symbol at all — never by guessing between several entries.
+        if (Array.isArray(book.closedTrades)) {
+          const devClosed = (book.closedTrades as any[])
+            .map((e) => ({
+              symbol: String(e?.symbol || '').toUpperCase(),
+              openedAt: Number(e?.openedAt) || 0,
+            }))
+            .filter((e) => e.symbol && e.openedAt > 0);
+          const keys = new Set(devClosed.map((e) => `${e.symbol}|${e.openedAt}`));
+          const histSymbols = new Set(devClosed.map((e) => e.symbol));
+          const staleClosed = allTrades.filter((t: any) => {
+            if (!t || t.status !== 'closed' || t.mode === 'paid') return false;
+            // Wait out the race between a close event and the book publish.
+            if (Number(t.closedAt || 0) >= now - HISTORY_RECONCILE_GRACE_MS) return false;
+            const sym = String(t.symbol || '').toUpperCase();
+            const srcOpened = Number(t.sourceOpenedAt);
+            if (srcOpened > 0) return !keys.has(`${sym}|${srcOpened}`);
+            return !histSymbols.has(sym);
+          });
+          if (staleClosed.length) {
+            await store.deleteTrades(staleClosed.map((t: any) => t.id));
+            const drop = new Set(staleClosed.map((t: any) => t.id));
+            allTrades = allTrades.filter((t: any) => !drop.has(t.id));
+            console.log(`[TradeMirror] removed ${staleClosed.length} history row(s) deleted by the developer`);
+            // Notify callers (mobile layout) that the local store changed so the
+            // UI refreshes immediately instead of waiting for the next load tick.
+            try { executed.push({ id: 'reconcile:history:' + Date.now(), kind: 'clear' as any, symbol: '', scope: 'history' as any, openedAt: Date.now(), origin: 'dev-book', publishedAt: Date.now() } as any); } catch {}
+          }
+        }
       }
     } catch (e) {
       console.warn('[TradeMirror] book reconcile failed:', (e as any)?.message || e);
@@ -515,7 +581,7 @@ async function runMirrorPass(opts: {
     devSl: number | null,
     devTp: number | null,
     eventId: string | null,
-    copy?: { entry?: number | null; qty?: number | null; loose?: boolean; category?: string | null },
+    copy?: { entry?: number | null; qty?: number | null; loose?: boolean; category?: string | null; openedAt?: number | null },
   ): Promise<boolean> => {
     const loose = copy?.loose === true;
     if (openFor(sym)) { if (eventId) markSeen(eventId); return false; }
@@ -554,12 +620,17 @@ async function runMirrorPass(opts: {
       category: cat, symbol: sym, entry: price, isBuy, qty: q,
       balance, signalSl: devSl, signalTp: devTp,
     });
+    // Keep the developer's own open time so the copy can be matched 1:1 against
+    // the developer's published history (single history deletes propagate).
+    const srcOpenedAt = Number(copy?.openedAt);
+    const hasSrcOpened = Number.isFinite(srcOpenedAt) && srcOpenedAt > 0;
     await store.addTrade({
       symbol: sym, category: cat, side, qty: q, entryPrice: price,
       status: 'open' as const,
       tp: levels.tpPrice,
       sl: levels.slPrice,
-      openedAt: Date.now(),
+      openedAt: hasSrcOpened ? srcOpenedAt : Date.now(),
+      ...(hasSrcOpened ? { sourceOpenedAt: srcOpenedAt } : {}),
       source: 'auto',
       mode: opts.mode || 'free',
       mirrored: true,
@@ -599,6 +670,7 @@ async function runMirrorPass(opts: {
         entry: entry.entry ?? null,
         qty: entry.qty ?? null,
         category: entry.category ?? null,
+        openedAt: entry.openedAt,
         loose: true,
       });
       if (ok) {
@@ -713,7 +785,7 @@ async function runMirrorPass(opts: {
           ev.devSl ?? null,
           ev.devTp ?? null,
           ev.id,
-          { entry: loose ? (ev.devEntry ?? null) : null, loose },
+          { entry: loose ? (ev.devEntry ?? null) : null, openedAt: ev.openedAt, loose },
         );
         if (created) {
           executed.push(ev);

@@ -59,6 +59,7 @@ import { fetchStoreBots } from '../../services/storeService';
 import type { PaymentSession } from '../../services/paymentSession';
 import { getLivePrices, calcPnl, isMarketOpen, getTradeStore } from '../../services/paperTradingService';
 import { pollMirrorEvents, listenMirrorEvents, broadcastMirrorEvent, clearEventFor } from '../../services/tradeMirror';
+import { publishSharedSignals, applySignalTombstones } from '../../services/sharedSignals';
 import { startDevSettingsSync, DEV_SETTINGS_EVENT } from '../../services/devSettingsSync';
 import { rememberBuyerEmail, setCurrentUserEmail } from '../../lib/clientScope';
 import { stackedPlanExpiry } from '../../lib/planPeriod';
@@ -899,8 +900,11 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         // merge) so removed developer signals also disappear here. De-dupe by
         // symbol+timeframe: several desktop publishers write shared_results, and
         // a duplicate entry used to render as two identical cards on the phone.
+        // Tombstones/`clearedAt` also apply, so a stale re-publish from another
+        // developer device cannot resurrect a deleted signal.
+        const alive = applySignalTombstones(latestData.results, latestData);
         const firestoreSignals = topPerCategory(
-          attachCategories(dedupeSignals(latestData.results
+          attachCategories(dedupeSignals(alive
             .filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways)
             .map((s: any) => ({ ...s, source: s.source || 'auto' })))),
           3,
@@ -1077,6 +1081,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       const store = getTradeStore(mobileTradeUser() as any);
       await store.deleteTrades([id]);
     } catch {}
+    // Developer phone: republish the live book so free/guest views drop the
+    // same history entry in the background (their reconcile pass removes any
+    // closed copy that is no longer in the developer's history).
+    if (isDev) { try { await publishMobileDevBook(); } catch {} }
     loadAll();
   }, [isDev, isPlanClient, loadAll]);
 
@@ -1089,6 +1097,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     // Developer device: mirror history clear to every free/guest view.
     if (isDev) {
       try { await broadcastMirrorEvent(clearEventFor(user?.email || email || '')); } catch {}
+      try { await publishMobileDevBook(); } catch {}
     }
     loadAll();
   }, [isDev, isPlanClient, loadAll, user, email]);
@@ -1290,20 +1299,18 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     // guest view, so a deletion here must reach the website and all devices.
     if (isDev) {
       const next = fullSignalsRef.current.filter((s: any) => String(s?.symbol) !== sym);
-      void publishDevSignals(next);
+      void publishDevSignals(next, sym);
     }
     loadAll();
   };
 
   /** Publish the developer's displayed signals (shared_results) from mobile. */
-  const publishDevSignals = async (list: any[]) => {
+  const publishDevSignals = async (list: any[], deletedSymbol?: string) => {
     if (!isDev) return;
     try {
-      const safe = JSON.parse(JSON.stringify(Array.isArray(list) ? attachCategories(list) : []));
-      await setDoc(doc(db, 'shared_results', 'latest'), {
-        results: safe,
-        timestamp: new Date().toISOString(),
+      await publishSharedSignals(attachCategories(Array.isArray(list) ? list : []), {
         developerEmail: user?.email || email || '',
+        deletedSymbol,
       });
     } catch (e) {
       console.warn('[DEV] mobile signal publish failed:', e);
@@ -1311,13 +1318,24 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   };
 
   /** Clear every displayed signal — developer's clear propagates to all views. */
-  const clearAllSignalsMobile = () => {
+  const clearAllSignalsMobile = async () => {
     // Free/guest accounts are view-only (desktop parity): no clearing.
     if (!isDev && !isPlanClient) return;
     setFullSignals([]);
     try { localStorage.setItem(mobileSignalsStorageKey(), '[]'); } catch {}
     try { localStorage.setItem('manual_results', '[]'); } catch {}
-    if (isDev) void publishDevSignals([]);
+    if (isDev) {
+      try {
+        // `clearAll` stamps `clearedAt`, so every free/guest view AND the
+        // developer's desktop drop the whole feed in the background.
+        await publishSharedSignals([], {
+          developerEmail: user?.email || email || '',
+          clearAll: true,
+        });
+      } catch (e) {
+        console.warn('[DEV] mobile clear publish failed:', e);
+      }
+    }
   };
 
   const signalFor = useCallback((sym: string) => fullSignals.find((r) => r.symbol === sym), [fullSignals]);

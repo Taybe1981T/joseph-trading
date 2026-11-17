@@ -86,19 +86,6 @@ export function MobileSignalCard({ res, lang, isDev, isClient, onDetail, onTrade
           {String(res.signal).includes('sell') ? <TrendingDown size={14} /> : <TrendingUp size={14} />}
         </div>
       </div>
-      {!isDev && res.summary && (
-        <div style={{ fontSize: 11, color: '#c9c9c9', padding: '4px 0', lineHeight: 1.55, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, paddingLeft: 8, paddingRight: 8 }}>
-          <div style={{ fontSize: 10, fontWeight: 800, color: '#F59E0B', marginBottom: 2 }}>
-            {isAr ? 'لماذا هذا الرمز؟' : 'Why this symbol?'}
-          </div>
-          {res.summary}
-        </div>
-      )}
-      {!isDev && !res.summary && (
-        <div style={{ fontSize: 11, color: '#aaa', padding: '4px 0', fontStyle: 'italic' }}>
-          {isAr ? `${res.symbol} — إشارة ${res.signal === 'strong_buy' || res.signal === 'buy' ? 'شراء' : 'بيع'} قوية (ثقة ${res.confidence}%) بناءً على تحليل فني متقدم` : `${res.symbol} — ${res.signal === 'strong_buy' || res.signal === 'buy' ? 'Buy' : 'Sell'} signal (confidence ${res.confidence}%) based on advanced technical analysis`}
-        </div>
-      )}
       {res.entryPrice ? (
         <div style={{ display: 'flex', gap: 10, fontSize: 12, color: '#aaa', fontWeight: 700 }}>
           <span>Entry <b style={{ color: '#fff' }}>{res.entryPrice}</b></span>

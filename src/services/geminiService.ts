@@ -587,6 +587,7 @@ function generateLocalAnalysis(
   let supportAligned = 0;
   let supportTotal = 0;
   const reasons: any[] = [];
+  const isAr = lang === 'ar';
   const direction = metrics?.direction || 'sideways';
   const isUp = direction === 'uptrend';
   const isDown = direction === 'downtrend';
@@ -648,12 +649,12 @@ function generateLocalAnalysis(
   const trendStartInfo = pullbackPt ? (pullbackPt.date ? `${pullbackPt.date} (${pullbackPt.price.toFixed(5)})` : pullbackPt.price.toFixed(5)) : 'N/A';
   const lastSwingInfo = lastSwing ? (lastSwing.date ? `${lastSwing.date} (${lastSwing.price.toFixed(5)})` : lastSwing.price.toFixed(5)) : 'N/A';
   if (prePullbackAgeVal < minPreAge) {
-    reasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö صغير (أقل من ${minPreAge}) | بداية: ${trendStartInfo} | آخر سحب: ${lastSwingInfo}`, status: 'neutral', impact: 'trend before pullback too short ΓÇö neutral only', primary: true });
+    reasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö ${isAr ? `صغير (أقل من ${minPreAge})` : `Young (<${minPreAge})`} | ${isAr ? 'بداية' : 'Start'}: ${trendStartInfo} | ${isAr ? 'آخر سحب' : 'Last pullback'}: ${lastSwingInfo}`, status: 'neutral', impact: 'trend before pullback too short ΓÇö neutral only', primary: true });
   } else if (prePullbackAgeVal >= minPreAge && prePullbackAgeVal <= maxPreAge) {
     prePullbackAgeMet = true;
-    reasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö شاب (${minPreAge}-${maxPreAge}) | بداية: ${trendStartInfo} | آخر سحب: ${lastSwingInfo}`, status: 'positive', impact: 'trend healthy ΓÇö STRONG signals allowed', primary: true });
+    reasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö ${isAr ? `شاب (${minPreAge}-${maxPreAge})` : `Healthy (${minPreAge}-${maxPreAge})`} | ${isAr ? 'بداية' : 'Start'}: ${trendStartInfo} | ${isAr ? 'آخر سحب' : 'Last pullback'}: ${lastSwingInfo}`, status: 'positive', impact: 'trend healthy ΓÇö STRONG signals allowed', primary: true });
   } else {
-    reasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö كهل (أكثر من ${maxPreAge}) | بداية: ${trendStartInfo} | آخر سحب: ${lastSwingInfo}`, status: 'negative', impact: 'trend exhausted ΓÇö neutral only', primary: true });
+    reasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö ${isAr ? `كهل (أكثر من ${maxPreAge})` : `Old (>${maxPreAge})`} | ${isAr ? 'بداية' : 'Start'}: ${trendStartInfo} | ${isAr ? 'آخر سحب' : 'Last pullback'}: ${lastSwingInfo}`, status: 'negative', impact: 'trend exhausted ΓÇö neutral only', primary: true });
   }
 
   // ΓöÇΓöÇ PRIMARY 4: News ΓöÇΓöÇ
@@ -1009,13 +1010,18 @@ export async function analyzeMarket(params: {
   lang?: string;
 }): Promise<AnalysisResult> {
   const { symbol, type, timeframe, tradingStyle, settings = DEFAULT_STRATEGY_SETTINGS, lang = 'en' } = params;
+  // Language of the UI: every generated label/reason is emitted in this language
+  // so an English site never shows Arabic fragments inside the analysis reasons.
+  const isAr = lang === 'ar';
 
   // Per-category retrace (pullback) final-confirmation configuration.
   // Resolved early so its candle data can be fetched alongside the rest.
   const retraceCfg = resolveRetraceConfig(settings, type);
 
   // Check result cache first
-  const cacheKey = `${symbol}_${timeframe}_${tradingStyle}_${JSON.stringify(settings)}`;
+  // Language is part of the key: cached labels/reasons are localized, so an
+  // English request must never be served an Arabic cached result.
+  const cacheKey = `${symbol}_${timeframe}_${tradingStyle}_${lang}_${JSON.stringify(settings)}`;
   const cached = _resultCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < RESULT_CACHE_TTL) {
     return cached.result;
@@ -1662,7 +1668,7 @@ Return ONLY valid JSON:
     if (!isStrongCandidate && isOld && finalSignal !== 'no_entry') {
       finalSignal = SignalType.NEUTRAL;
       finalConfidence = Math.min(finalConfidence, 25);
-      detailedReasons.push({ check: 'Trend Age Zone', value: `${totalAge}c ΓÇö كهل (أكثر من ${oldLimit})`, status: 'negative', impact: 'trend exhausted ΓÇö no signals allowed' });
+      detailedReasons.push({ check: 'Trend Age Zone', value: `${totalAge}c ΓÇö ${isAr ? `كهل (أكثر من ${oldLimit})` : `Old (>${oldLimit})`}`, status: 'negative', impact: 'trend exhausted ΓÇö no signals allowed' });
     }
 
     // STRONG signals: only allowed in MATURE zone (25-70)
@@ -1705,19 +1711,21 @@ Return ONLY valid JSON:
     const pullbackFormDateStr = pullbackPtAI ? `${toDateFromIdx(pullbackPtAI.index)} (${pullbackPtAI.price.toFixed(5)})` : 'N/A';
     // 3. آخر نقطة سحب (last swing point)
     const lastSwingDateStr = lastSwingAI ? `${toDateFromIdx(lastSwingAI.index)} (${lastSwingAI.price.toFixed(5)})` : 'N/A';
-    const preDatesInfo = `بداية الاتجاه: ${trendStartDateStr}\nبداية آخر سحبة: ${pullbackFormDateStr}\nآخر سحبة: ${lastSwingDateStr}`;
+    const preDatesInfo = isAr
+      ? `بداية الاتجاه: ${trendStartDateStr}\nبداية آخر سحبة: ${pullbackFormDateStr}\nآخر سحبة: ${lastSwingDateStr}`
+      : `Trend start: ${trendStartDateStr}\nPullback formation: ${pullbackFormDateStr}\nLast swing: ${lastSwingDateStr}`;
     if (prePullbackAgeVal < minPreAge || prePullbackAgeVal > maxPreAge) {
       if (isStrongCandidate && finalSignal !== 'no_entry') {
         finalSignal = SignalType.NEUTRAL;
         finalConfidence = Math.min(finalConfidence, 30);
       }
       if (prePullbackAgeVal < minPreAge) {
-        detailedReasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö صغير (أقل من ${minPreAge})`, dates: preDatesInfo, status: isStrongCandidate ? 'neutral' : 'positive', impact: isStrongCandidate ? 'trend before pullback too short ΓÇö blocks STRONG' : 'trend short but regular signal bypasses' });
+        detailedReasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö ${isAr ? `صغير (أقل من ${minPreAge})` : `Young (<${minPreAge})`}`, dates: preDatesInfo, status: isStrongCandidate ? 'neutral' : 'positive', impact: isStrongCandidate ? 'trend before pullback too short ΓÇö blocks STRONG' : 'trend short but regular signal bypasses' });
       } else {
-        detailedReasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö كهل (أكثر من ${maxPreAge})`, dates: preDatesInfo, status: isStrongCandidate ? 'negative' : 'positive', impact: isStrongCandidate ? 'trend exhausted ΓÇö blocks STRONG' : 'trend exhausted but regular signal bypasses' });
+        detailedReasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö ${isAr ? `كهل (أكثر من ${maxPreAge})` : `Old (>${maxPreAge})`}`, dates: preDatesInfo, status: isStrongCandidate ? 'negative' : 'positive', impact: isStrongCandidate ? 'trend exhausted ΓÇö blocks STRONG' : 'trend exhausted but regular signal bypasses' });
       }
     } else if (prePullbackAgeVal >= minPreAge && prePullbackAgeVal <= maxPreAge) {
-      detailedReasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö شاب (${minPreAge}-${maxPreAge})`, dates: preDatesInfo, status: 'positive', impact: 'trend healthy ΓÇö all signals allowed' });
+      detailedReasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö ${isAr ? `شاب (${minPreAge}-${maxPreAge})` : `Healthy (${minPreAge}-${maxPreAge})`}`, dates: preDatesInfo, status: 'positive', impact: 'trend healthy ΓÇö all signals allowed' });
     }
 
     // ΓöÇΓöÇ STEP 4c: Pullback Confirmation ΓöÇΓöÇ — validate pullback point quality
@@ -1730,7 +1738,7 @@ Return ONLY valid JSON:
     const oppositeCandles = totalAge - prePullbackAgeVal;
     if (oppositeCandles < minPullbackCandlesVal) {
       pullbackConfirmed = false;
-      detailedReasons.push({ check: 'Pullback Confirm', value: `${oppositeCandles}c معاكسة (أقل من ${minPullbackCandlesVal})`, status: 'negative', impact: `pullback too weak — only ${oppositeCandles} opposite candles` });
+      detailedReasons.push({ check: 'Pullback Confirm', value: `${oppositeCandles}c ${isAr ? `معاكسة (أقل من ${minPullbackCandlesVal})` : `opposite (<${minPullbackCandlesVal})`}`, status: 'negative', impact: `pullback too weak — only ${oppositeCandles} opposite candles` });
     }
     
     // Volume confirmation at pullback point
@@ -1740,7 +1748,7 @@ Return ONLY valid JSON:
       const pullbackVol = volumes && pullbackIdx >= 0 && pullbackIdx < volumes.length ? volumes[pullbackIdx] : 0;
       if (avgVol > 0 && pullbackVol < avgVol * 0.8) {
         pullbackConfirmed = false;
-        detailedReasons.push({ check: 'Pullback Confirm', value: `حجم منخفض عند السحبة`, status: 'negative', impact: `pullback volume ${Math.round(pullbackVol/avgVol*100)}% of average — weak confirmation` });
+        detailedReasons.push({ check: 'Pullback Confirm', value: isAr ? 'حجم منخفض عند السحبة' : 'Low volume at pullback', status: 'negative', impact: `pullback volume ${Math.round(pullbackVol/avgVol*100)}% of average — weak confirmation` });
       }
     }
     
@@ -1754,12 +1762,12 @@ Return ONLY valid JSON:
       ) : false;
       if (!hasReversalCandle) {
         pullbackConfirmed = false;
-        detailedReasons.push({ check: 'Pullback Confirm', value: `لا توجد شمعة ارتداد`, status: 'negative', impact: `no reversal candle at pullback point — weak confirmation` });
+        detailedReasons.push({ check: 'Pullback Confirm', value: isAr ? 'لا توجد شمعة ارتداد' : 'No reversal candle', status: 'negative', impact: `no reversal candle at pullback point — weak confirmation` });
       }
     }
     
     if (pullbackConfirmed && (oppositeCandles >= minPullbackCandlesVal || oppositeCandles >= 2)) {
-      detailedReasons.push({ check: 'Pullback Confirm', value: `${oppositeCandles}c معاكسة — مؤكدة`, status: 'positive', impact: `pullback confirmed with ${oppositeCandles} opposite candles` });
+      detailedReasons.push({ check: 'Pullback Confirm', value: `${oppositeCandles}c ${isAr ? 'معاكسة — مؤكدة' : 'opposite — confirmed'}`, status: 'positive', impact: `pullback confirmed with ${oppositeCandles} opposite candles` });
     }
 
     // ΓöÇΓöÇ STEP 5: Compute confidence from metrics ΓöÇΓöÇ
@@ -1781,11 +1789,11 @@ Return ONLY valid JSON:
     if (totalAge < infantAgeThreshold) {
       const infantPenalty = Math.round(finalConfidence * 0.30); // -30%
       finalConfidence = Math.max(finalConfidence - infantPenalty, 25);
-      detailedReasons.push({ check: 'Age Zone Penalty', value: `${totalAge}c — طفل (<${infantAgeThreshold})`, status: 'negative', impact: `trend too young, insufficient data — confidence -30%` });
+      detailedReasons.push({ check: 'Age Zone Penalty', value: `${totalAge}c — ${isAr ? `طفل (<${infantAgeThreshold})` : `Infant (<${infantAgeThreshold})`}`, status: 'negative', impact: `trend too young, insufficient data — confidence -30%` });
     } else if (totalAge < matureAgeThreshold) {
       const youthPenalty = Math.round(finalConfidence * 0.15); // -15%
       finalConfidence = Math.max(finalConfidence - youthPenalty, 30);
-      detailedReasons.push({ check: 'Age Zone Penalty', value: `${totalAge}c — شباب (${infantAgeThreshold}-${matureAgeThreshold})`, status: 'neutral', impact: `trend developing, moderate confidence — confidence -15%` });
+      detailedReasons.push({ check: 'Age Zone Penalty', value: `${totalAge}c — ${isAr ? `شباب (${infantAgeThreshold}-${matureAgeThreshold})` : `Youth (${infantAgeThreshold}-${matureAgeThreshold})`}`, status: 'neutral', impact: `trend developing, moderate confidence — confidence -15%` });
     }
 
     // ΓöÇΓöÇ STEP 5c: RSI Extreme Protection ΓöÇΓöÇ
@@ -1797,20 +1805,20 @@ Return ONLY valid JSON:
         // EXTREME overbought — BLOCK signal
         rsiBlocked = true;
         finalConfidence = Math.min(finalConfidence, 20);
-        detailedReasons.push({ check: 'RSI Extreme', value: `${rsiVal.toFixed(1)} — تشبع شرائي متطرف`, status: 'negative', impact: 'BLOCKED: RSI > 85 —极高风险 انعكاس' });
+        detailedReasons.push({ check: 'RSI Extreme', value: `${rsiVal.toFixed(1)} — ${isAr ? 'تشبع شرائي متطرف' : 'Extreme overbought'}`, status: 'negative', impact: 'BLOCKED: RSI > 85 — extreme reversal risk' });
       } else if (rsiVal > 80) {
         // High overbought — heavy penalty
         finalConfidence = Math.round(finalConfidence * 0.75); // -25%
-        detailedReasons.push({ check: 'RSI Extreme', value: `${rsiVal.toFixed(1)} — تشبع شرائي`, status: 'negative', impact: 'overbought danger — confidence -25%' });
+        detailedReasons.push({ check: 'RSI Extreme', value: `${rsiVal.toFixed(1)} — ${isAr ? 'تشبع شرائي' : 'Overbought'}`, status: 'negative', impact: 'overbought danger — confidence -25%' });
       } else if (rsiVal < 15) {
         // EXTREME oversold — BLOCK signal
         rsiBlocked = true;
         finalConfidence = Math.min(finalConfidence, 20);
-        detailedReasons.push({ check: 'RSI Extreme', value: `${rsiVal.toFixed(1)} — تشبع بيعي متطرف`, status: 'negative', impact: 'BLOCKED: RSI < 15 —极高风险 انعكاس' });
+        detailedReasons.push({ check: 'RSI Extreme', value: `${rsiVal.toFixed(1)} — ${isAr ? 'تشبع بيعي متطرف' : 'Extreme oversold'}`, status: 'negative', impact: 'BLOCKED: RSI < 15 — extreme reversal risk' });
       } else if (rsiVal < 20) {
         // High oversold — heavy penalty
         finalConfidence = Math.round(finalConfidence * 0.75); // -25%
-        detailedReasons.push({ check: 'RSI Extreme', value: `${rsiVal.toFixed(1)} — تشبع بيعي`, status: 'negative', impact: 'oversold danger — confidence -25%' });
+        detailedReasons.push({ check: 'RSI Extreme', value: `${rsiVal.toFixed(1)} — ${isAr ? 'تشبع بيعي' : 'Oversold'}`, status: 'negative', impact: 'oversold danger — confidence -25%' });
       }
     }
 
@@ -2268,10 +2276,10 @@ Return ONLY valid JSON:
                             finalSignal === SignalType.SELL || finalSignal === SignalType.STRONG_SELL;
       if (isTradeSignal && (finalConfidence < gMin || finalConfidence > gMax)) {
         const reason = finalConfidence < gMin
-          ? `ثقة ${finalConfidence}% أقل من النطاق الذهبي (${gMin}%) — إشارة ضعيفة`
-          : `ثقة ${finalConfidence}% أعلى من النطاق الذهبي (${gMax}%) — دخول متأخر/مطاردة`;
+          ? (isAr ? `ثقة ${finalConfidence}% أقل من النطاق الذهبي (${gMin}%) — إشارة ضعيفة` : `Confidence ${finalConfidence}% below the golden zone (${gMin}%) — weak signal`)
+          : (isAr ? `ثقة ${finalConfidence}% أعلى من النطاق الذهبي (${gMax}%) — دخول متأخر/مطاردة` : `Confidence ${finalConfidence}% above the golden zone (${gMax}%) — late entry / chasing`);
         detailedReasons.push({
-          check: 'النطاق الذهبي',
+          check: isAr ? 'النطاق الذهبي' : 'Golden Zone',
           value: reason,
           status: 'negative',
           impact: `outside golden window [${gMin}-${gMax}] — hidden as neutral`
@@ -2302,7 +2310,6 @@ Return ONLY valid JSON:
       const tfLabel = retraceCfg.timeframe;
       const candleWord = retraceSide === 'buy' ? 'هابطة' : 'صاعدة';
       const candleWordEn = retraceSide === 'buy' ? 'bearish' : 'bullish';
-
       const candleAligned = currentCandleAligns(retraceCandles, retraceSide);
       if (retraceConfirmed && candleAligned) {
         detailedReasons.push({
@@ -2329,7 +2336,7 @@ Return ONLY valid JSON:
             ? `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji ignored: ${count.dojiSkipped})`
             : `no candle data on ${tfLabel}`,
           status: 'negative',
-          impact: `BLOCKED: needs ${count.required} ${candleWordEn} (${candleWord}) consecutive candles on ${tfLabel} before entry — signal hidden`,
+          impact: `BLOCKED: needs ${count.required} ${candleWordEn}${isAr ? ` (${candleWord})` : ''} consecutive candles on ${tfLabel} before entry — signal hidden`,
         });
         finalSignal = SignalType.NEUTRAL;
         finalConfidence = Math.min(finalConfidence, 30);
@@ -2337,9 +2344,18 @@ Return ONLY valid JSON:
     }
 
     // ΓöÇΓöÇ Generate STABLE summary from metrics (not AI text) ΓöÇΓöÇ
-    const trendText = metrics?.direction === 'uptrend' ? 'صاعد' : metrics?.direction === 'downtrend' ? 'هابط' : 'عرضي';
-    const zoneText = totalAge < infantAgeThreshold ? 'طفولي' : totalAge < matureAgeThreshold ? 'شاب' : totalAge <= oldAgeThreshold ? 'نضج' : 'كهل';
-    const signalText = finalSignal === SignalType.STRONG_BUY ? 'شراء قوي' : finalSignal === SignalType.BUY ? 'شراء' : finalSignal === SignalType.STRONG_SELL ? 'بيع قوي' : finalSignal === SignalType.SELL ? 'بيع' : 'محايد';
+    const trendText = metrics?.direction === 'uptrend'
+      ? (isAr ? 'صاعد' : 'Uptrend')
+      : metrics?.direction === 'downtrend' ? (isAr ? 'هابط' : 'Downtrend') : (isAr ? 'عرضي' : 'Sideways');
+    const zoneText = totalAge < infantAgeThreshold
+      ? (isAr ? 'طفولي' : 'Infant')
+      : totalAge < matureAgeThreshold ? (isAr ? 'شاب' : 'Youth')
+      : totalAge <= oldAgeThreshold ? (isAr ? 'نضج' : 'Mature') : (isAr ? 'كهل' : 'Old');
+    const signalText = finalSignal === SignalType.STRONG_BUY ? (isAr ? 'شراء قوي' : 'Strong Buy')
+      : finalSignal === SignalType.BUY ? (isAr ? 'شراء' : 'Buy')
+      : finalSignal === SignalType.STRONG_SELL ? (isAr ? 'بيع قوي' : 'Strong Sell')
+      : finalSignal === SignalType.SELL ? (isAr ? 'بيع' : 'Sell')
+      : (isAr ? 'محايد' : 'Neutral');
     const rsiText = metrics?.rsi !== undefined ? `RSI=${metrics.rsi.toFixed(0)}` : '';
     const summary = `${symbol} ${signalText} ${finalConfidence}% — ${trendText} (${totalAge}c ${zoneText}) ${rsiText}`;
 

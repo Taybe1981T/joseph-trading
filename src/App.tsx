@@ -44,6 +44,7 @@ import TradeNowPage from './components/TradeNowPage';
 import { AutoTradeEngine, AUTO_OPEN_SOUND_EVENT } from './services/autoTradeEngine';
 import { playChampagnePop } from './lib/tradeSounds';
 import { pollMirrorEvents, listenMirrorEvents, isMirrorEnabled, setMirrorEnabled, publishDevBook } from './services/tradeMirror';
+import { publishSharedSignals, readSharedSignalFeed, applySignalTombstones } from './services/sharedSignals';
 import { startDevSettingsSync, DEV_SETTINGS_EVENT } from './services/devSettingsSync';
 import { getTradeStore } from './services/paperTradingService';
 import StorePage from './components/StorePage';
@@ -519,7 +520,10 @@ const isDeveloperSession = () => {
         if (!latestData) { setTopSignals([]); return; }
         const results = latestData.results;
         if (!results || !Array.isArray(results) || results.length === 0) { setTopSignals([]); return; }
-        const filtered = results.filter((r: any) => r && r.signal !== 'neutral' && r.signal !== 'no_entry' && !r.isSideways);
+        // Apply the developer's deletion tombstones / clear marker: a symbol the
+        // developer deleted stays gone even if an older device re-publishes it.
+        const alive = applySignalTombstones(results, latestData);
+        const filtered = alive.filter((r: any) => r && r.signal !== 'neutral' && r.signal !== 'no_entry' && !r.isSideways);
         setTopSignals(topPerCategory(attachCategories(filtered), 3));
       } catch {
         // ignore poll errors
@@ -1375,15 +1379,15 @@ const isDeveloperSession = () => {
       try { localStorage.removeItem(signalsStorageKey()); } catch {}
     }
 
-    // Debounced synchronization to Firestore ΓÇö only the latest state wins
+    // Debounced synchronization to Firestore — only the latest state wins.
+    // publishSharedSignals merges, so deletion tombstones / clearedAt written by
+    // a delete are preserved instead of being wiped by a radar re-publish.
     if (isDeveloperSession()) {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
       syncTimeoutRef.current = setTimeout(() => {
-        setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-          results: attachCategories(dedupeSignals(topSignals)),
-          timestamp: new Date().toISOString(),
+        publishSharedSignals(attachCategories(dedupeSignals(topSignals)), {
           developerEmail: user?.email || '',
-        })).then(() => {
+        }).then(() => {
           console.log('Top signals synced to Firestore successfully, count:', topSignals.length);
           setLastSyncStatus({ ok: true, count: topSignals.length, time: Date.now() });
         }).catch(e => {
@@ -1394,17 +1398,44 @@ const isDeveloperSession = () => {
     }
   }, [topSignals, user]);
 
+  // DEVELOPER: apply deletions broadcast by the developer's OTHER device.
+  // The desktop is the feed publisher, so it never consumed it like a client;
+  // without this a signal deleted on the phone stayed visible on the desktop.
+  // Tombstones make this idempotent: only signals older than their deletion
+  // marker (or older than the last clear) are removed, while a fresh analysis of
+  // the same symbol re-appears normally.
+  useEffect(() => {
+    if (!isDeveloperSession()) return;
+    let cancelled = false;
+    const syncDeletions = async () => {
+      try {
+        const feed = await readSharedSignalFeed();
+        if (cancelled) return;
+        if (!feed.clearedAt && Object.keys(feed.deletedSymbols).length === 0) return;
+        setTopSignals((prev) => {
+          const next = applySignalTombstones(prev, feed);
+          if (next.length === prev.length) return prev;
+          console.log(`[DEV] applied shared signal deletions: ${prev.length - next.length} removed`);
+          try { window.dispatchEvent(new CustomEvent('finalyze-signals-changed')); } catch {}
+          return next;
+        });
+      } catch { /* retry on the next tick */ }
+    };
+    void syncDeletions();
+    const iv = setInterval(syncDeletions, 10000);
+    return () => { cancelled = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   // DEVELOPER: Force sync on startup — ensures signals are always in Firestore
   useEffect(() => {
     if (!isDeveloperSession() || !user) return;
     const current = signalsRef.current;
     if (current.length === 0) return;
     console.log('[DEV] Startup sync — pushing', current.length, 'signals to Firestore');
-    setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-      results: attachCategories(dedupeSignals(current)),
-      timestamp: new Date().toISOString(),
+    publishSharedSignals(attachCategories(dedupeSignals(current)), {
       developerEmail: user?.email || '',
-    })).then(() => {
+    }).then(() => {
       console.log('[DEV] Startup sync successful');
       setLastSyncStatus({ ok: true, count: current.length, time: Date.now() });
     }).catch(e => {
@@ -1735,11 +1766,13 @@ const isDeveloperSession = () => {
     setTopSignals(updated);
     if (isDeveloperSession()) {
       try {
-        await setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-          results: attachCategories(updated),
-          timestamp: new Date().toISOString(),
+        // Tombstone the symbol: every other device (including another developer
+        // device) removes it on its next background poll and no stale re-publish
+        // can bring it back.
+        await publishSharedSignals(attachCategories(updated), {
           developerEmail: user?.email || '',
-        }));
+          deletedSymbol: symbol,
+        });
       } catch (e) { console.warn('[removeSignal] Firestore sync failed:', e); }
       purgeSignalAcrossScopedKeys(symbol);
     }
@@ -1752,14 +1785,14 @@ const isDeveloperSession = () => {
     setTopSignals([]);
     if (isDeveloperSession()) {
       try {
-        const resetToken = Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
-        await setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-          results: [],
-          resetToken,
-          timestamp: new Date().toISOString(),
+        // `clearAll` replaces the shared document with a `clearedAt` marker, so
+        // every free/guest view and the developer's other devices drop their
+        // whole feed in the background (no reload).
+        await publishSharedSignals([], {
           developerEmail: user?.email || '',
-        }));
-        console.log('Clear synced to Firestore, token:', resetToken);
+          clearAll: true,
+        });
+        console.log('Clear synced to Firestore');
       } catch (e) {
         console.warn('Failed to clear Firestore shared_results:', e);
       }
@@ -2222,11 +2255,9 @@ const isDeveloperSession = () => {
       if (merged.length > 0) {
         const unique = dedupeSignals(merged);
         await Promise.race([
-          setDoc(doc(db, 'shared_results', 'latest'), cleanForFirestore({
-            results: attachCategories(unique.slice(-100)),
-            timestamp: new Date().toISOString(),
+          publishSharedSignals(attachCategories(unique.slice(-100)), {
             developerEmail: user?.email || '',
-          })),
+          }),
           new Promise<null>((_, rej) => setTimeout(() => rej(new Error('shared_results timeout')), 15000))
         ]);
         setLastSyncStatus({ ok: true, count: unique.length, time: Date.now() });
