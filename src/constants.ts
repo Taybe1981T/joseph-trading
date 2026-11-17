@@ -48,8 +48,8 @@ export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   stopAtrMultiplier: 3,    // wider, breathable stop (crypto always 3×)
   minPullbackAtr: 0.5,     // entry zone depth in ATR
   pullbackRsiConfirm: true, // deepen the zone to 1 ATR when RSI is stretched
-  // ── Retrace (pullback) final-confirmation filter — all categories OFF ──
-  retraceFilterEnabledForex: false,
+  // ── Retrace (pullback) final-confirmation filter — forex ON, others OFF ──
+  retraceFilterEnabledForex: true,  // 3-candle retrace confirmation ON by default for forex
   retraceFilterEnabledCrypto: false,
   retraceFilterEnabledStocks: false,
   retraceFilterEnabledMetals: false,

@@ -880,6 +880,17 @@ const isDeveloperSession = () => {
           // After migration, keep parent in sync: if direction filter is ON, guard must be ON
           if (merged.candleDirectionFilter === true && merged.useCandleMatch !== true) merged.useCandleMatch = true;
         }
+        // One-time: the 3-candle retrace confirmation is ON by default for forex.
+        // Existing installs keep this off only if the developer explicitly turns
+        // it off again after this migration (the flag prevents re-applying it).
+        const RETRACE_FX_KEY = 'retraceForexDefault_v1';
+        if (!localStorage.getItem(RETRACE_FX_KEY)) {
+          if (merged.retraceFilterEnabledForex !== true) {
+            merged.retraceFilterEnabledForex = true;
+            try { localStorage.setItem('strategy_settings', JSON.stringify(merged)); } catch {}
+          }
+          try { localStorage.setItem(RETRACE_FX_KEY, '1'); } catch {}
+        }
         return merged;
       } catch (e) { return DEFAULT_STRATEGY_SETTINGS; }
     }

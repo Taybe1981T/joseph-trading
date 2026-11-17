@@ -2311,7 +2311,8 @@ Return ONLY valid JSON:
     // ═══════════════════════════════════════════════════════════════════
     // Runs LAST, after every other entry condition (entry gates, candle
     // match, volume guard, golden window). It only engages for a live
-    // BUY/SELL signal and only when its category switch is ON (default OFF).
+    // BUY/SELL signal and only when its category switch is ON (forex default ON,
+    // other categories default OFF).
     //   • retrace found  → signal allowed (strength stays as confidence decides)
     //   • retrace absent → hide the signal (neutral) — final blocking gate
     // Doji candles are never counted (and do not break the run).

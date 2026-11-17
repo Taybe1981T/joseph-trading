@@ -17,7 +17,8 @@ import { MarketType, StrategySettings } from '../types';
  * When the configured category is enabled and the count is reached, the engine
  * promotes the signal to STRONG (final confirmation). When the retrace is not
  * found, the signal is hidden as neutral (the filter is a blocking gate).
- * All categories are disabled by default.
+ * Forex is enabled by default (3 candles, lenient body counting); all other
+ * categories are disabled by default.
  */
 
 export type RetraceCategory = 'forex' | 'crypto' | 'stocks' | 'metals';

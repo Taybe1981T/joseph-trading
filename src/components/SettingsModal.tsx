@@ -555,8 +555,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
         <div className="bg-white/5 border border-white/5 rounded-2xl p-5 md:p-6 space-y-4">
           <p className="text-sm md:text-[17px] text-brand-text/55 leading-relaxed">
             {isAr
-              ? 'يعمل كآخر بوابة بعد استيفاء كل الشروط: يعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. عند تحقّق العدد + شمعة الإشارة مع اتجاه الصفقة → الإشارة مسموحة (قوتها تحدّدها نسبة الثقة). عند غيابه → إخفاء الإشارة (مانع final). شموع الدوجي/المحايدة لا تُحتسب ولا تقطع التسلسل. كل الفئات معطّلة افتراضيًا.'
-              : 'Runs as the very last gate after every other condition: it counts consecutive candles moving AGAINST the trade on the chosen timeframe. Count reached AND the signal candle aligned with the trade → signal allowed (strength set by confidence). Missing → signal hidden (final blocker). Neutral/doji candles are never counted and never break the run. All categories are OFF by default.'}
+              ? 'يعمل كآخر بوابة بعد استيفاء كل الشروط: يعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. عند تحقّق العدد + شمعة الإشارة مع اتجاه الصفقة → الإشارة مسموحة (قوتها تحدّدها نسبة الثقة). عند غيابه → إخفاء الإشارة (مانع final). شموع الدوجي/المحايدة لا تُحتسب ولا تقطع التسلسل. الفوركس مفعّل افتراضيًا (3 شموع)، وبقية الفئات معطّلة افتراضيًا.'
+              : 'Runs as the very last gate after every other condition: it counts consecutive candles moving AGAINST the trade on the chosen timeframe. Count reached AND the signal candle aligned with the trade → signal allowed (strength set by confidence). Missing → signal hidden (final blocker). Neutral/doji candles are never counted and never break the run. Forex is ON by default (3 candles); all other categories are OFF by default.'}
           </p>
           <div className="bg-black/30 rounded-xl p-3 text-xs md:text-sm text-amber-300/80 leading-relaxed">
             {isAr
@@ -589,7 +589,9 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                     <div className="text-xs md:text-sm opacity-70 mt-1">
                       {enabled
                         ? (isAr ? 'مفعّل — بوابة تأكيد أخيرة' : 'Enabled — final confirmation gate')
-                        : (isAr ? 'معطّل (افتراضي)' : 'Disabled (default)')}
+                        : row.suffix === 'Forex'
+                          ? (isAr ? 'معطّل' : 'Disabled')
+                          : (isAr ? 'معطّل (افتراضي)' : 'Disabled (default)')}
                     </div>
                   </div>
                   <div className={`w-14 h-8 rounded-full transition-colors flex items-center px-1 shrink-0 ${
@@ -630,7 +632,13 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                   </select>
                 </div>
 
-                {(() => {
+                {row.suffix === 'Forex' ? (
+                  <div className="w-full p-3 rounded-xl border-2 border-emerald-400/20 bg-emerald-400/5 text-xs md:text-sm text-emerald-300/80 leading-relaxed">
+                    {isAr
+                      ? 'الوضع المخفّف مطبَّق تلقائياً للفوركس: تُحسب كل شمعة عاكسة بجسم أكبر من 10% من مداها، وقاعدة الثلاث شموع باقية.'
+                      : 'Lenient mode applied automatically to forex: every opposite candle with a body larger than 10% of its range counts, and the 3-candle rule still applies.'}
+                  </div>
+                ) : (() => {
                   const strictKey = `retraceStrictMode${row.suffix}` as keyof StrategySettings;
                   const strict = (settings as any)[strictKey] !== false;
                   return (

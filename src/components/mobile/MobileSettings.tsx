@@ -180,8 +180,8 @@ export function MobileSettings({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
                   {isAr
-                    ? 'آخر بوابة بعد استيفاء كل الشروط: تعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. تحقّق العدد + شمعة الإشارة مع الاتجاه ← الإشارة مسموحة. غيابه ← إخفاء (مانع final). الدوجي/المحايدة لا تُحتسب. كل الفئات معطّلة افتراضيًا.'
-                    : 'Final gate after all conditions: counts consecutive candles moving against the trade on the chosen timeframe. Count reached + signal candle aligned → signal allowed. Missing → hidden (final blocker). Neutral/doji never counted. All categories OFF by default.'}
+                    ? 'آخر بوابة بعد استيفاء كل الشروط: تعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. تحقّق العدد + شمعة الإشارة مع الاتجاه ← الإشارة مسموحة. غيابه ← إخفاء (مانع final). الدوجي/المحايدة لا تُحتسب. الفوركس مفعّل افتراضيًا (3 شموع)، وبقية الفئات معطّلة افتراضيًا.'
+                    : 'Final gate after all conditions: counts consecutive candles moving against the trade on the chosen timeframe. Count reached + signal candle aligned → signal allowed. Missing → hidden (final blocker). Neutral/doji never counted. Forex is ON by default (3 candles); all other categories are OFF by default.'}
                 </div>
 
                 {retraceRows.map((row) => {
@@ -208,7 +208,11 @@ export function MobileSettings({
                         <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                           <span style={{ fontSize: 15, fontWeight: 900 }}>{isAr ? row.ar : row.en}</span>
                           <span style={{ fontSize: 11, opacity: 0.75 }}>
-                            {enabled ? (isAr ? 'مفعّل — تأكيد أخير' : 'Enabled — final gate') : (isAr ? 'معطّل (افتراضي)' : 'Disabled (default)')}
+                            {enabled
+                              ? (isAr ? 'مفعّل — تأكيد أخير' : 'Enabled — final gate')
+                              : row.suffix === 'Forex'
+                                ? (isAr ? 'معطّل' : 'Disabled')
+                                : (isAr ? 'معطّل (افتراضي)' : 'Disabled (default)')}
                           </span>
                         </span>
                         <span style={{ width: 44, height: 24, borderRadius: 99, background: enabled ? '#10b981' : '#3a3a3a', display: 'flex', alignItems: 'center', padding: 2, flexShrink: 0 }}>
@@ -256,7 +260,13 @@ export function MobileSettings({
                         </select>
                       </div>
 
-                      {(() => {
+                      {row.suffix === 'Forex' ? (
+                        <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(16,185,129,0.25)', background: 'rgba(16,185,129,0.06)', color: '#10b981', fontSize: 11, lineHeight: 1.7 }}>
+                          {isAr
+                            ? 'الوضع المخفّف مطبَّق تلقائياً للفوركس: تُحسب كل شمعة عاكسة بجسم أكبر من 10% من مداها، وقاعدة الثلاث شموع باقية.'
+                            : 'Lenient mode applied automatically to forex: every opposite candle with a body larger than 10% of its range counts, and the 3-candle rule still applies.'}
+                        </div>
+                      ) : (() => {
                         const strictKey = `retraceStrictMode${row.suffix}` as keyof StrategySettings;
                         const strict = (strategy as any)[strictKey] !== false;
                         return (
