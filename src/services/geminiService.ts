@@ -168,8 +168,18 @@ function calculateSupplyDemandZones(highs: number[], lows: number[], volumes: nu
  * ROBUST TECHNICAL ENGINE (VERSION 2.0)
  * Works with minimal data (10+ candles) and handles gaps gracefully.
  */
-function calculateTechnicalMetrics(closes: number[], highs: number[], lows: number[], volumes?: number[], opens?: number[]) {
+function calculateTechnicalMetrics(
+  closes: number[], highs: number[], lows: number[], volumes?: number[], opens?: number[],
+  opts?: { isForex?: boolean },
+) {
   if (!closes || closes.length < 10) return null;
+
+  // Forex is structurally low-volatility: relative BB width is almost always
+  // < 0.02 and MA alignment is frequently 'mixed'. Requiring only 2 of the 3
+  // sideways votes therefore labels nearly every FX pair as sideways, which
+  // makes the AI prompt return `no_entry` and hides every signal. Forex needs
+  // ALL THREE votes before it is treated as sideways (other categories keep 2).
+  const isForex = opts?.isForex === true;
 
   const len = closes.length;
   const safeOpens = opens && opens.length >= len ? opens : closes;
@@ -363,7 +373,9 @@ function calculateTechnicalMetrics(closes: number[], highs: number[], lows: numb
   const bbSideays = bbWidth < 0.02;
   const maMixed = maAlignment === 'mixed';
   const sidewaysVotes = [adxSideays, bbSideays, maMixed].filter(Boolean).length;
-  const isSideways = sidewaysVotes >= 2;
+  // FOREX FIX: genuine sideways requires all three votes. Without this, a
+  // healthy FX trend with narrow bands + mixed MAs was forced to `no_entry`.
+  const isSideways = sidewaysVotes >= (isForex ? 3 : 2);
   let sidewaysDirection: 'sideways' | 'uptrend' | 'downtrend' = 'sideways';
   if (!isSideways) {
     if (maAlignment === 'bullish' || adxDirection === 'uptrend') sidewaysDirection = 'uptrend';
@@ -535,7 +547,7 @@ async function fetchAndPrepareSymbolData(
     const opens = rawOpens1.length >= closes.length ? rawOpens1 : closes;
     if (closes.length < 10) return { error: `Insufficient data for ${symbol}.` };
 
-    const metrics = calculateTechnicalMetrics(closes, highs, lows, volumes, opens);
+    const metrics = calculateTechnicalMetrics(closes, highs, lows, volumes, opens, { isForex: type === MarketType.FOREX });
     const supplyDemandZones = calculateSupplyDemandZones(highs, lows, volumes || [], closes);
     const zonesText = supplyDemandZones.length > 0
       ? supplyDemandZones.map(z => `${z.type === 'supply' ? 'Supply' : 'Demand'} zone: ${z.bottom.toFixed(2)}ΓÇô${z.top.toFixed(2)} (strength ${z.strength.toFixed(0)}%)`).join('. ')
@@ -556,7 +568,7 @@ async function fetchAndPrepareSymbolData(
         microLows = microQuotes.low?.filter((c: any) => c != null) || microCloses;
         microOpens = microQuotes.open?.filter((c: any) => c != null) || microCloses;
         microVolumes = microQuotes.volume?.filter((c: any) => c != null) || [];
-        if (microCloses.length >= 10) microMetrics = calculateTechnicalMetrics(microCloses, microHighs, microLows, microVolumes.length > 0 ? microVolumes : undefined, microOpens);
+        if (microCloses.length >= 10) microMetrics = calculateTechnicalMetrics(microCloses, microHighs, microLows, microVolumes.length > 0 ? microVolumes : undefined, microOpens, { isForex: type === MarketType.FOREX });
       }
     } catch {}
     let contextFearGreed = null, contextNews: any[] = [], contextEcon: any[] = [];
@@ -1172,7 +1184,7 @@ export async function analyzeMarket(params: {
       throw new Error(`Insufficient data for ${symbol}.`);
     }
 
-    const metrics = calculateTechnicalMetrics(closes, highs, lows, volumes, opens);
+    const metrics = calculateTechnicalMetrics(closes, highs, lows, volumes, opens, { isForex: type === MarketType.FOREX });
     const supplyDemandZones = calculateSupplyDemandZones(highs, lows, volumes || [], closes);
     const zonesText = supplyDemandZones.length > 0 
       ? supplyDemandZones.map(z => `${z.type === 'supply' ? 'Supply' : 'Demand'} zone: ${z.bottom.toFixed(2)}ΓÇô${z.top.toFixed(2)} (strength ${z.strength.toFixed(0)}%)`).join('. ')
@@ -1194,7 +1206,7 @@ export async function analyzeMarket(params: {
         const microOpensRaw = microQuotes.open?.filter((c: any) => c != null) || microCloses;
         const microVolsRaw = microQuotes.volume?.filter((c: any) => c != null) || [];
         if (microCloses.length >= 10) {
-          microMetrics = calculateTechnicalMetrics(microCloses, microHighsRaw, microLowsRaw, microVolsRaw.length > 0 ? microVolsRaw : undefined, microOpensRaw);
+          microMetrics = calculateTechnicalMetrics(microCloses, microHighsRaw, microLowsRaw, microVolsRaw.length > 0 ? microVolsRaw : undefined, microOpensRaw, { isForex: type === MarketType.FOREX });
         }
       }
     } catch (e) {
@@ -1212,7 +1224,8 @@ export async function analyzeMarket(params: {
             (macroQuotes.high || []).filter((c: any) => c != null), 
             (macroQuotes.low || []).filter((c: any) => c != null), 
             (macroQuotes.volume || []).filter((c: any) => c != null), 
-            (macroQuotes.open || []).filter((c: any) => c != null));
+            (macroQuotes.open || []).filter((c: any) => c != null),
+            { isForex: type === MarketType.FOREX });
           macroDirection = macroMetrics?.direction || 'sideways';
         }
       }
@@ -2270,8 +2283,13 @@ Return ONLY valid JSON:
     // already extended and you'd be chasing the top → neutral. This is the sweet spot where
     // the pullback-entry protection is most reliable.
     if (settings?.goldenRangeEnabled) {
-      const gMin = typeof settings.goldenConfMin === 'number' ? settings.goldenConfMin : 70;
-      const gMax = typeof settings.goldenConfMax === 'number' ? settings.goldenConfMax : 85;
+      // FOREX FIX: the global [70,85] window was calibrated on crypto volatility.
+      // FX confidence settles lower because its ATR/volume are smaller, so almost
+      // every genuine FX signal fell below 70 and was hidden. Widen ONLY forex to
+      // [60,88]: weak (<60) and late-chasing (>88) entries stay filtered out.
+      const isForexGolden = type === MarketType.FOREX;
+      const gMin = isForexGolden ? 60 : (typeof settings.goldenConfMin === 'number' ? settings.goldenConfMin : 70);
+      const gMax = isForexGolden ? 88 : (typeof settings.goldenConfMax === 'number' ? settings.goldenConfMax : 85);
       const isTradeSignal = finalSignal === SignalType.BUY || finalSignal === SignalType.STRONG_BUY ||
                             finalSignal === SignalType.SELL || finalSignal === SignalType.STRONG_SELL;
       if (isTradeSignal && (finalConfidence < gMin || finalConfidence > gMax)) {

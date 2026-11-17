@@ -91,7 +91,12 @@ export function resolveRetraceConfig(
     ? storedTf
     : DEFAULT_RETRACE_TIMEFRAME;
 
-  const strictMode = raw[`retraceStrictMode${suffix}`] !== false; // default ON
+  // FOREX FIX: strict mode ignores doji, sub-30%-body candles, inside bars,
+  // hammers and shooting stars. On daily FX that removes most bars, so the
+  // user's "3 opposite candles" rule became almost impossible to satisfy.
+  // Keep the 3-candle rule, but count every real bearish/bullish body for
+  // forex. Every other category keeps strict mode exactly as before.
+  const strictMode = category !== 'forex' && raw[`retraceStrictMode${suffix}`] !== false;
 
   return { category, enabled, candles, timeframe, strictMode };
 }

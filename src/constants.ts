@@ -61,7 +61,7 @@ export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   retraceTimeframeCrypto: '1d',
   retraceTimeframeStocks: '1d',
   retraceTimeframeMetals: '1d',
-  retraceStrictModeForex: true,
+  retraceStrictModeForex: false, // FX counts normal bodies (strict mode kept for other categories)
   retraceStrictModeCrypto: true,
   retraceStrictModeStocks: true,
   retraceStrictModeMetals: true,
