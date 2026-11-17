@@ -309,6 +309,7 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
     }
     abortRef.current = null;
     setAnalyzingIndex(null);
+    setSelectedSymbols([]);
   };
 
   // Auto-start analysis when "Auto Analysis" icon is pressed (client paid plan):

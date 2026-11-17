@@ -3831,12 +3831,13 @@ const started = planGrants
                   onResult={(results) => {
                     const day = new Date().getUTCDay();
                     const allCryptos = ALL_SYMBOLS_DB.crypto || [];
+                    const deduped = dedupeSignals(results);
                     const filtered = (day === 0 || day === 6)
-                      ? results.filter(r => {
+                      ? deduped.filter(r => {
                           const sym = r.symbol.toUpperCase();
                           return allCryptos.includes(sym) || sym.includes('-USD') || sym.endsWith('USD');
                         })
-                      : results;
+                      : deduped;
                     setAnalysisResults(filtered);
                     setIsAnalyzing(false);
                     setAnalysisError(null);
