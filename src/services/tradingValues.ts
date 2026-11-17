@@ -24,8 +24,8 @@
 import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { usdToPrice } from '../lib/positionMath';
-import { baseQtyForSymbol, baseQtyPerCategory, calcRiskUSD, getDefaultQty } from './paperTradingService';
-import { cryptoTierRiskPct } from '../lib/cryptoTiers';
+import { baseQtyForSymbol, baseQtyPerCategory, balanceThousands, calcRiskUSD, getDefaultQty } from './paperTradingService';
+import { cryptoTierRiskUsd } from '../lib/cryptoTiers';
 
 export type TradingCategory = 'forex' | 'crypto' | 'stocks' | 'metals';
 
@@ -53,17 +53,21 @@ export const TRADING_VALUES_STORAGE_KEY = 'finalyze_trading_values_v1';
 // standard trailing rule ($5 activation / $2 step).
 const DEFAULT_RISK = calcRiskUSD(10000);
 
-// Crypto stops/targets are PERCENTAGES of the entry price, tiered by liquidity.
-// At a $1,000 notional: high 5%/10% ($50/$100), medium 3%/6% ($30/$60),
-// weak 1.5%/3% ($15/$30). The lot scales with balanceThousands(), so the USD
-// amounts grow with the account balance.
-export const CRYPTO_SL_PCT = 5;    // high-liquidity stop (medium ×0.6, low ×0.3)
-export const CRYPTO_TP_PCT = 10;   // high-liquidity target (1:2 R:R)
-const CRYPTO_PCT_MIN = 0.1;
-const CRYPTO_PCT_MAX = 25;
-// Old documents stored crypto SL/TP as USD (60 / 120). They are migrated by
-// dividing by 40 → the equivalent percentage (1.5% / 3%).
-const LEGACY_CRYPTO_USD_ANCHOR = 40;
+// Crypto stops/targets are DOLLAR budgets per $1,000 of balance, tiered by
+// liquidity (exactly like the other categories). The developer panel stores the
+// HIGH-tier base; cryptoTierRiskUsd() derives medium ×0.6 and weak ×0.2:
+//   high $50/$100 · medium $30/$60 · weak $10/$20 at a $1,000 balance.
+// Both numbers double when the balance doubles ($2,000 weak → $20/$40).
+export const CRYPTO_SL_USD = 50;   // high-liquidity stop budget per $1,000
+export const CRYPTO_TP_USD = 100;  // high-liquidity target budget per $1,000
+const CRYPTO_USD_MIN = 1;
+const CRYPTO_USD_MAX = 100000;
+// Older builds stored crypto SL/TP as percentages (high 5/10, weak 1.5/3).
+// Any legacy value ≤ 25 is a percentage → convert to dollars (×10).
+const LEGACY_CRYPTO_PCT_ANCHOR = 10;
+// A price level may never consume more than 95% of the entry price: cheap coins
+// (e.g. MANA at $0.06) cannot move $10 in price, so we keep the level positive.
+const CRYPTO_MAX_PRICE_MOVE = 0.95;
 
 export function normalizeTradingCategory(category: string): TradingCategory {
   const key = String(category || '').toLowerCase().trim();
@@ -73,12 +77,12 @@ export function normalizeTradingCategory(category: string): TradingCategory {
 export function defaultCategoryTradingValues(category: string): CategoryTradingValues {
   const cat = normalizeTradingCategory(category);
   if (cat === 'crypto') {
-    // Crypto: lotSize is the HIGH-tier base (×100 medium, ×1000 low) and the
-    // SL/TP fields hold the HIGH-tier percentages (medium/low derive from them).
+    // Crypto: lotSize is the HIGH-tier base (×10 medium, ×1000 low) and the
+    // SL/TP fields hold the HIGH-tier DOLLAR budgets (medium/weak derive from them).
     return {
       lotSize: baseQtyPerCategory('crypto'),
-      stopLossUSD: CRYPTO_SL_PCT,
-      takeProfitUSD: CRYPTO_TP_PCT,
+      stopLossUSD: CRYPTO_SL_USD,
+      takeProfitUSD: CRYPTO_TP_USD,
       trailingActivationUSD: 5,
       trailingStepUSD: 2,
     };
@@ -107,12 +111,12 @@ function positiveNumber(value: unknown, fallback: number): number {
   return Math.min(1e9, n);
 }
 
-// Crypto SL/TP are percentages. Values coming from an older document (USD,
-// e.g. 60/120) are converted to their percentage equivalent and clamped.
-function cryptoPercent(value: unknown, fallback: number): number {
+// Crypto SL/TP are DOLLAR budgets now. Values from an older document that were
+// percentages (≤ 25, e.g. 5/10 or 1.5/3) are converted to dollars (×10).
+function cryptoBudget(value: unknown, fallback: number): number {
   const n = positiveNumber(value, fallback);
-  const pct = n > 25 ? n / LEGACY_CRYPTO_USD_ANCHOR : n;
-  return Math.min(CRYPTO_PCT_MAX, Math.max(CRYPTO_PCT_MIN, pct));
+  const usd = n <= 25 ? n * LEGACY_CRYPTO_PCT_ANCHOR : n;
+  return Math.min(CRYPTO_USD_MAX, Math.max(CRYPTO_USD_MIN, Math.round(usd * 100) / 100));
 }
 
 export function normalizeTradingValues(raw: any): TradingValuesConfig {
@@ -123,16 +127,12 @@ export function normalizeTradingValues(raw: any): TradingValuesConfig {
     const value = src && typeof src === 'object' ? src : {};
     const isCrypto = cat === 'crypto';
     let lotSize = positiveNumber(value.lotSize, def.lotSize);
-    let stopLossUSD = isCrypto ? cryptoPercent(value.stopLossUSD, def.stopLossUSD) : positiveNumber(value.stopLossUSD, def.stopLossUSD);
-    let takeProfitUSD = isCrypto ? cryptoPercent(value.takeProfitUSD, def.takeProfitUSD) : positiveNumber(value.takeProfitUSD, def.takeProfitUSD);
+    let stopLossUSD = isCrypto ? cryptoBudget(value.stopLossUSD, def.stopLossUSD) : positiveNumber(value.stopLossUSD, def.stopLossUSD);
+    let takeProfitUSD = isCrypto ? cryptoBudget(value.takeProfitUSD, def.takeProfitUSD) : positiveNumber(value.takeProfitUSD, def.takeProfitUSD);
     if (isCrypto) {
-      // Upgrade values saved by an older build: crypto lot 0.1 → 0.01 and the
-      // old 1.5% / 3% levels → the new high-tier 5% / 10%.
-      if (Math.abs(lotSize - 0.1) < 1e-9) lotSize = def.lotSize;
-      if (Math.abs(stopLossUSD - 1.5) < 0.01 && Math.abs(takeProfitUSD - 3) < 0.01) {
-        stopLossUSD = def.stopLossUSD;
-        takeProfitUSD = def.takeProfitUSD;
-      }
+      // Upgrade values saved by an older build: crypto lot 1 → 0.01 (the new
+      // medium base is 0.1) and legacy 1.5%/3% → high-tier $15/$30 budget.
+      if (Math.abs(lotSize - 1) < 1e-9) lotSize = def.lotSize;
     }
     cats[cat] = {
       lotSize,
@@ -211,9 +211,6 @@ export interface FixedTradingValues {
   tpUsd: number;
   trailingActivationUSD: number;
   trailingStepUSD: number;
-  /** Crypto only: stop/target as a percentage of the entry price. */
-  slPct?: number;
-  tpPct?: number;
 }
 
 /**
@@ -236,10 +233,8 @@ export function getTradingValuesOverride(category: string): FixedTradingValues |
     trailingActivationUSD: v.trailingActivationUSD,
     trailingStepUSD: v.trailingStepUSD,
   };
-  // Crypto → the SL/TP numbers are percentages of price.
-  if (cat === 'crypto') {
-    return { ...base, slPct: v.stopLossUSD, tpPct: v.takeProfitUSD };
-  }
+  // Crypto → the SL/TP numbers are HIGH-tier dollar budgets per $1,000; the
+  // liquidity tier and balance scaling are applied by cryptoUsdLevels().
   return base;
 }
 
@@ -259,7 +254,56 @@ export interface TradeLevels {
   tpUsd: number;
 }
 
-/** Percentage stop/target for crypto (always logical, on any coin price). */
+/**
+ * Crypto SL/TP prices from DOLLAR budgets — the single helper used by the auto
+ * engine, the mobile ticket, the desktop manual ticket and resolveRiskLevels().
+ *
+ * The developer panel stores the HIGH-tier budget (default $50/$100 per $1,000).
+ * cryptoTierRiskUsd() scales it by liquidity (high 1 · medium 0.6 · weak 0.2 →
+ * $10/$20 for MANA-class coins) and balanceThousands() doubles it with the
+ * account. Finally usdToPrice() converts the dollar distance to a price using
+ * the position's qty, with a 95%-of-entry cap so a sub-dollar coin never gets a
+ * negative stop/target. The returned slUsd/tpUsd are the ACTUAL distances after
+ * that cap, which is what the open-positions table displays.
+ */
+export function cryptoUsdLevels(args: {
+  symbol: string;
+  entry: number;
+  isBuy: boolean;
+  qty: number;
+  balance: number;
+  highSlUsd?: number;
+  highTpUsd?: number;
+  /** Final (already balance-scaled) budgets — override the tier defaults. */
+  slBudgetUsd?: number;
+  tpBudgetUsd?: number;
+}): TradeLevels {
+  const { symbol, entry, isBuy, qty, balance } = args;
+  const tier = cryptoTierRiskUsd(
+    symbol,
+    args.highSlUsd ?? CRYPTO_SL_USD,
+    args.highTpUsd ?? CRYPTO_TP_USD,
+  );
+  const scale = balanceThousands(balance);
+  const slBudget = Math.max(0, args.slBudgetUsd ?? tier.slUsd * scale);
+  const tpBudget = Math.max(0, args.tpBudgetUsd ?? tier.tpUsd * scale);
+  const e = entry > 0 ? entry : 0;
+  let slPrice = e > 0 ? usdToPrice(symbol, slBudget, e, !isBuy, qty, 'crypto') : 0;
+  let tpPrice = e > 0 ? usdToPrice(symbol, tpBudget, e, isBuy, qty, 'crypto') : 0;
+  // The loss-side level (SL for a buy, TP for a sell) sits BELOW entry and can
+  // never go to/below zero on a cheap coin. Keep at least 5% of the entry.
+  const floor = e * (1 - CRYPTO_MAX_PRICE_MOVE);
+  if (isBuy) slPrice = Math.max(slPrice, floor);
+  else tpPrice = Math.max(tpPrice, floor);
+  return {
+    slPrice,
+    tpPrice,
+    slUsd: Math.abs(e - slPrice) * qty,
+    tpUsd: Math.abs(tpPrice - e) * qty,
+  };
+}
+
+/** @deprecated Dollar budgets are used now. Kept for older callers. */
 export function cryptoPctLevels(
   entry: number,
   isBuy: boolean,
@@ -280,7 +324,7 @@ export function cryptoPctLevels(
 
 /**
  * Lot size for a trade.
- * - crypto: ALWAYS the tiered, balance-scaled lot (BTC 0.01 / SOL 1 / DOGE 10
+ * - crypto: ALWAYS the tiered, balance-scaled lot (BTC 0.01 / SOL 0.1 / DOGE 10
  *   per $1,000); the panel's crypto lot is the high-tier base.
  * - other categories: the developer's fixed lot when the system is ON,
  *   otherwise the balance-scaled lot.
@@ -350,7 +394,7 @@ function signalLevels(args: {
 /**
  * SL/TP price levels for a trade — the SINGLE source of truth for auto and
  * manual orders on desktop + mobile:
- *   • crypto      → liquidity-tier percentages (high 5/10, medium 3/6, weak 1.5/3)
+ *   • crypto      → liquidity-tier dollar budgets (high $50/$100, medium $30/$60, weak $10/$20 per $1,000)
  *   • system ON   → forced fixed values
  *   • system OFF  → the analysed signal's own ATR-based SL/TP when available,
  *                   otherwise the dynamic balance risk
@@ -371,17 +415,19 @@ export function resolveRiskLevels(args: {
   const fixed = getTradingValuesOverride(cat);
 
   if (cat === 'crypto') {
-    // Crypto uses the liquidity-tier plan directly (the user's rules):
-    //   high 5% / 10%, medium 3% / 6%, weak 1.5% / 3% of the entry price.
-    // Higher liquidity = wider stop/target. The qty/balance scaling already
-    // makes the USD risk grow with the account balance. When the developer
-    // fixed-values system is ON, its crypto fields hold the HIGH-tier base.
-    const tier = cryptoTierRiskPct(
+    // Crypto uses DOLLAR budgets (like every other category), widened by
+    // liquidity: high $50/$100, medium $30/$60, weak $10/$20 per $1,000 —
+    // both numbers double when the balance doubles. The developer's fixed
+    // values (when ON) hold the HIGH-tier base. See cryptoUsdLevels().
+    return cryptoUsdLevels({
       symbol,
-      fixed?.slPct ?? CRYPTO_SL_PCT,
-      fixed?.tpPct ?? CRYPTO_TP_PCT,
-    );
-    return cryptoPctLevels(entry, isBuy, tier.slPct, tier.tpPct, qty);
+      entry,
+      isBuy,
+      qty,
+      balance,
+      highSlUsd: fixed?.slUsd ?? CRYPTO_SL_USD,
+      highTpUsd: fixed?.tpUsd ?? CRYPTO_TP_USD,
+    });
   }
 
   if (fixed) {

@@ -8,6 +8,19 @@ import { subscribeQuoteBatch } from '../../services/paperTradingService';
 import { calcPnl } from '../../services/paperTradingService';
 import { slAmountUSD, usdToPrice } from '../../lib/positionMath';
 
+const CATEGORY_LABELS: Record<string, { ar: string; en: string }> = {
+  forex: { ar: 'فوركس', en: 'Forex' },
+  crypto: { ar: 'كريبتو', en: 'Crypto' },
+  stocks: { ar: 'أسهم', en: 'Stocks' },
+  metals: { ar: 'معادن', en: 'Metals' },
+};
+
+function mobileCategoryLabel(category: string | undefined, lang: Language): string {
+  const c = String(category || '').toLowerCase().trim();
+  const label = CATEGORY_LABELS[c];
+  return label ? (lang === 'ar' ? label.ar : label.en) : (c || '—');
+}
+
 export interface MobilePosition {
   id: string;
   symbol: string;
@@ -415,15 +428,13 @@ export function MobilePositions({ positions, closed, onClose, onSelect, canTrade
             title={onSelect ? (p.symbol + ' — tap to open chart') : undefined}>
             <div className="mt5-position-info" style={{ flex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 10, color: '#7dd3fc', fontWeight: 800, background: 'rgba(14,165,233,0.1)', border: '1px solid rgba(14,165,233,0.35)', borderRadius: 6, padding: '1px 6px', whiteSpace: 'nowrap' }}>
+                  {mobileCategoryLabel(p.category || detectMobileTradeCategory(p.symbol), lang)}
+                </span>
                 <span className="mt5-position-symbol">{p.symbol}</span>
                 <span className={`mt5-position-type ${p.type}`} style={{ fontSize: 11 }}>
                   {p.type.toUpperCase()} {p.volume.toFixed(2)}
                 </span>
-                {p.category && (
-                  <span style={{ fontSize: 10, color: '#666', fontWeight: 700, background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 6, padding: '1px 6px' }}>
-                    {p.category}
-                  </span>
-                )}
                 {p.source && (
                   <span style={{ fontSize: 10, color: p.source === 'auto' ? '#00ff88' : '#60a5fa', fontWeight: 700 }}>
                     {p.source === 'auto' ? (lang === 'ar' ? 'تلقائي' : 'AUTO') : (lang === 'ar' ? 'يدوي' : 'MANUAL')}

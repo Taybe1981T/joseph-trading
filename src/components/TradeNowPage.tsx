@@ -8,7 +8,7 @@ import TradingViewWidget from './TradingViewWidget';
 import MT5Web from './MT5Web';
 import {
   PaperTrade, getTradeStore, getLivePrice, subscribePrices,
-  calcPnl, getDefaultQty, START_BALANCE, MIN_BALANCE, DEFAULT_LEVERAGE, LEVERAGE_OPTIONS, isMarketOpen, calcRiskUSD,
+  calcPnl, getDefaultQty, START_BALANCE, MIN_BALANCE, DEFAULT_LEVERAGE, LEVERAGE_OPTIONS, isMarketOpen, calcRiskUSD, balanceThousands,
 } from '../services/paperTradingService';
 import { searchSymbols, catEmoji, SuggestedSymbol } from '../services/symbolSuggestions';
 import { playOpenSound, playCloseSound, playDragTick } from '../lib/tradeSounds';
@@ -18,17 +18,17 @@ import { calcTrailingStop } from '../lib/trailingStop';
 import {
   getTradingValuesOverride,
   tradeQtyFor,
-  cryptoPctLevels,
+  cryptoUsdLevels,
   baseUnitForTrade,
-  CRYPTO_SL_PCT,
-  CRYPTO_TP_PCT,
+  CRYPTO_SL_USD,
+  CRYPTO_TP_USD,
 } from '../services/tradingValues';
+import { cryptoTierRiskUsd } from '../lib/cryptoTiers';
 import { clearOpened as clearAutoOpened, resetGuard as resetAutoGuard } from '../services/autoGuard';
 import { openEventFor, closeEventFor, clearEventFor, resetEventFor, broadcastMirrorEvent, publishDevBook } from '../services/tradeMirror';
 import MT5ConnectModal from './MT5ConnectModal';
 import { loadConnection, mt5Bridge, MT5Connection } from '../services/mt5Bridge';
 import { isDeveloperEmail } from '../lib/clientIds';
-import { cryptoTierRiskPct } from '../lib/cryptoTiers';
 import { TradeMode, currentTradeMode, stampLegacyTradeModes } from '../lib/tradeMode';
 
 // Minimum wait after an auto-close before the same symbol may be auto-opened
@@ -62,6 +62,14 @@ const CATEGORY_TABS = [
   { key: 'stocks', labelAr: 'الأسهم', labelEn: 'Stocks', emoji: '\uD83D\uDCC8' },
   { key: 'metals', labelAr: 'المعادن', labelEn: 'Metals', emoji: '\uD83D\uDC8E' },
 ];
+
+/** Localised category name shown on every open-trade row (desktop + mirror). */
+function categoryLabel(category: string | undefined, isAr: boolean): string {
+  const c = String(category || '').toLowerCase().trim();
+  const tab = CATEGORY_TABS.find((t) => t.key === c);
+  if (tab) return isAr ? tab.labelAr : tab.labelEn;
+  return c || (isAr ? '—' : '—');
+}
 
 function loadCustomSymbols(): string[] {
   try { return JSON.parse(localStorage.getItem(CUSTOM_KEY) || '[]'); } catch { return []; }
@@ -385,17 +393,19 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
 
     // ── SL / TP ──
     if (isCrypto) {
-      // Crypto uses the liquidity-tier plan: high 5%/10%, medium 3%/6%,
-      // weak 1.5%/3% (the developer panel drives the high-tier base).
-      const tierRisk = cryptoTierRiskPct(
+      // Crypto uses DOLLAR budgets like every other category, widened by
+      // liquidity: high $50/$100, medium $30/$60, weak $10/$20 per $1,000,
+      // doubled with the balance. The panel drives the high-tier base.
+      const tier = cryptoTierRiskUsd(
         symbol,
-        fixed?.slPct ?? CRYPTO_SL_PCT,
-        fixed?.tpPct ?? CRYPTO_TP_PCT,
+        fixed?.slUsd ?? CRYPTO_SL_USD,
+        fixed?.tpUsd ?? CRYPTO_TP_USD,
       );
-      const slPct = String(Number(tierRisk.slPct.toFixed(2)));
-      const tpPct = String(Number(tierRisk.tpPct.toFixed(2)));
-      if (!ticketTouchedRef.current.sl) setSlPrice((prev) => (prev === slPct ? prev : slPct));
-      if (!ticketTouchedRef.current.tp) setTpPrice((prev) => (prev === tpPct ? prev : tpPct));
+      const scale = balanceThousands(balance);
+      const slTxt = (tier.slUsd * scale).toFixed(2);
+      const tpTxt = (tier.tpUsd * scale).toFixed(2);
+      if (!ticketTouchedRef.current.sl) setSlPrice((prev) => (prev === slTxt ? prev : slTxt));
+      if (!ticketTouchedRef.current.tp) setTpPrice((prev) => (prev === tpTxt ? prev : tpTxt));
       return;
     }
     if (fixed) {
@@ -1003,10 +1013,9 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
       return;
     }
 
-    // SL/TP fields hold USD amounts for forex/metals/stocks and PERCENTAGES for
-    // crypto. Convert both to actual limit prices for execution.
-    // TP goes on the profit side (above for buy / below for sell), SL on the
-    // loss side (below for buy / above for sell).
+    // SL/TP fields hold USD amounts for EVERY category (including crypto).
+    // Convert them to actual limit prices for execution. TP goes on the profit
+    // side (above for buy / below for sell), SL on the loss side.
     const cat = detectCategory(symbol);
     const isBuy = side === 'buy';
     let tpVal: number | null = null;
@@ -1014,22 +1023,20 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     if (cat === 'crypto') {
       const typedSl = parseFloat(slPrice);
       const typedTp = parseFloat(tpPrice);
-      // Liquidity tier decides how WIDE the stop/target are: high 5%/10%,
-      // medium 3%/6%, weak 1.5%/3% (anchored on the developer high-tier base).
-      // Untouched fields fall back to the tier values; typed values are used
-      // as-is (still clamped to a sane 0.1 % – 25 % range).
-      const tier = cryptoTierRiskPct(
+      // Liquidity tier + balance decide the default budget (weak $10/$20 per
+      // $1,000). Typed dollar values win; cryptoUsdLevels() converts them to
+      // prices with the same safe cap the auto engine uses.
+      const lv = cryptoUsdLevels({
         symbol,
-        fixed?.slPct ?? CRYPTO_SL_PCT,
-        fixed?.tpPct ?? CRYPTO_TP_PCT,
-      );
-      const slPct = Number.isFinite(typedSl) && typedSl > 0
-        ? Math.min(25, Math.max(0.1, typedSl))
-        : tier.slPct;
-      const tpPct = Number.isFinite(typedTp) && typedTp > 0
-        ? Math.min(25, Math.max(0.1, typedTp))
-        : tier.tpPct;
-      const lv = cryptoPctLevels(livePrice, isBuy, slPct, tpPct, execQty);
+        entry: livePrice,
+        isBuy,
+        qty: execQty,
+        balance,
+        highSlUsd: fixed?.slUsd ?? CRYPTO_SL_USD,
+        highTpUsd: fixed?.tpUsd ?? CRYPTO_TP_USD,
+        slBudgetUsd: Number.isFinite(typedSl) && typedSl > 0 ? typedSl : undefined,
+        tpBudgetUsd: Number.isFinite(typedTp) && typedTp > 0 ? typedTp : undefined,
+      });
       slVal = lv.slPrice;
       tpVal = lv.tpPrice;
     } else {
@@ -2078,6 +2085,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
                 <thead>
                   <tr className="text-sm font-black uppercase text-brand-text/40 tracking-wider border-b border-white/10">
                     <th className="px-4 py-3">{isAr ? 'الرمز' : 'Symbol'}</th>
+                    <th className="px-4 py-3">{isAr ? 'الفئة' : 'Category'}</th>
                     <th className="px-4 py-3">{isAr ? 'الاتجاه' : 'Side'}</th>
                     <th className="px-4 py-3">{isAr ? 'الحجم' : 'Qty'}</th>
                     <th className="px-4 py-3">{isAr ? 'الدخول' : 'Entry'}</th>
@@ -2123,6 +2131,11 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
                             )}
                             {t.symbol}
                           </button>
+                        </td>
+                        <td className="px-2 py-3">
+                          <span className="inline-block px-2 py-1 rounded-md text-sm font-black uppercase bg-sky-500/10 text-sky-300 border border-sky-500/30 whitespace-nowrap">
+                            {categoryLabel(t.category || detectCategory(t.symbol), isAr)}
+                          </span>
                         </td>
                         <td className="px-4 py-3">
                           <span className={`px-3 py-1.5 rounded-lg text-lg font-black uppercase ${t.side === 'buy' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
@@ -2239,6 +2252,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
                 <thead>
                   <tr className="text-sm font-black uppercase text-brand-text/40 tracking-wider border-b border-white/10">
                     <th className="px-4 py-3">{isAr ? 'الرمز' : 'Symbol'}</th>
+                    <th className="px-4 py-3">{isAr ? 'الفئة' : 'Category'}</th>
                     <th className="px-4 py-3">{isAr ? 'الاتجاه' : 'Side'}</th>
                     <th className="px-4 py-3">{isAr ? 'الدخول' : 'Entry'}</th>
                     <th className="px-4 py-3">{isAr ? 'الخروج' : 'Exit'}</th>
@@ -2255,6 +2269,11 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
                       <td className="px-4 py-3">
                         <span className="inline-block px-3 py-1.5 rounded-lg text-lg font-black text-brand-text">
                           {t.symbol}
+                        </span>
+                      </td>
+                      <td className="px-2 py-3">
+                        <span className="inline-block px-2 py-1 rounded-md text-sm font-black uppercase bg-sky-500/10 text-sky-300 border border-sky-500/30 whitespace-nowrap">
+                          {categoryLabel(t.category || detectCategory(t.symbol), isAr)}
                         </span>
                       </td>
                       <td className="px-4 py-3">

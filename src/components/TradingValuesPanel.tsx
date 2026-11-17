@@ -36,11 +36,11 @@ const FIELDS: Array<{ key: FieldKey; ar: string; en: string; hintAr: string; hin
   { key: 'trailingStepUSD', ar: 'خطوة الترينلغ ($)', en: 'Trailing Step ($)', hintAr: 'خطوة تثبيت الربح الثابتة', hintEn: 'Fixed profit-lock step' },
 ];
 
-// Crypto has its own meaning for these fields: the lot is the HIGH-liquidity
-// base (BTC/ETH → 0.1, medium ×10, low ×100) and SL/TP are PERCENTAGES.
+// All categories — including crypto — use DOLLAR budgets. Crypto's lot is the
+// HIGH-liquidity base (BTC/ETH → 0.01, medium ×10, weak ×1000) and its SL/TP
+// are dollar budgets per $1,000, widened by liquidity (high 1 · medium 0.6 ·
+// weak 0.2) and doubled with the balance.
 function fieldLabel(f: { key: FieldKey; ar: string; en: string }, isCrypto: boolean, isAr: boolean): string {
-  if (isCrypto && f.key === 'stopLossUSD') return isAr ? 'وقف الخسارة (%)' : 'Stop Loss (%)';
-  if (isCrypto && f.key === 'takeProfitUSD') return isAr ? 'أخذ الربح (%)' : 'Take Profit (%)';
   return isAr ? f.ar : f.en;
 }
 
@@ -48,14 +48,18 @@ function fieldHint(f: { key: FieldKey; hintAr: string; hintEn: string }, isCrypt
   if (!isCrypto) return isAr ? f.hintAr : f.hintEn;
   if (f.key === 'lotSize') {
     return isAr
-      ? 'أساس الفئة العليا: بيتكوين/إيثيريوم 0.1 · متوسطة ×10 · منخفضة ×100 (يتغيّر مع الرصيد)'
-      : 'High-tier base: BTC/ETH 0.1 · medium ×10 · low ×100 (scales with balance)';
+      ? 'أساس الفئة العليا: بيتكوين/إيثيريوم 0.01 · متوسطة ×10 · ضعيفة ×1000 (يتغيّر مع الرصيد)'
+      : 'High-tier base: BTC/ETH 0.01 · medium ×10 · weak ×1000 (scales with balance)';
   }
   if (f.key === 'stopLossUSD') {
-    return isAr ? 'نسبة الوقف من سعر الدخول — افتراضي 1.5%' : 'Stop as % of entry price — default 1.5%';
+    return isAr
+      ? 'ميزانية وقف بالدولار لكل 1000$ — الافتراضي 50$ (ضعيفة 10$ · متوسطة 30$ · عالية 50$) ويتضاعف مع الرصيد'
+      : 'Stop budget per $1,000 — default $50 (weak $10 · medium $30 · high $50), doubles with balance';
   }
   if (f.key === 'takeProfitUSD') {
-    return isAr ? 'نسبة الهدف من سعر الدخول — افتراضي 3%' : 'Target as % of entry price — default 3%';
+    return isAr
+      ? 'ميزانية هدف بالدولار لكل 1000$ — الافتراضي 100$ (ضعيفة 20$ · متوسطة 60$ · عالية 100$) ويتضاعف مع الرصيد'
+      : 'Target budget per $1,000 — default $100 (weak $20 · medium $60 · high $100), doubles with balance';
   }
   return isAr ? f.hintAr : f.hintEn;
 }
@@ -247,7 +251,7 @@ export default function TradingValuesPanel({ lang }: Props) {
             <RotateCcw size={20} /> {isAr ? 'إعادة كل القيم للافتراضي الحالي' : 'Reset all to current defaults'}
           </button>
           <span className="text-base md:text-[20px] text-slate-500 self-center font-bold">
-            {isAr ? 'الافتراضي: لوت الفئة الأساسي · وقف/هدف 60$/120$ · كريبتو: لوت 0.1 (×10/×100) ووقف 1.5% وهدف 3% · ترينلغ 5$/2$' : 'Defaults: category base lot · SL/TP $60/$120 · crypto: lot 0.1 (×10/×100), SL 1.5%, TP 3% · trailing $5/$2'}
+            {isAr ? 'الافتراضي: لوت الفئة الأساسي · وقف/هدف 60$/120$ · كريبتو: لوت 0.01 (×10/×1000) ووقف 50$/هدف 100$ لكل 1000$ (ضعيفة 10$/20$) · ترينلغ 5$/2$' : 'Defaults: category base lot · SL/TP $60/$120 · crypto: lot 0.01 (×10/×1000), SL $50/TP $100 per $1,000 (weak $10/$20) · trailing $5/$2'}
           </span>
         </div>
       </div>

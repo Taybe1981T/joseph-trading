@@ -91,7 +91,7 @@ export function isMarketOpen(category: string, symbol?: string, now: Date = new 
 // $3,000 balance trades 3× the base, a $7,000 balance 7×, etc.
 export function baseQtyPerCategory(category: string): number {
   switch (category) {
-    case 'crypto': return 0.01;  // high-liquidity base per $1,000 (medium ×100, low ×1000)
+    case 'crypto': return 0.01;  // high-liquidity base per $1,000 (medium ×10, weak ×1000)
     case 'forex': return 0.01;   // 0.01 lots per $1,000 (1 lot = 100,000 units)
     case 'metals': return 0.01;  // 0.01 lots per $1,000 (1 lot = 100 oz)
     case 'stocks': return 0.01;  // 0.01 lots per $1,000 (1 lot = 100 shares)

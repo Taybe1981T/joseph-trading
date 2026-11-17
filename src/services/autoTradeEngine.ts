@@ -356,9 +356,10 @@ export class AutoTradeEngine {
 
         // Sizing + risk levels come from the single shared helper so this engine
         // behaves EXACTLY like the manual ticket and the clients' mirror:
-        //   • crypto → tiered balance-scaled lot (BTC 0.1 / SOL 1 / DOGE 10 per
-        //     $1,000) and stop/target as a PERCENTAGE of price (1.5% / 3%),
-        //     never a tiny USD distance that is meaningless across coins.
+        //   • crypto → tiered balance-scaled lot (BTC 0.01 / SOL 0.1 / DOGE 10
+        //     per $1,000) and dollar SL/TP budgets widened by liquidity
+        //     (high $50/$100 · medium $30/$60 · weak $10/$20 per $1,000),
+        //     with a safe price cap so cheap coins never get a negative level.
         //   • other categories → the developer's fixed values when the system is
         //     ON, otherwise the usual balance-scaled lot + $ risk.
         const q = tradeQtyFor(cat, sym, balance);
