@@ -372,6 +372,57 @@ function attemptsYahooFor(symbol: string): string[] {
   return [`${s}=X`];
 }
 
+/**
+ * The generic Yahoo path requests HOURLY bars for `timeframe=4h`. When Twelve
+ * Data is unavailable those 1h bars used to be returned labelled as 4h, so the
+ * retrace filter counted 1-hour candles while the user inspected a real 4h
+ * chart — signals appeared with no visible 3-candle pullback. Group the hourly
+ * bars into true 4-hour UTC buckets before returning them.
+ */
+export function aggregateHourlyTo4h(data: any): any {
+  try {
+    const result = data?.chart?.result?.[0];
+    const ts = result?.timestamp;
+    const q = result?.indicators?.quote?.[0];
+    if (!Array.isArray(ts) || !q || !Array.isArray(q.close)) return data;
+    const buckets = new Map<number, { o: number; h: number; l: number; c: number; v: number }>();
+    for (let i = 0; i < ts.length; i++) {
+      const o = q.open?.[i], h = q.high?.[i], l = q.low?.[i], c = q.close?.[i];
+      if (o == null || h == null || l == null || c == null || ts[i] == null) continue;
+      const key = Math.floor(ts[i] / (4 * 3600)) * 4 * 3600;
+      const b = buckets.get(key);
+      if (!b) buckets.set(key, { o, h, l, c, v: Number(q.volume?.[i]) || 0 });
+      else {
+        b.h = Math.max(b.h, h);
+        b.l = Math.min(b.l, l);
+        b.c = c; // last hour of the 4h block wins the close
+        b.v += Number(q.volume?.[i]) || 0;
+      }
+    }
+    const bars = [...buckets.entries()].sort((a, b) => a[0] - b[0]);
+    if (bars.length < 5) return data;
+    return {
+      chart: {
+        result: [{
+          ...result,
+          timestamp: bars.map(([t]) => t),
+          indicators: {
+            quote: [{
+              open: bars.map(([, b]) => b.o),
+              high: bars.map(([, b]) => b.h),
+              low: bars.map(([, b]) => b.l),
+              close: bars.map(([, b]) => b.c),
+              volume: bars.map(([, b]) => b.v),
+            }],
+          },
+        }],
+      },
+    };
+  } catch {
+    return data;
+  }
+}
+
 // Remove implausible outlier candles from a chart.result[0] payload. Some forex
 // sources (Twelve Data, and occasionally Yahoo e.g. USDJPY=X) include isolated
 // candles whose high-low range is many times the local daily median (EURUSD
@@ -595,7 +646,10 @@ app.get("/api/market-data", async (req, res) => {
 
     const hasQuotes = finalData?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.length > 0;
     if (!hasQuotes) return res.status(404).json({ error: "No data found" });
-    res.json(sanitizeCandles(finalData));
+    // The generic path fetched 1h bars for 4h — return real 4h candles so the
+    // retrace filter and the chart count the same bars (crypto is native 4h).
+    const payload = timeframe === '4h' && !isCrypto ? aggregateHourlyTo4h(finalData) : finalData;
+    res.json(sanitizeCandles(payload));
   } catch (error: any) {
     res.status(500).json({ error: "Server Error" });
   }

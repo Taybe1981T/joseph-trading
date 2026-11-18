@@ -43,6 +43,51 @@ function sanitizeCandles(data: any): any {
   return data;
 }
 
+/** Yahoo has no native 4h interval: build real 4h bars from its 1h series. */
+function aggregateHourlyTo4h(data: any): any {
+  try {
+    const result = data?.chart?.result?.[0];
+    const ts = result?.timestamp;
+    const q = result?.indicators?.quote?.[0];
+    if (!Array.isArray(ts) || !q || !Array.isArray(q.close)) return data;
+    const buckets = new Map<number, { o: number; h: number; l: number; c: number; v: number }>();
+    for (let i = 0; i < ts.length; i++) {
+      const o = q.open?.[i], h = q.high?.[i], l = q.low?.[i], c = q.close?.[i];
+      if (o == null || h == null || l == null || c == null || ts[i] == null) continue;
+      const key = Math.floor(ts[i] / (4 * 3600)) * 4 * 3600;
+      const b = buckets.get(key);
+      if (!b) buckets.set(key, { o, h, l, c, v: Number(q.volume?.[i]) || 0 });
+      else {
+        b.h = Math.max(b.h, h);
+        b.l = Math.min(b.l, l);
+        b.c = c;
+        b.v += Number(q.volume?.[i]) || 0;
+      }
+    }
+    const bars = [...buckets.entries()].sort((a, b) => a[0] - b[0]);
+    if (bars.length < 5) return data;
+    return {
+      chart: {
+        result: [{
+          ...result,
+          timestamp: bars.map(([t]) => t),
+          indicators: {
+            quote: [{
+              open: bars.map(([, b]) => b.o),
+              high: bars.map(([, b]) => b.h),
+              low: bars.map(([, b]) => b.l),
+              close: bars.map(([, b]) => b.c),
+              volume: bars.map(([, b]) => b.v),
+            }],
+          },
+        }],
+      },
+    };
+  } catch {
+    return data;
+  }
+}
+
 const BINANCE_BASE = 'https://api.binance.com/api/v3';const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
 const ALTERNATIVE_BASE = 'https://api.alternative.me';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
@@ -299,7 +344,7 @@ function symbolToYahooForex(symbol: string): string | null {
 function yahooInterval(timeframe: string): string {
   const map: Record<string, string> = {
     '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
-    '1h': '1h', '4h': '1d', '1d': '1d', '1w': '1wk', '1M': '1mo',
+    '1h': '1h', '4h': '1h', '1d': '1d', '1w': '1wk', '1M': '1mo',
   };
   return map[timeframe] || '1d';
 }
@@ -307,7 +352,7 @@ function yahooInterval(timeframe: string): string {
 function yahooRange(timeframe: string): string {
   const map: Record<string, string> = {
     '1m': '5d', '5m': '5d', '15m': '1mo', '30m': '1mo',
-    '1h': '3mo', '4h': '6mo', '1d': '1y', '1w': '2y', '1M': '5y',
+    '1h': '3mo', '4h': '3mo', '1d': '1y', '1w': '2y', '1M': '5y',
   };
   return map[timeframe] || '1y';
 }
@@ -361,7 +406,7 @@ async function fetchYahooFinance(symbol: string, timeframe: string): Promise<any
           const closes = q.close.filter((c: any) => c != null);
           if (closes.length < 10) continue;
 
-          return {
+          const out = {
             chart: {
               result: [{
                 meta: { symbol },
@@ -378,6 +423,9 @@ async function fetchYahooFinance(symbol: string, timeframe: string): Promise<any
               }]
             }
           };
+          // Yahoo has no 4h interval — the request fetched 1h bars, so build
+          // genuine 4h candles before they reach the retrace filter.
+          return timeframe === '4h' ? aggregateHourlyTo4h(out) : out;
         } catch {}
       }
     }

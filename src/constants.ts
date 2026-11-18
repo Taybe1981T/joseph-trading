@@ -22,7 +22,7 @@ export interface CategoryGateProfile {
 }
 
 export const CATEGORY_GATE_PROFILES: Record<string, CategoryGateProfile> = {
-  forex:   { sidewaysVotes: 3, goldenOverride: [55, 88], ignoreZeroVolume: true,  usesPips: true,  retraceDefault: true,  retraceStrict: false },
+  forex:   { sidewaysVotes: 3, goldenOverride: [60, 88], ignoreZeroVolume: true,  usesPips: true,  retraceDefault: true,  retraceStrict: false },
   crypto:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, retraceDefault: false, retraceStrict: true },
   stocks:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, retraceDefault: false, retraceStrict: true },
   metals:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, retraceDefault: false, retraceStrict: true },
