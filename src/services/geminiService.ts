@@ -1,5 +1,5 @@
 import { MarketType, AnalysisResult, TradingStyle, SignalType, StrategySettings } from "../types";
-import { DEFAULT_STRATEGY_SETTINGS } from "../constants";
+import { DEFAULT_STRATEGY_SETTINGS, gateProfileFor } from "../constants";
 import { fetchMarketContext } from "./marketContextService";
 import { onRateLimited, waitIfRateLimited } from "./rateLimitTracker";
 import { fetchMarketDataDirect } from './apiDirect';
@@ -170,16 +170,14 @@ function calculateSupplyDemandZones(highs: number[], lows: number[], volumes: nu
  */
 function calculateTechnicalMetrics(
   closes: number[], highs: number[], lows: number[], volumes?: number[], opens?: number[],
-  opts?: { isForex?: boolean },
+  opts?: { category?: MarketType | string },
 ) {
   if (!closes || closes.length < 10) return null;
 
-  // Forex is structurally low-volatility: relative BB width is almost always
-  // < 0.02 and MA alignment is frequently 'mixed'. Requiring only 2 of the 3
-  // sideways votes therefore labels nearly every FX pair as sideways, which
-  // makes the AI prompt return `no_entry` and hides every signal. Forex needs
-  // ALL THREE votes before it is treated as sideways (other categories keep 2).
-  const isForex = opts?.isForex === true;
+  // Sideways voting is category-aware. See CATEGORY_GATE_PROFILES in constants.ts:
+  // FX is structurally low-volatility (BB width almost always < 0.02 and MA often
+  // 'mixed'), so it requires all 3 votes while other categories keep 2.
+  const sidewaysVotesNeeded = gateProfileFor(opts?.category || '').sidewaysVotes;
 
   const len = closes.length;
   const safeOpens = opens && opens.length >= len ? opens : closes;
@@ -375,7 +373,7 @@ function calculateTechnicalMetrics(
   const sidewaysVotes = [adxSideays, bbSideays, maMixed].filter(Boolean).length;
   // FOREX FIX: genuine sideways requires all three votes. Without this, a
   // healthy FX trend with narrow bands + mixed MAs was forced to `no_entry`.
-  const isSideways = sidewaysVotes >= (isForex ? 3 : 2);
+  const isSideways = sidewaysVotes >= sidewaysVotesNeeded;
   let sidewaysDirection: 'sideways' | 'uptrend' | 'downtrend' = 'sideways';
   if (!isSideways) {
     if (maAlignment === 'bullish' || adxDirection === 'uptrend') sidewaysDirection = 'uptrend';
@@ -547,7 +545,7 @@ async function fetchAndPrepareSymbolData(
     const opens = rawOpens1.length >= closes.length ? rawOpens1 : closes;
     if (closes.length < 10) return { error: `Insufficient data for ${symbol}.` };
 
-    const metrics = calculateTechnicalMetrics(closes, highs, lows, volumes, opens, { isForex: type === MarketType.FOREX });
+    const metrics = calculateTechnicalMetrics(closes, highs, lows, volumes, opens, { category: type });
     const supplyDemandZones = calculateSupplyDemandZones(highs, lows, volumes || [], closes);
     const zonesText = supplyDemandZones.length > 0
       ? supplyDemandZones.map(z => `${z.type === 'supply' ? 'Supply' : 'Demand'} zone: ${z.bottom.toFixed(2)}ΓÇô${z.top.toFixed(2)} (strength ${z.strength.toFixed(0)}%)`).join('. ')
@@ -568,7 +566,7 @@ async function fetchAndPrepareSymbolData(
         microLows = microQuotes.low?.filter((c: any) => c != null) || microCloses;
         microOpens = microQuotes.open?.filter((c: any) => c != null) || microCloses;
         microVolumes = microQuotes.volume?.filter((c: any) => c != null) || [];
-        if (microCloses.length >= 10) microMetrics = calculateTechnicalMetrics(microCloses, microHighs, microLows, microVolumes.length > 0 ? microVolumes : undefined, microOpens, { isForex: type === MarketType.FOREX });
+        if (microCloses.length >= 10) microMetrics = calculateTechnicalMetrics(microCloses, microHighs, microLows, microVolumes.length > 0 ? microVolumes : undefined, microOpens, { category: type });
       }
     } catch {}
     let contextFearGreed = null, contextNews: any[] = [], contextEcon: any[] = [];
@@ -924,7 +922,7 @@ function synthFromMetrics(metrics: any, symbol: string): any {
 // ═══════════════════════════════════════════════════════════════════
 function computeVolumeQuality(
   closes: number[], highs: number[], lows: number[], volumes: number[], opens: number[], direction: string,
-  isForex = false
+  ignoreZeroVolume = false
 ): { score: number; detected: boolean; absorbed: boolean; absorptionLevel: number; reasons: string[] } {
   const len = closes.length;
   const v = volumes || [];
@@ -933,7 +931,7 @@ function computeVolumeQuality(
   // FX daily bars are aggregated with an all-zero placeholder volume (api/server.ts).
   // Those zeros must not be scored as "real" volume: the resulting 27-46 score sits
   // below the 45 threshold and suppresses EVERY forex signal before any later gate.
-  if (!v.length || v.length < 8 || len < 10 || (isForex && v.every((x) => !x))) return base;
+  if (!v.length || v.length < 8 || len < 10 || (ignoreZeroVolume && v.every((x) => !x))) return base;
 
   const lastVol = v[len - 1] || 0;
   const prevVols = v.slice(-6, -1).filter((x: any) => x != null);
@@ -1188,14 +1186,14 @@ export async function analyzeMarket(params: {
       throw new Error(`Insufficient data for ${symbol}.`);
     }
 
-    const metrics = calculateTechnicalMetrics(closes, highs, lows, volumes, opens, { isForex: type === MarketType.FOREX });
+    const metrics = calculateTechnicalMetrics(closes, highs, lows, volumes, opens, { category: type });
     const supplyDemandZones = calculateSupplyDemandZones(highs, lows, volumes || [], closes);
     const zonesText = supplyDemandZones.length > 0 
       ? supplyDemandZones.map(z => `${z.type === 'supply' ? 'Supply' : 'Demand'} zone: ${z.bottom.toFixed(2)}ΓÇô${z.top.toFixed(2)} (strength ${z.strength.toFixed(0)}%)`).join('. ')
       : 'No clear zones detected.';
 
     // ── Professional Volume Quality (5-module filter) ──
-    const volumeQuality = computeVolumeQuality(closes, highs, lows, volumes || [], opens, metrics?.direction || 'sideways', type === MarketType.FOREX);
+    const volumeQuality = computeVolumeQuality(closes, highs, lows, volumes || [], opens, metrics?.direction || 'sideways', gateProfileFor(type).ignoreZeroVolume);
     console.log(`[Engine] ${symbol} VolumeQuality=${volumeQuality.score}/100 detected=${volumeQuality.detected} absorbed=${volumeQuality.absorbed} ${volumeQuality.reasons.join('; ')}`);
     
     // Process micro data (already fetched in parallel above)
@@ -1210,7 +1208,7 @@ export async function analyzeMarket(params: {
         const microOpensRaw = microQuotes.open?.filter((c: any) => c != null) || microCloses;
         const microVolsRaw = microQuotes.volume?.filter((c: any) => c != null) || [];
         if (microCloses.length >= 10) {
-          microMetrics = calculateTechnicalMetrics(microCloses, microHighsRaw, microLowsRaw, microVolsRaw.length > 0 ? microVolsRaw : undefined, microOpensRaw, { isForex: type === MarketType.FOREX });
+          microMetrics = calculateTechnicalMetrics(microCloses, microHighsRaw, microLowsRaw, microVolsRaw.length > 0 ? microVolsRaw : undefined, microOpensRaw, { category: type });
         }
       }
     } catch (e) {
@@ -1229,7 +1227,7 @@ export async function analyzeMarket(params: {
             (macroQuotes.low || []).filter((c: any) => c != null), 
             (macroQuotes.volume || []).filter((c: any) => c != null), 
             (macroQuotes.open || []).filter((c: any) => c != null),
-            { isForex: type === MarketType.FOREX });
+            { category: type });
           macroDirection = macroMetrics?.direction || 'sideways';
         }
       }
@@ -2153,7 +2151,7 @@ Return ONLY valid JSON:
 
     if (currentPrice > 0) {
       var slDist = 0;
-      const isForex = type === MarketType.FOREX;
+      const isForex = gateProfileFor(type).usesPips;
 
       // ── Lever 2: breathable stop ──
       // Use the configured ATR multiple (default 3). Crypto stays at 3× because
@@ -2287,13 +2285,12 @@ Return ONLY valid JSON:
     // already extended and you'd be chasing the top → neutral. This is the sweet spot where
     // the pullback-entry protection is most reliable.
     if (settings?.goldenRangeEnabled) {
-      // FOREX FIX: the global [70,85] window was calibrated on crypto volatility.
-      // FX confidence settles lower because its ATR/volume are smaller, so almost
-      // every genuine FX signal fell below 70 and was hidden. Widen ONLY forex to
-      // [60,88]: weak (<60) and late-chasing (>88) entries stay filtered out.
-      const isForexGolden = type === MarketType.FOREX;
-      const gMin = isForexGolden ? 60 : (typeof settings.goldenConfMin === 'number' ? settings.goldenConfMin : 70);
-      const gMax = isForexGolden ? 88 : (typeof settings.goldenConfMax === 'number' ? settings.goldenConfMax : 85);
+      // Per-category window. See CATEGORY_GATE_PROFILES: FX settles lower because
+      // its ATR/volume are smaller, so only FX uses [60,88]; every other category
+      // keeps the user's [70,85] defaults. Weak (<min) and late (>max) stay filtered.
+      const goldenOverride = gateProfileFor(type).goldenOverride;
+      const gMin = goldenOverride ? goldenOverride[0] : (typeof settings.goldenConfMin === 'number' ? settings.goldenConfMin : 70);
+      const gMax = goldenOverride ? goldenOverride[1] : (typeof settings.goldenConfMax === 'number' ? settings.goldenConfMax : 85);
       const isTradeSignal = finalSignal === SignalType.BUY || finalSignal === SignalType.STRONG_BUY ||
                             finalSignal === SignalType.SELL || finalSignal === SignalType.STRONG_SELL;
       if (isTradeSignal && (finalConfidence < gMin || finalConfidence > gMax)) {
