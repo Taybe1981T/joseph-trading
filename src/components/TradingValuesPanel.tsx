@@ -37,9 +37,10 @@ const FIELDS: Array<{ key: FieldKey; ar: string; en: string; hintAr: string; hin
 ];
 
 // All categories — including crypto — use DOLLAR budgets. Crypto's lot is the
-// HIGH-liquidity base (BTC/ETH → 0.01, medium ×10, weak ×1000) and its SL/TP
-// are dollar budgets per $1,000, widened by liquidity (high 1 · medium 0.6 ·
-// weak 0.2) and doubled with the balance.
+// HIGH-liquidity base (BTC/ETH → 0.01, medium ×10, weak ×1000, with per-symbol
+// overrides such as LTC ×100 and AXS/SEI ×1000); its SL/TP are dollar budgets
+// per $1,000, widened by liquidity (high 1 · medium 0.6 · weak 0.2) and doubled
+// with the balance.
 function fieldLabel(f: { key: FieldKey; ar: string; en: string }, isCrypto: boolean, isAr: boolean): string {
   return isAr ? f.ar : f.en;
 }
@@ -48,8 +49,8 @@ function fieldHint(f: { key: FieldKey; hintAr: string; hintEn: string }, isCrypt
   if (!isCrypto) return isAr ? f.hintAr : f.hintEn;
   if (f.key === 'lotSize') {
     return isAr
-      ? 'أساس الفئة العليا: بيتكوين/إيثيريوم 0.01 · متوسطة ×10 · ضعيفة ×1000 (يتغيّر مع الرصيد)'
-      : 'High-tier base: BTC/ETH 0.01 · medium ×10 · weak ×1000 (scales with balance)';
+      ? 'أساس الفئة العليا: بيتكوين/إيثيريوم 0.01 · متوسطة ×10 · ضعيفة ×1000 · استثناءات: لايتكوين ×100 وAXS/SEI ×1000 (يتغيّر مع الرصيد)'
+      : 'High-tier base: BTC/ETH 0.01 · medium ×10 · weak ×1000 · overrides: LTC ×100, AXS/SEI ×1000 (scales with balance)';
   }
   if (f.key === 'stopLossUSD') {
     return isAr

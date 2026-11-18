@@ -106,8 +106,8 @@ export function balanceThousands(balance: number): number {
   return Math.max(1, Math.floor(b / 1000));
 }
 
-// Base lot for a specific symbol: crypto is tiered per coin (BTC 0.01 · SOL 1 ·
-// DOGE 10 per $1,000), every other category uses its single category base.
+// Base lot for a specific symbol: crypto is tiered per coin (BTC 0.01 · SOL 0.1 ·
+// LTC 1 · DOGE/AXS 10 per $1,000), other categories use their single base.
 // `cryptoTierBase` lets the developer's fixed-values panel drive the high tier.
 export function baseQtyForSymbol(category: string, symbol?: string, cryptoTierBase = 0.01): number {
   if ((category || '') === 'crypto' && symbol) return cryptoBaseQty(symbol, cryptoTierBase);
