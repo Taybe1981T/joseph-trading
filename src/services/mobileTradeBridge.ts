@@ -133,7 +133,7 @@ export async function openMobileManualTrade(
   const store = getTradeStore(mobileTradeUser() as any);
   const price = await getLivePrice(sym);
   if (price == null || !isFinite(price) || price <= 0) throw new Error('no live price for ' + sym);
-  const fixed = getTradingValuesOverride(category);
+  const fixed = getTradingValuesOverride(category, sym);
   // Same sizing rules as desktop + the global engine:
   //   • crypto → tiered balance-scaled lot (BTC 0.1 · SOL 1 · DOGE 10 per $1k)
   //     and SL/TP as PERCENTAGES (1.5 % / 3 %), never tiny USD distances.
@@ -314,7 +314,7 @@ async function mobileManagePositions(): Promise<void> {
     // 2) Trailing stop — same rule as desktop (base unit per category).
     // Developer "Trading Values" system ON → fixed activation/step, no lot
     // scaling, and per-position overrides are ignored (system takes priority).
-    const tfFixed = getTradingValuesOverride(t.category || detectMobileTradeCategory(t.symbol));
+    const tfFixed = getTradingValuesOverride(t.category || detectMobileTradeCategory(t.symbol), t.symbol);
     if (!cfg.enabled && !tfFixed) continue;
     try {
       const { calcTrailingStop } = await import('../lib/trailingStop');

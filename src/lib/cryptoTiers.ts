@@ -31,6 +31,25 @@
 
 export type CryptoTier = 'high' | 'medium' | 'low';
 
+export const CRYPTO_TIER_KEYS: CryptoTier[] = ['high', 'medium', 'low'];
+
+/** SL/TP dollar-budget factor vs the high tier (per $1,000 of balance). */
+export const CRYPTO_TIER_FACTORS: Record<CryptoTier, number> = {
+  high: 1, medium: 0.6, low: 0.2,
+};
+
+/** Lot multiplier vs the high-tier base (units per $1,000 of balance). */
+export const CRYPTO_TIER_LOT_MULTIPLIERS: Record<CryptoTier, number> = {
+  high: 1, medium: 10, low: 1000,
+};
+
+/** Editable per-tier lot bases (units per $1,000) from the developer panel. */
+export interface CryptoLotTierBases {
+  high: number;
+  medium: number;
+  low: number;
+}
+
 // Deep-liquidity majors with a high unit price → smallest unit count.
 const HIGH_TIER = new Set(['BTC', 'ETH', 'BNB', 'PAXG', 'XAUT']);
 
@@ -85,8 +104,7 @@ export function cryptoTier(symbol: string): CryptoTier {
 export function cryptoLotMultiplier(symbol: string): number {
   const override = CRYPTO_LOT_MULTIPLIER_OVERRIDES[cryptoRootSymbol(symbol)];
   if (typeof override === 'number' && Number.isFinite(override) && override > 0) return override;
-  const tier = cryptoTier(symbol);
-  return tier === 'high' ? 1 : tier === 'medium' ? 10 : 1000;
+  return CRYPTO_TIER_LOT_MULTIPLIERS[cryptoTier(symbol)];
 }
 
 /**
@@ -101,10 +119,29 @@ export function cryptoBaseQty(symbol: string, highTierBase = 0.01): number {
   return Math.round(base * 10000) / 10000;
 }
 
+/**
+ * Translate independently-editable per-tier lot bases into the ONE "high-tier
+ * base" that the legacy qty helpers expect. Those helpers multiply the base by
+ * the symbol's `cryptoLotMultiplier()` (tier default, or an explicit LTC/AXS
+ * override), so dividing each tier's own base by its own multiplier yields the
+ * exact edited lot for that tier. Overrides stay relative to the high-tier base
+ * — preserving LTC ×100 and AXS/SEI ×1000 from the previous build.
+ */
+export function cryptoHighBaseForSymbol(symbol: string, tierBases: CryptoLotTierBases): number {
+  const root = cryptoRootSymbol(symbol);
+  const override = CRYPTO_LOT_MULTIPLIER_OVERRIDES[root];
+  if (typeof override === 'number' && Number.isFinite(override) && override > 0) {
+    return Number.isFinite(tierBases.high) && tierBases.high > 0 ? tierBases.high : 0.01;
+  }
+  const tier = cryptoTier(symbol);
+  const own = tierBases[tier];
+  const div = CRYPTO_TIER_LOT_MULTIPLIERS[tier];
+  return Number.isFinite(own) && own > 0 ? own / div : 0.01;
+}
+
 /** Liquidity multiplier applied to the developer's HIGH-tier dollar budget. */
 export function cryptoTierFactor(symbol: string): number {
-  const tier = cryptoTier(symbol);
-  return tier === 'high' ? 1 : tier === 'medium' ? 0.6 : 0.2;
+  return CRYPTO_TIER_FACTORS[cryptoTier(symbol)];
 }
 
 /**

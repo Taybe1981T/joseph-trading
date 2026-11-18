@@ -20,10 +20,8 @@ import {
   tradeQtyFor,
   cryptoUsdLevels,
   baseUnitForTrade,
-  CRYPTO_SL_USD,
-  CRYPTO_TP_USD,
+  resolvedCryptoRiskUsd,
 } from '../services/tradingValues';
-import { cryptoTierRiskUsd } from '../lib/cryptoTiers';
 import { clearOpened as clearAutoOpened, resetGuard as resetAutoGuard } from '../services/autoGuard';
 import { openEventFor, closeEventFor, clearEventFor, resetEventFor, broadcastMirrorEvent, publishDevBook } from '../services/tradeMirror';
 import MT5ConnectModal from './MT5ConnectModal';
@@ -376,7 +374,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     if (!symbol) return;
     const cat = detectCategory(symbol);
     const isCrypto = cat === 'crypto';
-    const fixed = getTradingValuesOverride(cat);
+    const fixed = getTradingValuesOverride(cat, symbol);
 
     // ── Lot ──
     if (isCrypto) {
@@ -395,12 +393,8 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     if (isCrypto) {
       // Crypto uses DOLLAR budgets like every other category, widened by
       // liquidity: high $50/$100, medium $30/$60, weak $10/$20 per $1,000,
-      // doubled with the balance. The panel drives the high-tier base.
-      const tier = cryptoTierRiskUsd(
-        symbol,
-        fixed?.slUsd ?? CRYPTO_SL_USD,
-        fixed?.tpUsd ?? CRYPTO_TP_USD,
-      );
+      // doubled with the balance. Each tier is independently editable.
+      const tier = resolvedCryptoRiskUsd(symbol);
       const scale = balanceThousands(balance);
       const slTxt = (tier.slUsd * scale).toFixed(2);
       const tpTxt = (tier.tpUsd * scale).toFixed(2);
@@ -622,7 +616,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
       if (typeof t.qty === 'number' && t.qty > 0 && typeof t.entryPrice === 'number') {
         const pnlUSD = calcPnl(t, price);
         const ts = loadTrailingSettings();
-        const fixed = getTradingValuesOverride(t.category || detectCategory(t.symbol));
+        const fixed = getTradingValuesOverride(t.category || detectCategory(t.symbol), t.symbol);
         if (!ts.enabled && !fixed) {
           // Trailing disabled by the owner → keep the original stop, skip trailing.
         } else {
@@ -983,7 +977,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     // Developer "Trading Values" system: when ON, force the fixed lot + the
     // fixed SL/TP for this category. Typed values and the matched signal risk
     // plan are ignored (the system imposes its own numbers on every symbol).
-    const fixed = getTradingValuesOverride(pendingCat);
+    const fixed = getTradingValuesOverride(pendingCat, symbol);
     // Crypto always uses the tiered ticket lot (prefilled by the effect above) so
     // a cheap coin is never traded at an absurdly small size; other categories
     // are forced to the fixed lot while the system is ON.
@@ -1026,14 +1020,15 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
       // Liquidity tier + balance decide the default budget (weak $10/$20 per
       // $1,000). Typed dollar values win; cryptoUsdLevels() converts them to
       // prices with the same safe cap the auto engine uses.
+      const tierRisk = resolvedCryptoRiskUsd(symbol);
       const lv = cryptoUsdLevels({
         symbol,
         entry: livePrice,
         isBuy,
         qty: execQty,
         balance,
-        highSlUsd: fixed?.slUsd ?? CRYPTO_SL_USD,
-        highTpUsd: fixed?.tpUsd ?? CRYPTO_TP_USD,
+        slPer1kUsd: tierRisk.slUsd,
+        tpPer1kUsd: tierRisk.tpUsd,
         slBudgetUsd: Number.isFinite(typedSl) && typedSl > 0 ? typedSl : undefined,
         tpBudgetUsd: Number.isFinite(typedTp) && typedTp > 0 ? typedTp : undefined,
       });
@@ -1932,7 +1927,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
                     if (activeTrade && typeof activeTrade.qty === 'number' && activeTrade.qty > 0 && typeof activeTrade.entryPrice === 'number' && typeof activeTrade.sl === 'number') {
                       const live = (typeof livePrice === 'number' ? livePrice : activeTrade.entryPrice) as number;
                       const pnl = calcPnl(activeTrade, live);
-                      const tfFixed = getTradingValuesOverride(activeTrade.category || detectCategory(activeTrade.symbol));
+                      const tfFixed = getTradingValuesOverride(activeTrade.category || detectCategory(activeTrade.symbol), activeTrade.symbol);
                       const trail = calcTrailingStop({
                         qty: activeTrade.qty, openPnlUSD: pnl,
                         baseUnit: baseUnitForTrade(activeTrade.category || detectCategory(activeTrade.symbol), activeTrade.symbol),

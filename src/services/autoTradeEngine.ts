@@ -223,7 +223,7 @@ export class AutoTradeEngine {
           const ts = loadTrailingSettings();
           // Developer "Trading Values" system ON → its fixed activation/step
           // win over the global strategy values AND the lot-step scaling.
-          const fixed = getTradingValuesOverride(t.category || detectCategory(t.symbol));
+          const fixed = getTradingValuesOverride(t.category || detectCategory(t.symbol), t.symbol);
           if (fixed || ts.enabled) {
             const pnlUSD = calcPnl(t, price);
             const trailCat = t.category || detectCategory(t.symbol);

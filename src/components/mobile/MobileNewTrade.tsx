@@ -140,7 +140,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   if (openForSymbol && openForSymbol.qty > 0 && openForSymbol.entryPrice > 0) {
     const live = chartLivePrice ?? openForSymbol.entryPrice;
     const pnl = calcPnl(openForSymbol, live);
-    const tvFixed = getTradingValuesOverride(chartCategory);
+    const tvFixed = getTradingValuesOverride(chartCategory, symbol);
     const tr = calcTrailingStop({
       qty: openForSymbol.qty,
       openPnlUSD: pnl,

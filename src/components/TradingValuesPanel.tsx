@@ -1,13 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { SlidersHorizontal, RotateCcw, CheckCircle, Loader2, AlertTriangle, Zap, Lock } from 'lucide-react';
+import { SlidersHorizontal, RotateCcw, CheckCircle, Loader2, AlertTriangle, Zap, Lock, Layers } from 'lucide-react';
 import { Language } from '../lib/i18n';
 import {
+  CRYPTO_TIER_VALUES_KEYS,
   TRADING_CATEGORIES,
   TRADING_VALUES_STORAGE_KEY,
-  type CategoryTradingValues,
+  type CryptoTierKey,
+  type TierTradingValues,
   type TradingCategory,
   type TradingValuesConfig,
   defaultCategoryTradingValues,
+  defaultCryptoTierValues,
   defaultTradingValues,
   loadSharedTradingValues,
   normalizeTradingValues,
@@ -19,13 +22,19 @@ interface Props {
   lang: Language;
 }
 
-type FieldKey = keyof CategoryTradingValues;
+type FieldKey = keyof TierTradingValues;
 
 const CATEGORY_LABEL: Record<TradingCategory, { ar: string; en: string }> = {
   forex: { ar: 'فوركس', en: 'Forex' },
   crypto: { ar: 'كريبتو', en: 'Crypto' },
   stocks: { ar: 'أسهم', en: 'Stocks' },
   metals: { ar: 'معادن', en: 'Metals' },
+};
+
+const TIER_LABEL: Record<CryptoTierKey, { ar: string; en: string }> = {
+  high: { ar: 'الأعلى سيولة (قوي)', en: 'Highest liquidity (strong)' },
+  medium: { ar: 'متوسط السيولة', en: 'Medium liquidity' },
+  low: { ar: 'الأضعف سيولة (ضعيف)', en: 'Lowest liquidity (weak)' },
 };
 
 const FIELDS: Array<{ key: FieldKey; ar: string; en: string; hintAr: string; hintEn: string }> = [
@@ -36,33 +45,36 @@ const FIELDS: Array<{ key: FieldKey; ar: string; en: string; hintAr: string; hin
   { key: 'trailingStepUSD', ar: 'خطوة الترينلغ ($)', en: 'Trailing Step ($)', hintAr: 'خطوة تثبيت الربح الثابتة', hintEn: 'Fixed profit-lock step' },
 ];
 
-// All categories — including crypto — use DOLLAR budgets. Crypto's lot is the
-// HIGH-liquidity base (BTC/ETH → 0.01, medium ×10, weak ×1000, with per-symbol
-// overrides such as LTC ×100 and AXS/SEI ×1000); its SL/TP are dollar budgets
-// per $1,000, widened by liquidity (high 1 · medium 0.6 · weak 0.2) and doubled
-// with the balance.
-function fieldLabel(f: { key: FieldKey; ar: string; en: string }, isCrypto: boolean, isAr: boolean): string {
+function fieldLabel(f: { ar: string; en: string }, isAr: boolean): string {
   return isAr ? f.ar : f.en;
 }
 
-function fieldHint(f: { key: FieldKey; hintAr: string; hintEn: string }, isCrypto: boolean, isAr: boolean): string {
-  if (!isCrypto) return isAr ? f.hintAr : f.hintEn;
-  if (f.key === 'lotSize') {
-    return isAr
-      ? 'أساس الفئة العليا: بيتكوين/إيثيريوم 0.01 · متوسطة ×10 · ضعيفة ×1000 · استثناءات: لايتكوين ×100 وAXS/SEI ×1000 (يتغيّر مع الرصيد)'
-      : 'High-tier base: BTC/ETH 0.01 · medium ×10 · weak ×1000 · overrides: LTC ×100, AXS/SEI ×1000 (scales with balance)';
+/** Crypto hints describe THIS tier's editable base; other categories keep the old hint. */
+function fieldHint(f: { key: FieldKey; hintAr: string; hintEn: string }, cat: TradingCategory, tier: CryptoTierKey | undefined, isAr: boolean): string {
+  if (cat !== 'crypto') return isAr ? f.hintAr : f.hintEn;
+  const d = defaultCryptoTierValues()[tier || 'high'];
+  switch (f.key) {
+    case 'lotSize':
+      return isAr
+        ? `لوت هذه الفئة لكل 1000$ (الافتراضي ${formatNumericValue(d.lotSize)}) — يتضاعف مع الرصيد`
+        : `Lot per $1,000 for this tier (default ${formatNumericValue(d.lotSize)}) — scales with balance`;
+    case 'stopLossUSD':
+      return isAr
+        ? `ميزانية وقف بالدولار لكل 1000$ (الافتراضي ${d.stopLossUSD}$) — تتضاعف مع الرصيد`
+        : `Stop budget per $1,000 (default $${d.stopLossUSD}) — doubles with balance`;
+    case 'takeProfitUSD':
+      return isAr
+        ? `ميزانية هدف بالدولار لكل 1000$ (الافتراضي ${d.takeProfitUSD}$) — تتضاعف مع الرصيد`
+        : `Target budget per $1,000 (default $${d.takeProfitUSD}) — doubles with balance`;
+    case 'trailingActivationUSD':
+      return isAr
+        ? `ربح التفعيل بالدولار لهذه الفئة (الافتراضي ${d.trailingActivationUSD}$)`
+        : `Activation profit in USD for this tier (default $${d.trailingActivationUSD})`;
+    case 'trailingStepUSD':
+      return isAr
+        ? `خطوة تثبيت الربح بالدولار لهذه الفئة (الافتراضي ${d.trailingStepUSD}$)`
+        : `Profit-lock step in USD for this tier (default $${d.trailingStepUSD})`;
   }
-  if (f.key === 'stopLossUSD') {
-    return isAr
-      ? 'ميزانية وقف بالدولار لكل 1000$ — الافتراضي 50$ (ضعيفة 10$ · متوسطة 30$ · عالية 50$) ويتضاعف مع الرصيد'
-      : 'Stop budget per $1,000 — default $50 (weak $10 · medium $30 · high $50), doubles with balance';
-  }
-  if (f.key === 'takeProfitUSD') {
-    return isAr
-      ? 'ميزانية هدف بالدولار لكل 1000$ — الافتراضي 100$ (ضعيفة 20$ · متوسطة 60$ · عالية 100$) ويتضاعف مع الرصيد'
-      : 'Target budget per $1,000 — default $100 (weak $20 · medium $60 · high $100), doubles with balance';
-  }
-  return isAr ? f.hintAr : f.hintEn;
 }
 
 // Numbers are always written AND displayed as Western (Latin) digits — e.g.
@@ -146,27 +158,40 @@ export default function TradingValuesPanel({ lang }: Props) {
     }, 600);
   };
 
-  const patchField = (cat: TradingCategory, field: FieldKey, value: number) => {
-    const next: TradingValuesConfig = {
-      ...config,
-      categories: {
-        ...config.categories,
-        [cat]: { ...config.categories[cat], [field]: value },
-      },
-    };
+  // A tier is supplied only for crypto; other categories keep their flat field.
+  const draftKey = (cat: TradingCategory, field: FieldKey, tier?: CryptoTierKey) =>
+    tier ? `${cat}.${tier}.${field}` : `${cat}.${field}`;
+
+  const readValue = (cat: TradingCategory, field: FieldKey, tier?: CryptoTierKey): number => {
+    const cv = config.categories[cat];
+    if (cat === 'crypto' && tier) return cv.cryptoTiers?.[tier]?.[field] ?? defaultCryptoTierValues()[tier][field];
+    return cv[field];
+  };
+
+  const writeValue = (cat: TradingCategory, field: FieldKey, value: number, tier?: CryptoTierKey) => {
+    const next: TradingValuesConfig = { ...config, categories: { ...config.categories } };
+    if (cat === 'crypto' && tier) {
+      const base = next.categories.crypto.cryptoTiers || defaultCryptoTierValues();
+      next.categories.crypto = {
+        ...next.categories.crypto,
+        cryptoTiers: { ...base, [tier]: { ...base[tier], [field]: value } },
+      };
+    } else {
+      next.categories[cat] = { ...next.categories[cat], [field]: value };
+    }
     persist(next);
   };
 
-  const handleInput = (cat: TradingCategory, field: FieldKey, raw: string) => {
-    const key = `${cat}.${field}`;
+  const handleInput = (cat: TradingCategory, field: FieldKey, raw: string, tier?: CryptoTierKey) => {
+    const key = draftKey(cat, field, tier);
     const western = normalizeNumericInput(raw);
     setDrafts((d) => ({ ...d, [key]: western }));
     const n = parseFloat(western);
-    if (Number.isFinite(n) && n > 0) patchField(cat, field, n);
+    if (Number.isFinite(n) && n > 0) writeValue(cat, field, n, tier);
   };
 
-  const clearDraft = (cat: TradingCategory, field: FieldKey) => {
-    const key = `${cat}.${field}`;
+  const clearDraft = (cat: TradingCategory, field: FieldKey, tier?: CryptoTierKey) => {
+    const key = draftKey(cat, field, tier);
     setDrafts((d) => {
       if (!(key in d)) return d;
       const next = { ...d };
@@ -175,22 +200,43 @@ export default function TradingValuesPanel({ lang }: Props) {
     });
   };
 
-  const resetField = (cat: TradingCategory, field: FieldKey) => {
-    const def = defaultCategoryTradingValues(cat);
-    clearDraft(cat, field);
-    patchField(cat, field, def[field]);
+  const resetField = (cat: TradingCategory, field: FieldKey, tier?: CryptoTierKey) => {
+    const def = tier ? defaultCryptoTierValues()[tier] : defaultCategoryTradingValues(cat);
+    clearDraft(cat, field, tier);
+    writeValue(cat, field, (def as TierTradingValues)[field], tier);
+  };
+
+  const resetTier = (tier: CryptoTierKey) => {
+    setDrafts((d) => {
+      const next = { ...d };
+      for (const f of FIELDS) delete next[`crypto.${tier}.${f.key}`];
+      return next;
+    });
+    const base = config.categories.crypto.cryptoTiers || defaultCryptoTierValues();
+    persist({
+      ...config,
+      categories: {
+        ...config.categories,
+        crypto: { ...config.categories.crypto, cryptoTiers: { ...base, [tier]: defaultCryptoTierValues()[tier] } },
+      },
+    });
   };
 
   const resetCategory = (cat: TradingCategory) => {
-    const def = defaultCategoryTradingValues(cat);
     setDrafts((d) => {
       const next = { ...d };
-      for (const f of FIELDS) delete next[`${cat}.${f.key}`];
+      if (cat === 'crypto') {
+        for (const t of CRYPTO_TIER_VALUES_KEYS) {
+          for (const f of FIELDS) delete next[`crypto.${t}.${f.key}`];
+        }
+      } else {
+        for (const f of FIELDS) delete next[`${cat}.${f.key}`];
+      }
       return next;
     });
     persist({
       ...config,
-      categories: { ...config.categories, [cat]: def },
+      categories: { ...config.categories, [cat]: defaultCategoryTradingValues(cat) },
     });
   };
 
@@ -206,6 +252,45 @@ export default function TradingValuesPanel({ lang }: Props) {
       : status === 'error'
         ? <span className="inline-flex items-center gap-2 text-red-400 text-lg md:text-[22px] font-black"><AlertTriangle size={22} />{isAr ? 'فشل الحفظ — تحقق من الاتصال' : 'Save failed — check connection'}</span>
         : <span className="text-slate-500 text-lg md:text-[22px] font-bold">{isAr ? 'التغييرات تُحفظ تلقائياً' : 'Changes save automatically'}</span>;
+
+  const renderFieldRow = (cat: TradingCategory, field: (typeof FIELDS)[number], tier?: CryptoTierKey) => {
+    const fieldKey = field.key;
+    const key = draftKey(cat, fieldKey, tier);
+    const display = drafts[key] ?? formatNumericValue(readValue(cat, fieldKey, tier));
+    return (
+      <div key={key} className="grid grid-cols-[1fr_150px_46px] md:grid-cols-[1fr_180px_46px] items-center gap-3">
+        <div className="min-w-0">
+          <div className="text-lg md:text-[22px] font-black text-brand-text/90 truncate">{fieldLabel(field, isAr)}</div>
+          <div className="text-base md:text-[19px] text-slate-500 truncate" title={fieldHint(field, cat, tier, isAr)}>{fieldHint(field, cat, tier, isAr)}</div>
+        </div>
+        {/* text + inputMode=decimal instead of type=number: a native
+            number input may render Arabic-Indic digits depending on
+            the device locale, while a plain ASCII string always
+            shows Western digits: 1.2 , 0.01 , 60 */}
+        <input
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          spellCheck={false}
+          dir="ltr"
+          lang="en-US"
+          value={display}
+          onChange={(e) => handleInput(cat, fieldKey, e.target.value, tier)}
+          onBlur={() => clearDraft(cat, fieldKey, tier)}
+          className="w-full bg-brand-bg border border-white/15 rounded-xl px-3 py-3 text-lg md:text-[22px] font-black text-white text-left focus:outline-none focus:border-amber-500/60 tabular-nums"
+          style={{ fontFamily: "'Inter', 'Segoe UI', ui-sans-serif, system-ui, sans-serif", fontVariantNumeric: 'lining-nums tabular-nums', letterSpacing: '0.01em' }}
+        />
+        <button
+          type="button"
+          onClick={() => resetField(cat, fieldKey, tier)}
+          title={isAr ? 'إعادة هذه القيمة للافتراضي' : 'Reset this value to default'}
+          className="w-11 h-11 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-brand-text/60 hover:text-amber-400 flex items-center justify-center transition-all"
+        >
+          <RotateCcw size={18} />
+        </button>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4 pt-6 border-t border-amber-500/25">
@@ -252,14 +337,57 @@ export default function TradingValuesPanel({ lang }: Props) {
             <RotateCcw size={20} /> {isAr ? 'إعادة كل القيم للافتراضي الحالي' : 'Reset all to current defaults'}
           </button>
           <span className="text-base md:text-[20px] text-slate-500 self-center font-bold">
-            {isAr ? 'الافتراضي: لوت الفئة الأساسي · وقف/هدف 60$/120$ · كريبتو: لوت 0.01 (×10/×1000) ووقف 50$/هدف 100$ لكل 1000$ (ضعيفة 10$/20$) · ترينلغ 5$/2$' : 'Defaults: category base lot · SL/TP $60/$120 · crypto: lot 0.01 (×10/×1000), SL $50/TP $100 per $1,000 (weak $10/$20) · trailing $5/$2'}
+            {isAr
+              ? 'الافتراضي: لوت الفئة الأساسي · وقف/هدف 60$/120$ · كريبتو: قوي 0.01 و50$/100$ · متوسط 0.1 و30$/60$ · ضعيف 10 و10$/20$ لكل 1000$ · ترينلغ 5$/2$'
+              : 'Defaults: category base lot · SL/TP $60/$120 · crypto: high 0.01 & $50/$100 · medium 0.1 & $30/$60 · weak 10 & $10/$20 per $1,000 · trailing $5/$2'}
           </span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         {TRADING_CATEGORIES.map((cat) => {
-          const values = config.categories[cat];
+          if (cat === 'crypto') {
+            return (
+              <div key="crypto" className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xl md:text-[26px] font-black text-brand-text">
+                    <Layers size={22} className="text-amber-400" />
+                    {isAr ? CATEGORY_LABEL.crypto.ar : CATEGORY_LABEL.crypto.en}
+                    <span className="text-base md:text-[19px] font-bold text-amber-300/80">
+                      ({isAr ? 'ثلاث فئات سيولة مستقلة' : '3 independent liquidity tiers'})
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => resetCategory('crypto')}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-base md:text-[19px] font-black text-brand-text/70 transition-all"
+                  >
+                    <RotateCcw size={16} /> {isAr ? 'افتراضي الكريبتو' : 'Crypto defaults'}
+                  </button>
+                </div>
+                <p className="text-base md:text-[18px] leading-relaxed text-slate-500 font-semibold">
+                  {isAr
+                    ? 'كل فئة سيولة تُعدَّل بشكل مستقل. استثناءات اللوت: لايتكوين وما شابهه ×100 · AXS/SEI ×1000 من أساس الفئة القوية.'
+                    : 'Each liquidity tier is edited independently. Lot overrides: LTC-style ×100 · AXS/SEI ×1000 of the high-tier base.'}
+                </p>
+                {CRYPTO_TIER_VALUES_KEYS.map((tier) => (
+                  <div key={tier} className="rounded-xl border border-amber-500/20 bg-amber-500/[0.04] p-3 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-2">
+                      <div className="text-lg md:text-[21px] font-black text-amber-300">{isAr ? TIER_LABEL[tier].ar : TIER_LABEL[tier].en}</div>
+                      <button
+                        type="button"
+                        onClick={() => resetTier(tier)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-sm md:text-[16px] font-black text-brand-text/70 transition-all"
+                      >
+                        <RotateCcw size={14} /> {isAr ? 'افتراضي الفئة' : 'Tier default'}
+                      </button>
+                    </div>
+                    {FIELDS.map((f) => renderFieldRow('crypto', f, tier))}
+                  </div>
+                ))}
+              </div>
+            );
+          }
           return (
             <div key={cat} className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
@@ -274,43 +402,7 @@ export default function TradingValuesPanel({ lang }: Props) {
               </div>
 
               <div className="space-y-2.5">
-                {FIELDS.map((f) => {
-                  const key = `${cat}.${f.key}`;
-                  const display = drafts[key] ?? formatNumericValue(values[f.key]);
-                  return (
-                    <div key={f.key} className="grid grid-cols-[1fr_150px_46px] md:grid-cols-[1fr_180px_46px] items-center gap-3">
-                      <div className="min-w-0">
-                        <div className="text-lg md:text-[22px] font-black text-brand-text/90 truncate">{fieldLabel(f, cat === 'crypto', isAr)}</div>
-                        <div className="text-base md:text-[19px] text-slate-500 truncate">{fieldHint(f, cat === 'crypto', isAr)}</div>
-                      </div>
-                      {/* text + inputMode=decimal instead of type=number: a native
-                          number input may render Arabic-Indic digits depending on
-                          the device locale, while a plain ASCII string always
-                          shows Western digits: 1.2 , 0.01 , 60 */}
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
-                        spellCheck={false}
-                        dir="ltr"
-                        lang="en-US"
-                        value={display}
-                        onChange={(e) => handleInput(cat, f.key, e.target.value)}
-                        onBlur={() => clearDraft(cat, f.key)}
-                        className="w-full bg-brand-bg border border-white/15 rounded-xl px-3 py-3 text-lg md:text-[22px] font-black text-white text-left focus:outline-none focus:border-amber-500/60 tabular-nums"
-                        style={{ fontFamily: "'Inter', 'Segoe UI', ui-sans-serif, system-ui, sans-serif", fontVariantNumeric: 'lining-nums tabular-nums', letterSpacing: '0.01em' }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => resetField(cat, f.key)}
-                        title={isAr ? 'إعادة هذه القيمة للافتراضي' : 'Reset this value to default'}
-                        className="w-11 h-11 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-brand-text/60 hover:text-amber-400 flex items-center justify-center transition-all"
-                      >
-                        <RotateCcw size={18} />
-                      </button>
-                    </div>
-                  );
-                })}
+                {FIELDS.map((f) => renderFieldRow(cat, f))}
               </div>
             </div>
           );
@@ -319,7 +411,7 @@ export default function TradingValuesPanel({ lang }: Props) {
 
       <p className="text-lg md:text-[21px] text-slate-500 leading-relaxed font-semibold">
         {isAr
-          ? 'ملاحظة: عند التفعيل تُطبَّق القيم على فتح الصفقات وعلى إدارة الترينلغ للصفقات المفتوحة. تغيير أي قيمة يُزامَن فوراً مع كل أجهزة الموقع والموبايل. عند التعطيل تعود المنصة لقيمها الديناميكية السابقة.'
+          ? 'ملاحظة: عند التفعيل تُطبَّق القيم على فتح الصفقات وعلى إدارة الترينلغ للصفقات المفتوحة. كل قيمة تُزامَن فوراً مع كل أجهزة الموقع والموبايل. عند التعطيل تعود المنصة لقيمها الديناميكية السابقة.'
           : 'Note: when enabled, values apply to new trades and to trailing management of open positions. Any change syncs instantly to every desktop and mobile device. Disabling restores the previous dynamic behaviour.'}
       </p>
     </div>
