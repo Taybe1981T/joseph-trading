@@ -2286,8 +2286,10 @@ Return ONLY valid JSON:
     // the pullback-entry protection is most reliable.
     if (settings?.goldenRangeEnabled) {
       // Per-category window. See CATEGORY_GATE_PROFILES: FX settles lower because
-      // its ATR/volume are smaller, so only FX uses [60,88]; every other category
-      // keeps the user's [70,85] defaults. Weak (<min) and late (>max) stay filtered.
+      // its ATR/volume are smaller, so only FX uses [55,88]; every other category
+      // keeps the user's [70,85] defaults. The retrace gate still decides the
+      // actual entry timing, so a slightly lower FX floor (55) only lets a signal
+      // reach that gate — it never bypasses the 3-candle pullback requirement.
       const goldenOverride = gateProfileFor(type).goldenOverride;
       const gMin = goldenOverride ? goldenOverride[0] : (typeof settings.goldenConfMin === 'number' ? settings.goldenConfMin : 70);
       const gMax = goldenOverride ? goldenOverride[1] : (typeof settings.goldenConfMax === 'number' ? settings.goldenConfMax : 85);
