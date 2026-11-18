@@ -923,13 +923,17 @@ function synthFromMetrics(metrics: any, symbol: string): any {
 //   Module 5  Absorption penalty   (-30..0)
 // ═══════════════════════════════════════════════════════════════════
 function computeVolumeQuality(
-  closes: number[], highs: number[], lows: number[], volumes: number[], opens: number[], direction: string
+  closes: number[], highs: number[], lows: number[], volumes: number[], opens: number[], direction: string,
+  isForex = false
 ): { score: number; detected: boolean; absorbed: boolean; absorptionLevel: number; reasons: string[] } {
   const len = closes.length;
   const v = volumes || [];
   const base = { score: 0, detected: false, absorbed: false, absorptionLevel: 0, reasons: [] as string[] };
   // No volume data (some feeds return OHLC only) → neutral pass, do not interfere.
-  if (!v.length || v.length < 8 || len < 10) return base;
+  // FX daily bars are aggregated with an all-zero placeholder volume (api/server.ts).
+  // Those zeros must not be scored as "real" volume: the resulting 27-46 score sits
+  // below the 45 threshold and suppresses EVERY forex signal before any later gate.
+  if (!v.length || v.length < 8 || len < 10 || (isForex && v.every((x) => !x))) return base;
 
   const lastVol = v[len - 1] || 0;
   const prevVols = v.slice(-6, -1).filter((x: any) => x != null);
@@ -1191,7 +1195,7 @@ export async function analyzeMarket(params: {
       : 'No clear zones detected.';
 
     // ── Professional Volume Quality (5-module filter) ──
-    const volumeQuality = computeVolumeQuality(closes, highs, lows, volumes || [], opens, metrics?.direction || 'sideways');
+    const volumeQuality = computeVolumeQuality(closes, highs, lows, volumes || [], opens, metrics?.direction || 'sideways', type === MarketType.FOREX);
     console.log(`[Engine] ${symbol} VolumeQuality=${volumeQuality.score}/100 detected=${volumeQuality.detected} absorbed=${volumeQuality.absorbed} ${volumeQuality.reasons.join('; ')}`);
     
     // Process micro data (already fetched in parallel above)

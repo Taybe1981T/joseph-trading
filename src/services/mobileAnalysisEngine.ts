@@ -1,7 +1,8 @@
 import { analyzeMarketBatch } from './geminiService';
 import { MarketType, TradingStyle, StrategySettings, AutoAnalysisSettings, AnalysisResult } from '../types';
-import { DEFAULT_STRATEGY_SETTINGS, SYMBOL_CATEGORIES, SYMBOL_GROUPS, ALL_SYMBOLS_DB, TIMEFRAMES, TRADING_STYLES } from '../constants';
+import { DEFAULT_STRATEGY_SETTINGS, SYMBOL_CATEGORIES, SYMBOL_GROUPS, ALL_SYMBOLS_DB, TIMEFRAMES, TRADING_STYLES, CRYPTO_SCAN_LIMIT } from '../constants';
 import { getOpenStockExchanges, exchangeLabel } from '../lib/marketHours';
+import { topPerCategory } from '../lib/signalFeed';
 import { waitIfRateLimited } from './rateLimitTracker';
 import { collection, addDoc, serverTimestamp, doc, setDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -50,9 +51,9 @@ export function readMobileAuto(): AutoAnalysisSettings {
   return { isEnabled: false, interval: 15, timeframe: '1d', category: 'all', tradingStyle: TradingStyle.DAY_TRADING, volume: 0.8, showAllSignals: false } as AutoAnalysisSettings;
 }
 
-/** The crypto category is a FIXED 100-symbol universe. Custom crypto entries
- *  must never enlarge it — otherwise the radar silently scans >100 symbols. */
-export const CRYPTO_SCAN_LIMIT = 100;
+/** The crypto category is a FIXED 100-symbol universe. The limit lives in
+ *  constants.ts so desktop manual, radar and mobile all enforce the same value. */
+export { CRYPTO_SCAN_LIMIT };
 
 /** ── Category-aware symbol picker (same groups as AnalysisForm) ──
  * Ported from desktop AnalysisForm logic:
@@ -393,10 +394,12 @@ export async function runMobileRadar(uid: string, email: string, onProg?: (p: Mo
   try { initAudio(); } catch {}
   try { playCompletion(Math.max(0, Math.min(1, Number((auto as any).volume ?? 0.5)))); } catch {}
   const fresh = mergeMobileTopSignals(scanned, !!auto.showAllSignals);
-  const top = scanned.filter((s) => {
+  // Desktop parity: give every category its own slots instead of letting crypto
+  // push forex/metals out of a global top-10 list.
+  const top = topPerCategory(scanned.filter((s) => {
     const sig = String(s.signal || '');
     return sig !== 'neutral' && sig !== 'no_entry' && !s.isSideways;
-  }).sort((a, b) => (b.confidence || 0) - (a.confidence || 0)).slice(0, 10);
+  }).sort((a, b) => (b.confidence || 0) - (a.confidence || 0)), 3);
   await publishMobileShared(top, email || '');
   try {
     const cur = readMobileAuto();

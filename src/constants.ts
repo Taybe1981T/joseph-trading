@@ -77,6 +77,9 @@ export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   trailingStepLotStep: 1,        // +$ step for each extra 0.01 lot above 0.01
 };
 
+/** Fixed crypto universe size — shared by desktop manual, radar and mobile. */
+export const CRYPTO_SCAN_LIMIT = 100;
+
 export const DEFAULT_AUTO_SETTINGS = {
   isEnabled: false,
   interval: 15,

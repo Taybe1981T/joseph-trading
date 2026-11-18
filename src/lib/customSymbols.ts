@@ -1,4 +1,8 @@
 import { MarketType } from '../types';
+import { TOP_CRYPTO_100 } from '../data/topCrypto100';
+
+/** Curated app crypto symbols are already USD-quoted (BTCUSD = BINANCE:BTCUSDT). */
+const APP_CRYPTO_SYMBOLS = new Set<string>(TOP_CRYPTO_100.map((c) => c.symbol));
 
 /**
  * Custom symbol support — any Binance crypto pair, any TradingView symbol.
@@ -87,6 +91,20 @@ export function normalizeSymbolInput(raw: string, category: MarketType): Normali
   if (category === MarketType.CRYPTO) {
     let pair = cleanBody(body).replace(/(PERP|SWAP)$/, '');
     if (!pair) return null;
+
+    // Idempotency: a curated app symbol (BTCUSD, ETHUSD...) already carries the
+    // quote suffix. Appending USDT again used to create bogus BTCUSDUSD twins —
+    // "select all" turned 100 curated symbols into ~189 analysis targets.
+    if (APP_CRYPTO_SYMBOLS.has(pair)) {
+      const binancePair = `${pair.slice(0, -3)}USDT`;
+      return {
+        symbol: pair,
+        tv: `BINANCE:${binancePair}`,
+        pair: binancePair,
+        category,
+        custom: true,
+      };
+    }
 
     // A bare coin ticker (e.g. "BTC") is treated as BTCUSDT. A real pair always
     // has a base before its quote (ETHBTC, SOLUSDT, BTCFDUSD...).

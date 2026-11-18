@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { User } from 'firebase/auth';
 import { ChevronDown, Search, ArrowRight, TrendingUp, Bitcoin, DollarSign, Gem, Briefcase, Play, ListFilter, Plus, Zap, X, Clock, Sparkles, Star, Crown, Activity, Ban } from 'lucide-react';
 import { MarketType, AnalysisResult, TradingStyle, StrategySettings } from '../types';
-import { MARKET_CATEGORIES, TIMEFRAMES, SYMBOL_GROUPS, TRADING_STYLES, ALL_SYMBOLS_DB, FREE_SYMBOLS } from '../constants';
+import { MARKET_CATEGORIES, TIMEFRAMES, SYMBOL_GROUPS, TRADING_STYLES, ALL_SYMBOLS_DB, FREE_SYMBOLS, CRYPTO_SCAN_LIMIT } from '../constants';
 import { analyzeMarket, analyzeMarketBatch, getApiKey } from '../services/geminiService';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -201,16 +201,29 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
     // (BTCUSDT, BTC/USDT, BINANCE:BTCUSDT) become clean app symbols and any
     // TradingView symbol keeps its exact chart/exchange mapping.
     const manualSymbols: string[] = [];
+    const curatedCrypto = new Set(ALL_SYMBOLS_DB.crypto || []);
     for (const raw of manualRaw) {
+      const upper = raw.toUpperCase();
+      // Curated symbols are already in the exact form the engine expects.
+      // Re-registering them used to create *USDUSD twins and inflate a 100-symbol batch.
+      if (data.type === MarketType.CRYPTO && curatedCrypto.has(upper)) {
+        if (!manualSymbols.includes(upper)) manualSymbols.push(upper);
+        continue;
+      }
       const norm = registerCustomSymbol(raw, data.type);
-      const sym = norm?.symbol || raw.toUpperCase();
+      const sym = norm?.symbol || upper;
       if (sym && !manualSymbols.includes(sym)) manualSymbols.push(sym);
     }
     const newCustom = manualSymbols.filter(s => !customSymbols.includes(s));
     if (newCustom.length > 0) setCustomSymbols(prev => [...new Set([...prev, ...newCustom])]);
 
-    const allSymbolsToAnalyze = [...new Set([...selectedSymbols, ...manualSymbols])]
+    let allSymbolsToAnalyze = [...new Set([...selectedSymbols, ...manualSymbols])]
       .filter(s => s && s.length > 1);
+
+    // The crypto universe is a fixed 100 symbols — manual analysis must not exceed it.
+    if (data.type === MarketType.CRYPTO && allSymbolsToAnalyze.length > CRYPTO_SCAN_LIMIT) {
+      allSymbolsToAnalyze = allSymbolsToAnalyze.slice(0, CRYPTO_SCAN_LIMIT);
+    }
 
     if (allSymbolsToAnalyze.length === 0) {
       setFormErrors([t.selectAtLeastOne]);

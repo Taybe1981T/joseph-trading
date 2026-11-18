@@ -21,7 +21,7 @@ import ClientDashboard from './components/ClientDashboard';
 import AnalysisDetailPage from './components/AnalysisDetailPage';
 
 import { AnalysisResult, StrategySettings, AutoAnalysisSettings, MarketType, TradingStyle } from './types';
-import { DEFAULT_STRATEGY_SETTINGS, DEFAULT_AUTO_SETTINGS, SYMBOL_CATEGORIES, ALL_SYMBOLS_DB, SYMBOL_GROUPS, FREE_SYMBOLS, STOCKS_BY_EXCHANGE } from './constants';
+import { DEFAULT_STRATEGY_SETTINGS, DEFAULT_AUTO_SETTINGS, SYMBOL_CATEGORIES, ALL_SYMBOLS_DB, SYMBOL_GROUPS, FREE_SYMBOLS, STOCKS_BY_EXCHANGE, CRYPTO_SCAN_LIMIT } from './constants';
 import { getOpenStockExchanges, exchangeLabel, StockExchangeKey } from './lib/marketHours';
 import { Language, translations } from './lib/i18n';
 import { analyzeMarket } from './services/geminiService';
@@ -2078,7 +2078,7 @@ const isDeveloperSession = () => {
             );
             const list = [...new Set([...gFiltered, ...c])].filter(x => !hidden.includes(x));
             // The crypto category is a fixed 100-symbol universe — never larger.
-            return cat === 'crypto' ? list.slice(0, SYMBOL_CATEGORIES.crypto.length) : list;
+            return cat === 'crypto' ? list.slice(0, CRYPTO_SCAN_LIMIT) : list;
           })()
         : (() => {
             const free = FREE_SYMBOLS[cat] || [];
