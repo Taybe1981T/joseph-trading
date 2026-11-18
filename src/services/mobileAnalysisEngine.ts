@@ -1,6 +1,6 @@
 import { analyzeMarketBatch } from './geminiService';
 import { MarketType, TradingStyle, StrategySettings, AutoAnalysisSettings, AnalysisResult } from '../types';
-import { DEFAULT_STRATEGY_SETTINGS, SYMBOL_CATEGORIES, SYMBOL_GROUPS, ALL_SYMBOLS_DB, TIMEFRAMES, TRADING_STYLES, CRYPTO_SCAN_LIMIT } from '../constants';
+import { DEFAULT_STRATEGY_SETTINGS, SYMBOL_CATEGORIES, SYMBOL_GROUPS, ALL_SYMBOLS_DB, TIMEFRAMES, TRADING_STYLES, CRYPTO_SCAN_LIMIT, mergeStrategySettings } from '../constants';
 import { getOpenStockExchanges, exchangeLabel } from '../lib/marketHours';
 import { topPerCategory } from '../lib/signalFeed';
 import { waitIfRateLimited } from './rateLimitTracker';
@@ -173,7 +173,7 @@ export function removeMobileCustomSymbol(sym: string): void {
 export function readMobileStrategy(): StrategySettings {
   try {
     const raw = localStorage.getItem('strategy_settings');
-    if (raw) return { ...DEFAULT_STRATEGY_SETTINGS, ...JSON.parse(raw) };
+    if (raw) return mergeStrategySettings(JSON.parse(raw));
   } catch {}
   return DEFAULT_STRATEGY_SETTINGS;
 }

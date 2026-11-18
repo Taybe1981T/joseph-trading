@@ -1,5 +1,5 @@
 import { MarketType, AnalysisResult, TradingStyle, SignalType, StrategySettings } from "../types";
-import { DEFAULT_STRATEGY_SETTINGS, gateProfileFor } from "../constants";
+import { DEFAULT_STRATEGY_SETTINGS, gateProfileFor, resolveGoldenWindow } from "../constants";
 import { fetchMarketContext } from "./marketContextService";
 import { onRateLimited, waitIfRateLimited } from "./rateLimitTracker";
 import { fetchMarketDataDirect } from './apiDirect';
@@ -2280,17 +2280,14 @@ Return ONLY valid JSON:
     }
 
     // ── GOLDEN CONFIDENCE WINDOW (last gate — the developer only sees the best-timed entries) ──
-    // Only signals whose final confidence sits inside [goldenConfMin .. goldenConfMax] are
+    // Only signals whose final confidence sits inside the active category's window are
     // surfaced. Too low (< min) = weak/no edge → neutral. Too high (> max) = the move is
-    // already extended and you'd be chasing the top → neutral. This is the sweet spot where
-    // the pullback-entry protection is most reliable.
+    // already extended and you'd be chasing the top → neutral. Each market's min/max is
+    // independently editable; the legacy global fields remain a fallback for old installs.
     if (settings?.goldenRangeEnabled) {
-      // Per-category window. See CATEGORY_GATE_PROFILES: FX settles lower because
-      // its ATR/volume are smaller, so only FX uses [60,88]; every other category
-      // keeps the user's [70,85] defaults. Weak (<min) and late (>max) stay filtered.
-      const goldenOverride = gateProfileFor(type).goldenOverride;
-      const gMin = goldenOverride ? goldenOverride[0] : (typeof settings.goldenConfMin === 'number' ? settings.goldenConfMin : 70);
-      const gMax = goldenOverride ? goldenOverride[1] : (typeof settings.goldenConfMax === 'number' ? settings.goldenConfMax : 85);
+      // Per-category window: explicit setting → profile default → legacy global.
+      // Defaults are unchanged (FX 60/88, crypto/stocks/metals 70/85).
+      const [gMin, gMax] = resolveGoldenWindow(settings, type);
       const isTradeSignal = finalSignal === SignalType.BUY || finalSignal === SignalType.STRONG_BUY ||
                             finalSignal === SignalType.SELL || finalSignal === SignalType.STRONG_SELL;
       if (isTradeSignal && (finalConfidence < gMin || finalConfidence > gMax)) {

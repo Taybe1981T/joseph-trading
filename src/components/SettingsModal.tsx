@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Settings2, Activity, LayoutTemplate, Layers, ShieldCheck, Mail, MessageSquare, CheckCircle, RotateCcw, AlertTriangle, Loader2, Lock, Trash2, ChevronLeft } from 'lucide-react';
 import { StrategySettings } from '../types';
-import { DEFAULT_STRATEGY_SETTINGS } from '../constants';
+import { DEFAULT_STRATEGY_SETTINGS, resolveGoldenWindow } from '../constants';
 import { User } from 'firebase/auth';
 import { Language } from '../lib/i18n';
 import { isDeveloperEmail, DEVELOPER_EMAILS } from '../lib/clientIds';
@@ -479,8 +479,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                 : 'bg-white/5 border-white/5 text-brand-muted'
             }`}>
             <div className="flex-1 min-w-0">
-              <div className="text-lg md:text-xl font-black leading-tight">{isAr ? 'تفعيل النطاق الذهبي (70-85)' : 'Enable Golden Window (70-85)'}</div>
-              <div className="text-sm md:text-base opacity-70 mt-1 leading-snug">{isAr ? 'اعرض الإشارات داخل نطاق الثقة الذهبي فقط؛ ما دون 70% أو فوق 85% يُحوَّل لمحايد' : 'Only surface signals inside the golden window; below min or above max becomes neutral'}</div>
+              <div className="text-lg md:text-xl font-black leading-tight">{isAr ? 'تفعيل النطاق الذهبي (لكل فئة نطاقها)' : 'Enable Golden Window (per-category ranges)'}</div>
+              <div className="text-sm md:text-base opacity-70 mt-1 leading-snug">{isAr ? 'اعرض الإشارات داخل نطاق الثقة الذهبي لكل فئة فقط؛ ما دون أدنى الفئة أو فوق أقصاها يُحوَّل لمحايد' : "Only surface signals inside each category's golden window; below its min or above its max becomes neutral"}</div>
             </div>
             <div className={`w-14 h-8 rounded-full transition-colors flex items-center px-1 shrink-0 ${
               settings.goldenRangeEnabled !== false ? 'bg-amber-400' : 'bg-white/20'
@@ -490,8 +490,38 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
               }`} />
             </div>
           </button>
-          <NumberInput label={isAr ? 'أدنى النطاق الذهبي' : 'Golden Min (%)'} value={settings.goldenConfMin ?? 70} onChange={(v) => handleChange('goldenConfMin', v)} color="text-amber-300" desc={isAr ? 'أقل من هذه النسبة → محايد (إشارة ضعيفة)' : 'Below this → neutral (weak signal)'} />
-          <NumberInput label={isAr ? 'أقصى النطاق الذهبي' : 'Golden Max (%)'} value={settings.goldenConfMax ?? 85} onChange={(v) => handleChange('goldenConfMax', v)} color="text-amber-300" desc={isAr ? 'أعلى من هذه النسبة → محايد (دخول متأخر/مطاردة)' : 'Above this → neutral (late entry / chasing)'} />
+          {RETRACE_ROWS.map((row) => {
+            const minKey = `goldenConfMin${row.suffix}` as keyof StrategySettings;
+            const maxKey = `goldenConfMax${row.suffix}` as keyof StrategySettings;
+            const [fallbackMin, fallbackMax] = resolveGoldenWindow(settings, row.suffix.toLowerCase());
+            const rawMin = (settings as any)[minKey];
+            const rawMax = (settings as any)[maxKey];
+            const minValue = typeof rawMin === 'number' && Number.isFinite(rawMin) ? rawMin : fallbackMin;
+            const maxValue = typeof rawMax === 'number' && Number.isFinite(rawMax) ? rawMax : fallbackMax;
+            return (
+              <div key={row.suffix} className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <div className="text-base md:text-lg font-black text-brand-text/80 mb-1">
+                  {isAr ? row.ar : row.en}
+                </div>
+                <NumberInput
+                  label={isAr ? `أدنى ثقة — ${row.ar}` : `${row.en} — Golden Min`}
+                  value={minValue}
+                  onChange={(v) => handleChange(minKey, v)}
+                  max={100}
+                  color="text-amber-300"
+                  desc={isAr ? 'أقل من هذه النسبة → محايد (إشارة ضعيفة)' : 'Below this → neutral (weak signal)'}
+                />
+                <NumberInput
+                  label={isAr ? `أقصى ثقة — ${row.ar}` : `${row.en} — Golden Max`}
+                  value={maxValue}
+                  onChange={(v) => handleChange(maxKey, v)}
+                  max={100}
+                  color="text-amber-300"
+                  desc={isAr ? 'أعلى من هذه النسبة → محايد (دخول متأخر/مطاردة)' : 'Above this → neutral (late entry / chasing)'}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
       )}

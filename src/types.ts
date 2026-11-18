@@ -153,8 +153,18 @@ export interface StrategySettings {
   retraceStrictModeMetals?: boolean;
   // ── Golden confidence window (surface only the best-timed entries) ──
   goldenRangeEnabled?: boolean;        // when true, only signals inside [goldenConfMin..goldenConfMax] are shown
-  goldenConfMin?: number;              // lower edge of the golden window (default 70) — below → neutral
-  goldenConfMax?: number;              // upper edge of the golden window (default 85) — above → neutral (chasing risk)
+  goldenConfMin?: number;              // legacy global fallback (default 70) — below → neutral
+  goldenConfMax?: number;              // legacy global fallback (default 85) — above → neutral (chasing risk)
+  // Per-category golden windows. These take precedence over the global fields
+  // above, so every market can be tuned independently (FX defaults to 60/88).
+  goldenConfMinForex?: number;
+  goldenConfMaxForex?: number;
+  goldenConfMinCrypto?: number;
+  goldenConfMaxCrypto?: number;
+  goldenConfMinStocks?: number;
+  goldenConfMaxStocks?: number;
+  goldenConfMinMetals?: number;
+  goldenConfMaxMetals?: number;
   // ── Trailing stop (dynamic, scales with lot size) ──
   trailingEnabled?: boolean;           // master on/off for the trailing stop (default true)
   trailingBaseActivationUSD?: number;  // profit ($) that activates the trail at lot 0.01 (default 5)

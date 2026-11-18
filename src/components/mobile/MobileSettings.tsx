@@ -4,7 +4,7 @@ import { Language } from '../../lib/i18n';
 import { useMobileMode } from '../../lib/mobileMode';
 import TradingValuesPanel from '../TradingValuesPanel';
 import { StrategySettings } from '../../types';
-import { DEFAULT_STRATEGY_SETTINGS } from '../../constants';
+import { DEFAULT_STRATEGY_SETTINGS, mergeStrategySettings, resolveGoldenWindow } from '../../constants';
 import { RETRACE_TIMEFRAMES } from '../../services/retraceFilter';
 import { DEV_SETTINGS_EVENT } from '../../services/devSettingsSync';
 
@@ -36,7 +36,7 @@ interface MobileSettingsProps {
 
 // Mobile parity with desktop: Settings shows ONLY the system names (one per
 // line). Tapping a name opens that system's own page with its controls.
-type MobileSystem = 'autoTrade' | 'retrace' | 'sound' | 'language' | 'devLogin' | 'tradingValues';
+type MobileSystem = 'autoTrade' | 'thresholds' | 'retrace' | 'sound' | 'language' | 'devLogin' | 'tradingValues';
 
 export function MobileSettings({
   autoTradeEnabled,
@@ -65,7 +65,7 @@ export function MobileSettings({
   const [strategy, setStrategy] = useState<StrategySettings>(() => {
     try {
       const raw = localStorage.getItem('strategy_settings');
-      if (raw) return { ...DEFAULT_STRATEGY_SETTINGS, ...JSON.parse(raw) };
+      if (raw) return mergeStrategySettings(JSON.parse(raw));
     } catch {}
     return DEFAULT_STRATEGY_SETTINGS;
   });
@@ -82,7 +82,7 @@ export function MobileSettings({
     const sync = () => {
       try {
         const raw = localStorage.getItem('strategy_settings');
-        if (raw) setStrategy({ ...DEFAULT_STRATEGY_SETTINGS, ...JSON.parse(raw) });
+        if (raw) setStrategy(mergeStrategySettings(JSON.parse(raw)));
       } catch {}
     };
     window.addEventListener(DEV_SETTINGS_EVENT, sync);
@@ -93,6 +93,7 @@ export function MobileSettings({
     };
   }, []);
   const [retraceDrafts, setRetraceDrafts] = useState<Record<string, string>>({});
+  const [thresholdDrafts, setThresholdDrafts] = useState<Record<string, string>>({});
 
   const retraceRows: Array<{ suffix: 'Forex' | 'Crypto' | 'Stocks' | 'Metals'; ar: string; en: string }> = [
     { suffix: 'Forex', ar: 'الفوركس', en: 'Forex' },
@@ -103,6 +104,7 @@ export function MobileSettings({
 
   const systems: Array<{ id: MobileSystem; ar: string; en: string; devOnly?: boolean; color: string }> = [
     { id: 'autoTrade', ar: 'التداول التلقائي', en: 'Auto Trade', color: '#3b82f6' },
+    { id: 'thresholds', ar: 'عتبات الثقة والنطاق الذهبي', en: 'Confidence & Golden Window', color: '#8b5cf6' },
     { id: 'retrace', ar: 'فلتر التراجع (شموع الارتداد) — التأكيد الأخير', en: 'Retrace Filter (Pullback Candles)', color: '#ef4444' },
     { id: 'sound', ar: 'الصوت والتنبيهات', en: 'Sound & Alerts', color: '#10b981' },
     { id: 'language', ar: 'اللغة', en: 'Language', color: '#8b5cf6' },
@@ -173,6 +175,100 @@ export function MobileSettings({
                 <button className="mt5-btn mt5-btn-secondary" onClick={() => onAutoTradeToggle(!autoTradeEnabled)}>
                   {autoTradeEnabled ? (isAr ? 'مفعّل' : 'On') : (isAr ? 'معطّل' : 'Off')}
                 </button>
+              </div>
+            )}
+
+            {activeSystem === 'thresholds' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
+                  {isAr
+                    ? 'لكل فئة نطاق ثقة مستقل. الإشارة تظهر داخل نطاقها فقط؛ أقل من الأدنى أو فوق الأقصى تُحوَّل لمحايد. التغيير يُحفظ ويُزامن بين الأجهزة تلقائياً.'
+                    : 'Every market has its own confidence window. Signals are shown only inside that range; below the min or above the max becomes neutral. Changes are saved and synced across devices automatically.'}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => updateStrategy('goldenRangeEnabled', strategy.goldenRangeEnabled === false)}
+                  style={{
+                    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 10, padding: '12px', borderRadius: 10, cursor: 'pointer', textAlign: 'right',
+                    background: strategy.goldenRangeEnabled !== false ? 'rgba(245,158,11,0.12)' : '#151515',
+                    border: `2px solid ${strategy.goldenRangeEnabled !== false ? 'rgba(245,158,11,0.5)' : '#2a2a2a'}`,
+                    color: strategy.goldenRangeEnabled !== false ? '#fbbf24' : '#bbb',
+                  }}
+                >
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span style={{ fontSize: 14, fontWeight: 900 }}>
+                      {isAr ? 'تفعيل النطاق الذهبي' : 'Enable Golden Window'}
+                    </span>
+                    <span style={{ fontSize: 11, opacity: 0.75 }}>
+                      {strategy.goldenRangeEnabled !== false
+                        ? (isAr ? 'مفعّل — لكل فئة نطاقها' : 'On — per-category ranges')
+                        : (isAr ? 'معطّل' : 'Off')}
+                    </span>
+                  </span>
+                  <span style={{ width: 44, height: 24, borderRadius: 99, background: strategy.goldenRangeEnabled !== false ? '#f59e0b' : '#3a3a3a', display: 'flex', alignItems: 'center', padding: 2, flexShrink: 0 }}>
+                    <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', transform: `translateX(${strategy.goldenRangeEnabled !== false ? 20 : 0}px)`, transition: 'transform .15s' }} />
+                  </span>
+                </button>
+
+                {retraceRows.map((row) => {
+                  const minKey = `goldenConfMin${row.suffix}` as keyof StrategySettings;
+                  const maxKey = `goldenConfMax${row.suffix}` as keyof StrategySettings;
+                  const [fallbackMin, fallbackMax] = resolveGoldenWindow(strategy, row.suffix.toLowerCase());
+                  const [defaultMin, defaultMax] = resolveGoldenWindow(DEFAULT_STRATEGY_SETTINGS, row.suffix.toLowerCase());
+                  const rawMin = (strategy as any)[minKey];
+                  const rawMax = (strategy as any)[maxKey];
+                  const minValue = typeof rawMin === 'number' && Number.isFinite(rawMin) ? rawMin : fallbackMin;
+                  const maxValue = typeof rawMax === 'number' && Number.isFinite(rawMax) ? rawMax : fallbackMax;
+
+                  const renderField = (
+                    kind: 'min' | 'max',
+                    key: keyof StrategySettings,
+                    value: number,
+                    labelAr: string,
+                    labelEn: string,
+                  ) => {
+                    const draftKey = `${kind}${row.suffix}`;
+                    const draft = thresholdDrafts[draftKey];
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: '#ddd' }}>{isAr ? labelAr : labelEn}</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          dir="ltr"
+                          value={draft !== undefined ? draft : String(value)}
+                          onChange={(e) => {
+                            const digits = toWesternDigits(e.target.value).replace(/[^0-9]/g, '').slice(0, 3);
+                            setThresholdDrafts((prev) => ({ ...prev, [draftKey]: digits }));
+                          }}
+                          onBlur={() => {
+                            const n = parseInt(thresholdDrafts[draftKey] ?? '', 10);
+                            if (Number.isFinite(n)) updateStrategy(key, Math.max(0, Math.min(100, n)));
+                            setThresholdDrafts((prev) => {
+                              const next = { ...prev };
+                              delete next[draftKey];
+                              return next;
+                            });
+                          }}
+                          style={{ width: 64, textAlign: 'center', padding: '8px 10px', borderRadius: 8, border: '1px solid #3a3a3a', background: '#111', color: '#fff', fontWeight: 900, fontSize: 15 }}
+                        />
+                      </div>
+                    );
+                  };
+
+                  return (
+                    <div key={row.suffix} style={{ border: '1px solid #333', borderRadius: 12, padding: 12, display: 'flex', flexDirection: 'column', gap: 10, background: '#0b0b0b' }}>
+                      <div style={{ fontSize: 15, fontWeight: 900, color: '#fbbf24' }}>{isAr ? row.ar : row.en}</div>
+                      {renderField('min', minKey, minValue, 'أدنى ثقة', 'Golden Min')}
+                      {renderField('max', maxKey, maxValue, 'أقصى ثقة', 'Golden Max')}
+                      <div style={{ fontSize: 11, color: '#888' }}>
+                        {isAr ? `الافتراضي لهذه الفئة: ${defaultMin} / ${defaultMax}` : `Category default: ${defaultMin} / ${defaultMax}`}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
 

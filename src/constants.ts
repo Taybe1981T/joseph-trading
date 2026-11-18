@@ -33,6 +33,64 @@ export function gateProfileFor(type: MarketType | string): CategoryGateProfile {
   return CATEGORY_GATE_PROFILES[String(type || '').toLowerCase()] || CATEGORY_GATE_PROFILES.default;
 }
 
+/**
+ * Resolve the confidence window for one category.
+ * Priority: per-category setting → category profile override → legacy global
+ * setting → hard default. This keeps old installs working while giving every
+ * market its own editable min/max.
+ */
+export function resolveGoldenWindow(
+  settings: StrategySettings | undefined,
+  type: MarketType | string,
+): [number, number] {
+  const key = String(type || '').toLowerCase();
+  const category = CATEGORY_GATE_PROFILES[key] ? key : 'default';
+  const profile = CATEGORY_GATE_PROFILES[category];
+  const suffix = category === 'default' ? '' : category.charAt(0).toUpperCase() + category.slice(1);
+  const raw: any = settings || {};
+  const minRaw = suffix ? raw[`goldenConfMin${suffix}`] : undefined;
+  const maxRaw = suffix ? raw[`goldenConfMax${suffix}`] : undefined;
+  const min = typeof minRaw === 'number' && Number.isFinite(minRaw)
+    ? minRaw
+    : profile.goldenOverride ? profile.goldenOverride[0]
+    : (typeof raw.goldenConfMin === 'number' ? raw.goldenConfMin : 70);
+  const max = typeof maxRaw === 'number' && Number.isFinite(maxRaw)
+    ? maxRaw
+    : profile.goldenOverride ? profile.goldenOverride[1]
+    : (typeof raw.goldenConfMax === 'number' ? raw.goldenConfMax : 85);
+  return [min, max];
+}
+
+/** Categories that expose an independent golden confidence window. */
+export const GOLDEN_WINDOW_CATEGORIES = ['Forex', 'Crypto', 'Stocks', 'Metals'] as const;
+
+/** True when a stored settings object still needs the per-category fields seeded. */
+export function needsGoldenWindowMigration(raw: any): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  return GOLDEN_WINDOW_CATEGORIES.some((category) =>
+    raw[`goldenConfMin${category}`] === undefined ||
+    raw[`goldenConfMax${category}`] === undefined
+  );
+}
+
+/**
+ * Merge stored settings with defaults WITHOUT changing the window a legacy
+ * install was already using. FX keeps its profile override (60/88); the other
+ * categories inherit the old global goldenConfMin/Max when present.
+ */
+export function mergeStrategySettings(raw: any): StrategySettings {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const merged: any = { ...DEFAULT_STRATEGY_SETTINGS, ...source };
+  for (const category of GOLDEN_WINDOW_CATEGORIES) {
+    const minKey = `goldenConfMin${category}`;
+    const maxKey = `goldenConfMax${category}`;
+    const [min, max] = resolveGoldenWindow(source as StrategySettings, category);
+    if (source[minKey] === undefined) merged[minKey] = min;
+    if (source[maxKey] === undefined) merged[maxKey] = max;
+  }
+  return merged as StrategySettings;
+}
+
 export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   momentumThreshold: 70,
   supplyDemandStrength: 80,
@@ -99,8 +157,17 @@ export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   retraceStrictModeMetals: CATEGORY_GATE_PROFILES.metals.retraceStrict,
   // ── Golden confidence window (surface only the best-timed entries) ──
   goldenRangeEnabled: true, // only show signals whose confidence is inside the golden window
-  goldenConfMin: 70,        // below this → neutral (too weak)
-  goldenConfMax: 85,        // above this → neutral (late-entry / chasing risk)
+  goldenConfMin: 70,        // legacy global fallback (below this → neutral)
+  goldenConfMax: 85,        // legacy global fallback (above this → neutral)
+  // Per-category windows: FX keeps 60/88, every other market keeps 70/85.
+  goldenConfMinForex: CATEGORY_GATE_PROFILES.forex.goldenOverride?.[0] ?? 60,
+  goldenConfMaxForex: CATEGORY_GATE_PROFILES.forex.goldenOverride?.[1] ?? 88,
+  goldenConfMinCrypto: 70,
+  goldenConfMaxCrypto: 85,
+  goldenConfMinStocks: 70,
+  goldenConfMaxStocks: 85,
+  goldenConfMinMetals: 70,
+  goldenConfMaxMetals: 85,
   // ── Trailing stop (dynamic, scales with lot size) ──
   trailingEnabled: true,    // master on/off (each TradeNowPage tick checks it)
   trailingBaseActivationUSD: 5,  // $ profit that arms the trail at the base lot 0.01
