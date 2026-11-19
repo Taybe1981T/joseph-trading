@@ -464,7 +464,13 @@ export function tradeQtyFor(category: string, symbol: string, balance: number): 
     return getDefaultQty('crypto', balance, symbol, cryptoHighBaseForCurrentConfig(symbol));
   }
   const fixed = getTradingValuesOverride(cat);
-  return fixed ? fixed.qty : getDefaultQty(cat, balance, symbol);
+  if (fixed) {
+    // The stored lot is a PER-$1,000 base (0.01 by default). It must scale with
+    // the account like getDefaultQty — $10,000 trades 0.1, not 0.01.
+    const scaled = fixed.qty * balanceThousands(balance);
+    return Math.round(scaled * 1000) / 1000;
+  }
+  return getDefaultQty(cat, balance, symbol);
 }
 
 /**
@@ -478,7 +484,10 @@ export function manualTradeQty(category: string, symbol: string, balance: number
     return getDefaultQty('crypto', balance, symbol, cryptoHighBaseForCurrentConfig(symbol));
   }
   const fixed = getTradingValuesOverride(cat);
-  if (fixed) return fixed.qty;
+  if (fixed) {
+    const scaled = fixed.qty * balanceThousands(balance);
+    return Math.round(scaled * 1000) / 1000;
+  }
   const t = Number(typed);
   return Number.isFinite(t) && t > 0 ? t : getDefaultQty(cat, balance, symbol);
 }

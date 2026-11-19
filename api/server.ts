@@ -364,10 +364,11 @@ function findServerCryptoPair(symbol: string): string | null {
 const SERVER_INTERVAL_MAP: Record<string, string> = {
   '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m',
   '1h': '1h', '4h': '4h', '1d': '1d', '1w': '1w', '1M': '1M',
+  '1Y': '1d',
 };
 const SERVER_LIMIT_MAP: Record<string, number> = {
-  '1m': 100, '5m': 100, '15m': 200, '1h': 200, '4h': 500,
-  '1d': 365, '1w': 200, '1M': 200,
+  '1m': 100, '5m': 100, '15m': 200, '30m': 200, '1h': 200, '4h': 500,
+  '1d': 365, '1w': 200, '1M': 200, '1Y': 365,
 };
 
 const BINANCE_ENDPOINTS = [
@@ -1102,11 +1103,16 @@ app.get("/api/market-data", async (req, res) => {
     if (timeframe === '1m') { interval = '1m'; range = '1d'; }
     else if (timeframe === '5m') { interval = '5m'; range = '5d'; }
     else if (timeframe === '15m') { interval = '15m'; range = '5d'; }
+    else if (timeframe === '30m') { interval = '30m'; range = '5d'; }
     else if (timeframe === '1h') { interval = '60m'; range = '1mo'; }
-    else if (timeframe === '4h') { interval = '1h'; range = '3mo'; } 
+    else if (timeframe === '4h') { interval = '1h'; range = '3mo'; }
     else if (timeframe === '1d') { interval = '1d'; range = '6mo'; }
     else if (timeframe === '1w') { interval = '1wk'; range = '2y'; }
     else if (timeframe === '1M') { interval = '1mo'; range = '5y'; }
+    // 1Y is a selectable timeframe — without this it fell through to the
+    // 14-day default (~10 closes), which fails the 20/28-bar indicators and
+    // forces every 1Y analysis into sideways → no_entry.
+    else if (timeframe === '1Y') { interval = '1d'; range = '1y'; }
 
     const hasEquals = yahooSymbol.includes('=');
     const cryptoPair = findServerCryptoPair(rawSymbol);

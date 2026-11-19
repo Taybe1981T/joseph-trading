@@ -16,17 +16,20 @@ export interface CategoryGateProfile {
   ignoreZeroVolume: boolean;
   /** Stop distances are expressed in pips rather than price percent. */
   usesPips: boolean;
+  /** Feeds return a still-forming last candle; its partial volume must not be
+   *  compared against completed candles (it always looks "very low"). */
+  skipFormingVolumeCandle: boolean;
   /** Final 3-candle retrace gate defaults. */
   retraceDefault: boolean;
   retraceStrict: boolean;
 }
 
 export const CATEGORY_GATE_PROFILES: Record<string, CategoryGateProfile> = {
-  forex:   { sidewaysVotes: 3, goldenOverride: [60, 88], ignoreZeroVolume: true,  usesPips: true,  retraceDefault: true,  retraceStrict: false },
-  crypto:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, retraceDefault: false, retraceStrict: true },
-  stocks:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, retraceDefault: false, retraceStrict: true },
-  metals:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, retraceDefault: false, retraceStrict: true },
-  default: { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, retraceDefault: false, retraceStrict: true },
+  forex:   { sidewaysVotes: 3, goldenOverride: [60, 88], ignoreZeroVolume: true,  usesPips: true,  skipFormingVolumeCandle: false, retraceDefault: true,  retraceStrict: false },
+  crypto:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: true,  retraceDefault: false, retraceStrict: true },
+  stocks:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: false, retraceDefault: false, retraceStrict: true },
+  metals:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: false, retraceDefault: false, retraceStrict: true },
+  default: { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: false, retraceDefault: false, retraceStrict: true },
 };
 
 export function gateProfileFor(type: MarketType | string): CategoryGateProfile {

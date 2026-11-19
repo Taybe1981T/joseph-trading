@@ -210,6 +210,25 @@ async function fetchServerLastPrice(symbol: string): Promise<number | null> {
   return null;
 }
 
+/**
+ * Quote WITH its server timestamp. `/api/quote` re-serves the last known good
+ * price (with its ORIGINAL ts) when upstream is unavailable — fine for P&L
+ * display, unsafe for SL/TP execution. Close paths use this to reject stale
+ * prices so a refresh/resume cannot close a trade at a price the market never
+ * traded at.
+ */
+export async function getQuoteWithTs(symbol: string): Promise<{ price: number; ts: number } | null> {
+  try {
+    const r = await fetch(`/api/quote?symbol=${encodeURIComponent(symbol)}`);
+    if (!r.ok) return null;
+    const d = await r.json();
+    const p = Number(d?.price);
+    if (typeof p !== 'number' || !isFinite(p) || p <= 0) return null;
+    const ts = Number(d?.ts);
+    return { price: p, ts: Number.isFinite(ts) ? ts : 0 };
+  } catch { return null; }
+}
+
 export async function getLivePrice(symbol: string): Promise<number | null> {
   const cached = _priceCache.get(symbol);
   if (cached && Date.now() - cached.ts < PRICE_TTL) return cached.price;

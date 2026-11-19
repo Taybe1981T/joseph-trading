@@ -44,6 +44,7 @@ import {
   closeMobileTrade,
   detectMobileTradeCategory,
   startMobilePositionManager,
+  stopMobilePositionManager,
   openMobileManualTrade,
   stampMobileLegacyTradeModes,
   mobileTradeUser,
@@ -819,6 +820,11 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     window.addEventListener('mobile-autotrade-resync', rs);
     return () => {
       clearInterval(iv);
+      // The layout can flip back to desktop without a full reload. If the
+      // mobile TP/SL/trailing manager keeps running alongside the global
+      // AutoTradeEngine, both trail and close the SAME auto trades from
+      // separate snapshots (double-close / balance corruption). Stop it here.
+      try { stopMobilePositionManager(); } catch {}
       window.removeEventListener('mobile-trades-changed', h);
       window.removeEventListener('mobile-autotrade-resync', rs);
     };

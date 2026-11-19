@@ -1606,8 +1606,17 @@ const isDeveloperSession = () => {
     }));
 
     results.forEach(res => {
-      if (res.signal === 'neutral' || res.signal === 'no_entry') return; // neutral hidden
-      if (res.isSideways) return; // sideways signals completely hidden
+      if (res.signal === 'neutral' || res.signal === 'no_entry' || res.isSideways) {
+        // A symbol re-analysed into neutral/no_entry/sideways must be REMOVED
+        // from the box, not just skipped. The old BUY/SELL card otherwise stays
+        // visible (updated was seeded from the current signals) and keeps
+        // feeding auto-trading even though the engine now blocks the entry.
+        if (updated.some(s => s.symbol === res.symbol)) {
+          updated = updated.filter(s => s.symbol !== res.symbol);
+          changed = true;
+        }
+        return;
+      }
 
       // ── PULLBACK ENTRY NOTE (no longer a hard hide) ──
       // The signal is ALWAYS surfaced to the box (we never leave it empty). The

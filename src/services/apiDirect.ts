@@ -423,9 +423,11 @@ async function fetchYahooFinance(symbol: string, timeframe: string): Promise<any
               }]
             }
           };
-          // Yahoo has no 4h interval — the request fetched 1h bars, so build
-          // genuine 4h candles before they reach the retrace filter.
-          return timeframe === '4h' ? aggregateHourlyTo4h(out) : out;
+          // Yahoo has no 4h interval — aggregate ONLY when this attempt actually
+          // fetched 1h bars. If the 1h request failed and the '1d' fallback
+          // succeeded, these are DAILY candles and must never be bucketed into
+          // fake 4h bars (the retrace filter would count multi-day candles).
+          return timeframe === '4h' && it === '1h' ? aggregateHourlyTo4h(out) : out;
         } catch {}
       }
     }
@@ -451,7 +453,15 @@ export async function fetchMarketDataDirect(symbol: string, timeframe: string): 
       if (r.ok) {
         const d = await r.json();
         const hasData = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.length > 0;
-        if (d && d.chart && hasData) { _dataCache.set(cacheKey, { data: sanitizeCandles(d), ts: Date.now() }); return sanitizeCandles(d); }
+        if (d && d.chart && hasData) {
+          // sanitizeCandles MUTATES the arrays in place — sanitize ONCE and use
+          // the same clean object for both the cache and the return value. Two
+          // passes recompute the median on a shortened series and can drop more
+          // valid candles, diverging cached data from returned data.
+          const clean = sanitizeCandles(d);
+          _dataCache.set(cacheKey, { data: clean, ts: Date.now() });
+          return clean;
+        }
         console.warn(`[FetchData] ${symbol} server returned data but no valid close. hasData=${hasData}, d.chart=${!!d?.chart}`);
       } else {
         console.warn(`[FetchData] ${symbol} server responded ${r.status} ${r.statusText}`);
@@ -466,7 +476,11 @@ export async function fetchMarketDataDirect(symbol: string, timeframe: string): 
   // Fallback: try Yahoo Finance directly via CORS proxy
   try {
     const data = await fetchYahooFinance(symbol, timeframe);
-    if (data) { _dataCache.set(cacheKey, { data: sanitizeCandles(data), ts: Date.now() }); return sanitizeCandles(data); }
+    if (data) {
+      const clean = sanitizeCandles(data);
+      _dataCache.set(cacheKey, { data: clean, ts: Date.now() });
+      return clean;
+    }
   } catch {}
 
   throw new Error('Market data currently unavailable from the source.');

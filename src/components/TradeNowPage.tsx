@@ -383,7 +383,9 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
         setQty((prev) => (prev === autoQty ? prev : autoQty));
       }
     } else if (fixed) {
-      setQty((prev) => (prev === fixed.qty ? prev : fixed.qty));
+      // The fixed lot is a per-$1,000 base — scale it with the account balance.
+      const autoQty = tradeQtyFor(cat, symbol, balance);
+      setQty((prev) => (prev === autoQty ? prev : autoQty));
     } else if (!ticketTouchedRef.current.qty) {
       const autoQty = getDefaultQty(cat, balance, symbol);
       setQty((prev) => (prev === autoQty ? prev : autoQty));
@@ -983,7 +985,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
     // are forced to the fixed lot while the system is ON.
     let execQty = Number(qty);
     if (!(execQty > 0)) execQty = tradeQtyFor(pendingCat, symbol, balance);
-    if (fixed && pendingCat !== 'crypto') execQty = fixed.qty;
+    if (fixed && pendingCat !== 'crypto') execQty = tradeQtyFor(pendingCat, symbol, balance);
     if (!(execQty > 0)) return;
     // Block opening when the market for this asset is closed (weekend/hours).
     // Crypto trades 24/7 and is always allowed.

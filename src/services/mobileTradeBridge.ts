@@ -337,12 +337,17 @@ async function mobileManagePositions(): Promise<void> {
         activationLotStep: tfFixed ? 0 : cfg.activationLotStep,
         stepLotStep: tfFixed ? 0 : cfg.stepLotStep,
       });
-      if (tr.active) {
+      if (tr.active && typeof t.qty === 'number' && t.qty > 0 && typeof t.entryPrice === 'number' && t.entryPrice > 0) {
         const newSl = usdToPrice(t.symbol, tr.offsetUSD, t.entryPrice, isBuy, t.qty, t.category || detectMobileTradeCategory(t.symbol));
-        const better = t.sl == null || (isBuy ? newSl > t.sl! : newSl < t.sl!);
-        if (better) {
-          await store.updateTrade(t.id, { sl: newSl });
-          changed = true;
+        // Guard like the desktop/global paths: an invalid SL (e.g. from a
+        // malformed qty) made the sell-side comparison always true and closed
+        // the trade instantly at whatever small P/L the current price showed.
+        if (isFinite(newSl) && newSl > 0) {
+          const better = t.sl == null || (isBuy ? newSl > t.sl! : newSl < t.sl!);
+          if (better) {
+            await store.updateTrade(t.id, { sl: newSl });
+            changed = true;
+          }
         }
       }
     } catch {}

@@ -13,6 +13,7 @@ import {
   calcPnl,
   isMarketOpen,
   getLivePrice,
+  getQuoteWithTs,
   getTradeStore,
   type PaperTrade,
 } from './paperTradingService';
@@ -82,12 +83,17 @@ function loadTrailingSettings(): { enabled: boolean; baseActivationUSD: number; 
   try {
     const raw = JSON.parse(localStorage.getItem('strategy_settings') || 'null');
     if (!raw || typeof raw !== 'object') return fallback;
+    // Read the SAME keys the UI writes (TradeNowPage / mobileTradeBridge /
+    // SettingsModal). The old code read raw.enabled / raw.baseActivationUSD,
+    // which are never saved — so trailing was always ON with the fallback $5/$2
+    // no matter what the owner configured, moving the stop to breakeven on the
+    // first tick and closing forex trades at ~0 before TP was ever reached.
     return {
-      enabled: raw.enabled !== false,
-      baseActivationUSD: Number(raw.baseActivationUSD) || fallback.baseActivationUSD,
-      baseStepUSD: Number(raw.baseStepUSD) || fallback.baseStepUSD,
-      activationLotStep: Number(raw.activationLotStep) || fallback.activationLotStep,
-      stepLotStep: Number(raw.stepLotStep) || fallback.stepLotStep,
+      enabled: raw.trailingEnabled !== false,
+      baseActivationUSD: typeof raw.trailingBaseActivationUSD === 'number' && raw.trailingBaseActivationUSD > 0 ? raw.trailingBaseActivationUSD : fallback.baseActivationUSD,
+      baseStepUSD: typeof raw.trailingBaseStepUSD === 'number' && raw.trailingBaseStepUSD > 0 ? raw.trailingBaseStepUSD : fallback.baseStepUSD,
+      activationLotStep: typeof raw.trailingActivationLotStep === 'number' && raw.trailingActivationLotStep >= 0 ? raw.trailingActivationLotStep : fallback.activationLotStep,
+      stepLotStep: typeof raw.trailingStepLotStep === 'number' && raw.trailingStepLotStep >= 0 ? raw.trailingStepLotStep : fallback.stepLotStep,
     };
   } catch { return fallback; }
 }
@@ -215,7 +221,15 @@ export class AutoTradeEngine {
 
       // CLOSE PASS: trail + hit SL/TP for auto trades only.
       for (const t of openAuto) {
-        const price = await this.getPrice(t.symbol);
+        // Only EXECUTE SL/TP/trailing on a FRESH quote. `/api/quote` re-serves
+        // the last known price with its original ts when upstream is down;
+        // acting on that stale price on resume/refresh closed forex trades at
+        // levels the market never actually traded at.
+        let price: number | null = null;
+        try {
+          const q = await getQuoteWithTs(t.symbol);
+          if (q && q.ts > 0 && Date.now() - q.ts < 30_000) price = q.price;
+        } catch {}
         if (price == null || !(price > 0)) continue;
 
         // ── DYNAMIC TRAILING STOP (same logic as the manual engine) ──
@@ -403,6 +417,13 @@ export class AutoTradeEngine {
   }
 
   private async closeTrade(store: any, t: PaperTrade, exitPrice: number, reason: 'tp' | 'sl', currentBalance: number) {
+    // Re-read the account just before crediting. A scan can close several
+    // positions; reusing the one snapshot taken at scan start makes the last
+    // saveBalance() overwrite earlier P&L and desync the account.
+    try {
+      const fresh = await store.getAccount();
+      if (fresh && Number.isFinite(fresh.balance)) currentBalance = fresh.balance;
+    } catch {}
     const pnl = calcPnl(t, exitPrice);
     const newBalance = currentBalance + pnl;
     try {
