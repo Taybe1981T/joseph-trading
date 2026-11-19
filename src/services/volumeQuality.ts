@@ -44,9 +44,14 @@ export function computeVolumeQuality(
   }
 
   // ── Module 3: Volume trend (0-20) ──
+  // Use the same volume sample boundary as Modules 1/2/4/5. For feeds whose last
+  // candle is still forming (crypto), leaving it in this window makes a partial
+  // bar look like a declining volume trend and unfairly costs up to 12 points.
+  // Price/OHLC still come from the live candle — only the volume slice shifts.
   const window = Math.max(3, Math.min(5, Math.floor(len / 2)));
-  const recentV = v.slice(-window);
-  const earlierV = v.slice(-window * 2, -window);
+  const volEnd = volIdx + 1;
+  const recentV = v.slice(Math.max(0, volEnd - window), volEnd);
+  const earlierV = v.slice(Math.max(0, volEnd - window * 2), Math.max(0, volEnd - window));
   const recentAvg = recentV.length ? recentV.reduce((a: number, b: number) => a + b, 0) / recentV.length : 1;
   const earlierAvg = earlierV.length ? earlierV.reduce((a: number, b: number) => a + b, 0) / earlierV.length : 1;
   const volRising = recentAvg > earlierAvg * 1.1;

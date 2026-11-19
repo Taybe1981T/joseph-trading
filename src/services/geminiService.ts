@@ -1001,6 +1001,7 @@ export async function analyzeMarket(params: {
         technicalScore: 0, sentimentScore: 0,
         timestamp: new Date().toISOString(), userId: '',
       };
+      console.log(`[Engine] ${symbol} -> no_entry by gate: Market Hours (${exchangeName} closed)`);
       return blockedResult;
     }
   }
@@ -1926,6 +1927,10 @@ Return ONLY valid JSON:
 
     finalConfidence = Math.min(100, finalConfidence + agreementBonus);
 
+    // Diagnostic: the LAST gate that pushed this symbol out of a trade signal.
+    // Used only by the one-line console log at the end of the engine.
+    let decisiveBlock: string | null = null;
+
     // ═══ STEP 5f: Professional Volume Quality filter ═══
     // HARD GATE (quality-first):
     //   - No volume data  → neutral pass (never blocks a genuine signal when data is absent)
@@ -1940,6 +1945,7 @@ Return ONLY valid JSON:
     if (volumeGuardOn && volumeQuality.detected) {
       if (volumeQuality.absorbed) {
         volumeQualityBlocked = true;
+        decisiveBlock = 'Volume Guard (Absorption)';
         detailedReasons.push({
           check: 'Volume Guard (Absorption)',
           value: `Score ${volumeQuality.score}/100 ${volumeQuality.reasons.join('; ')}`,
@@ -1948,6 +1954,7 @@ Return ONLY valid JSON:
         });
       } else if (volumeQuality.score > volMaxThreshold) {
         volumeQualityBlocked = true;
+        decisiveBlock = `Volume Guard (Climax Ceiling ${volumeQuality.score}>${volMaxThreshold})`;
         detailedReasons.push({
           check: 'Volume Guard (Climax Ceiling)',
           value: `${volumeQuality.score}/100 (>${volMaxThreshold}) ${volumeQuality.reasons.join('; ')}`,
@@ -1964,6 +1971,7 @@ Return ONLY valid JSON:
         });
       } else {
         volumeQualityBlocked = true;
+        decisiveBlock = `Volume Quality (${volumeQuality.score}<${volThreshold})`;
         detailedReasons.push({
           check: 'Volume Quality',
           value: `${volumeQuality.score}/100 (<${volThreshold}) ${volumeQuality.reasons.join('; ')}`,
@@ -1976,22 +1984,30 @@ Return ONLY valid JSON:
 
     if (finalSignal === ('no_entry' as any)) {
       // Sideways enforcement already blocked — do NOT override
+      decisiveBlock = 'Sideways enforcement (no_entry)';
     } else if (weeklyNewsBlocked) {
       finalSignal = SignalType.NO_ENTRY;
       finalConfidence = Math.min(finalConfidence, 0);
+      decisiveBlock = 'Weekly News Gate';
     } else if (volumeQualityBlocked) {
       finalSignal = SignalType.NEUTRAL;
       finalConfidence = Math.min(finalConfidence, 30);
+      // decisiveBlock already carries the exact Volume Guard sub-reason from STEP 5f.
     } else if (higherTFBlocked) {
       finalSignal = SignalType.NEUTRAL;
+      decisiveBlock = 'Higher TF conflict';
     } else if (candleMatchBlocked) {
       finalSignal = SignalType.NEUTRAL;
+      decisiveBlock = 'Candle Match';
     } else if (rsiBlocked) {
       finalSignal = SignalType.NEUTRAL;
+      decisiveBlock = 'RSI Extreme';
     } else if (hasConflict) {
       finalSignal = SignalType.NEUTRAL;
+      decisiveBlock = 'Signal conflict';
     } else if (direction === null) {
       finalSignal = SignalType.NEUTRAL;
+      decisiveBlock = 'No clear direction';
     } else if (isOld) {
       // Rule: no signals in the OLD zone (STRONG only in MATURE). The earlier
       // age-zone neutralization is overwritten by the confidence recompute and
@@ -1999,6 +2015,7 @@ Return ONLY valid JSON:
       // last gate, where nothing can undo it.
       finalSignal = SignalType.NEUTRAL;
       finalConfidence = Math.min(finalConfidence, 25);
+      decisiveBlock = 'Old age zone';
     } else {
       const strongThreshold = settings?.strongThreshold ?? 60;
       const buyThreshold = settings?.buyThreshold ?? 40;
@@ -2017,6 +2034,7 @@ Return ONLY valid JSON:
           finalSignal = SignalType.BUY;
         } else {
           finalSignal = SignalType.NEUTRAL;
+          decisiveBlock = `Below entry confidence (${finalConfidence}% < ${buyThreshold - CONF_BUFFER}%)`;
         }
       } else if (direction === 'sell') {
         if (qualifiesForStrong) {
@@ -2025,9 +2043,11 @@ Return ONLY valid JSON:
           finalSignal = SignalType.SELL;
         } else {
           finalSignal = SignalType.NEUTRAL;
+          decisiveBlock = `Below entry confidence (${finalConfidence}% < ${buyThreshold - CONF_BUFFER}%)`;
         }
       } else {
         finalSignal = SignalType.NEUTRAL;
+        decisiveBlock = 'No buy/sell direction';
       }
       // Mature-only STRONG enforcement
       const isMature = totalAge >= matureLimit && totalAge <= oldLimit;
@@ -2064,6 +2084,7 @@ Return ONLY valid JSON:
       if (!hasStrongSetup && finalConfidence < 40 && (finalSignal === SignalType.BUY || finalSignal === SignalType.SELL)) {
         finalConfidence = Math.min(finalConfidence, 35);
         finalSignal = SignalType.NEUTRAL;
+        decisiveBlock = 'Sideways / no strong setup';
       }
     }
     // ΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉΓòÉ
@@ -2203,6 +2224,7 @@ Return ONLY valid JSON:
       if (finalSignal === SignalType.BUY || finalSignal === SignalType.STRONG_BUY ||
           finalSignal === SignalType.SELL || finalSignal === SignalType.STRONG_SELL) {
         finalSignal = SignalType.NEUTRAL;
+        decisiveBlock = 'Candle Match (final safety)';
       }
       finalConfidence = Math.min(finalConfidence, 30);
     }
@@ -2229,6 +2251,7 @@ Return ONLY valid JSON:
           impact: `outside golden window [${gMin}-${gMax}] — hidden as neutral`
         });
         finalSignal = SignalType.NEUTRAL;
+        decisiveBlock = `Golden Zone (${finalConfidence}% outside [${gMin}-${gMax}])`;
       }
     }
 
@@ -2273,6 +2296,7 @@ Return ONLY valid JSON:
         });
         finalSignal = SignalType.NEUTRAL;
         finalConfidence = Math.min(finalConfidence, 30);
+        decisiveBlock = `Retrace Filter (${tfLabel}: signal candle misaligned)`;
         retraceConfirmed = false;
       } else {
         detailedReasons.push({
@@ -2285,6 +2309,7 @@ Return ONLY valid JSON:
         });
         finalSignal = SignalType.NEUTRAL;
         finalConfidence = Math.min(finalConfidence, 30);
+        decisiveBlock = `Retrace Filter (${tfLabel}: ${count.found}/${count.required})`;
       }
     }
 
@@ -2303,6 +2328,12 @@ Return ONLY valid JSON:
       : (isAr ? 'محايد' : 'Neutral');
     const rsiText = metrics?.rsi !== undefined ? `RSI=${metrics.rsi.toFixed(0)}` : '';
     const summary = `${symbol} ${signalText} ${finalConfidence}% — ${trendText} (${totalAge}c ${zoneText}) ${rsiText}`;
+
+    // One-line diagnostic: which gate actually forced this symbol out of a trade.
+    // Last assignment wins because later gates only run while the signal is live.
+    if ((finalSignal === SignalType.NEUTRAL || finalSignal === ('no_entry' as any)) && decisiveBlock) {
+      console.log(`[Engine] ${symbol} -> ${finalSignal} by gate: ${decisiveBlock} | conf ${finalConfidence}%`);
+    }
 
     const finalResult: AnalysisResult = {
       symbol, type, timeframe,
