@@ -536,6 +536,16 @@ function signalLevels(args: {
 }
 
 /**
+ * Scale for the developer's fixed non-crypto SL/TP budgets. They are stored at
+ * the $10,000 calibration point (DEFAULT_RISK = calcRiskUSD(10000)), so:
+ *   $1,000 -> ×0.1   ·   $10,000 -> ×1   ·   $20,000 -> ×2
+ * Exported so the manual ticket prefill uses the exact same maths.
+ */
+export function fixedRiskScale(balance: number): number {
+  return balanceThousands(balance) / 10;
+}
+
+/**
  * SL/TP price levels for a trade — the SINGLE source of truth for auto and
  * manual orders on desktop + mobile:
  *   • crypto      → liquidity-tier dollar budgets (high $50/$100, medium $30/$60, weak $10/$20 per $1,000)
@@ -576,11 +586,18 @@ export function resolveRiskLevels(args: {
 
   const fixed = getTradingValuesOverride(cat);
   if (fixed) {
+    // Fixed non-crypto budgets are calibrated at a $10,000 balance (the
+    // DEFAULT_RISK defaults: $60 SL / $120 TP). Scale them proportionally with
+    // the account exactly like the crypto per-$1,000 budgets, so a balance
+    // increase never leaves the stop/target at a stale small value.
+    const scale = fixedRiskScale(balance);
+    const slBudget = fixed.slUsd * scale;
+    const tpBudget = fixed.tpUsd * scale;
     return {
-      slPrice: usdToPrice(symbol, fixed.slUsd, entry, !isBuy, qty, cat),
-      tpPrice: usdToPrice(symbol, fixed.tpUsd, entry, isBuy, qty, cat),
-      slUsd: fixed.slUsd,
-      tpUsd: fixed.tpUsd,
+      slPrice: usdToPrice(symbol, slBudget, entry, !isBuy, qty, cat),
+      tpPrice: usdToPrice(symbol, tpBudget, entry, isBuy, qty, cat),
+      slUsd: slBudget,
+      tpUsd: tpBudget,
     };
   }
 

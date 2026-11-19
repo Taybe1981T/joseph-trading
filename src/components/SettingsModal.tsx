@@ -551,10 +551,11 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
               }`} />
             </div>
           </button>
-          <NumberInput label={isAr ? 'ربح التفعيل عند 0.01 ($)' : 'Activation Profit @0.01 ($)'} value={settings.trailingBaseActivationUSD ?? 5} onChange={(v) => handleChange('trailingBaseActivationUSD', v)} color="text-emerald-300" suffix="$" min={1} max={100} desc={isAr ? 'الربح الذي يحرّك الوقف لنقطة الدخول (افتراضي 5$)' : 'Profit that moves the stop to breakeven (default $5)'} />
-          <NumberInput label={isAr ? 'خطوة التتبع عند 0.01 ($)' : 'Trail Step @0.01 ($)'} value={settings.trailingBaseStepUSD ?? 2} onChange={(v) => handleChange('trailingBaseStepUSD', v)} color="text-emerald-300" suffix="$" min={1} max={50} desc={isAr ? 'كل ربح إضافي بهذا المقدار يضيف خطوة قفل ربح (افتراضي 2$)' : 'Each extra profit of this size locks one more step (default $2)'} />
-          <NumberInput label={isAr ? 'زيادة التفعيل لكل 0.01 لوت ($)' : 'Extra Activation per +0.01 lot ($)'} value={settings.trailingActivationLotStep ?? 2} onChange={(v) => handleChange('trailingActivationLotStep', v)} color="text-emerald-300" suffix="$" min={0} max={20} desc={isAr ? 'يُضاف للتفعيل مع كل وحدة لوت إضافية (افتراضي 2$)' : 'Added to activation per extra lot unit (default $2)'} />
-          <NumberInput label={isAr ? 'زيادة الخطوة لكل 0.01 لوت ($)' : 'Extra Step per +0.01 lot ($)'} value={settings.trailingStepLotStep ?? 1} onChange={(v) => handleChange('trailingStepLotStep', v)} color="text-emerald-300" suffix="$" min={0} max={10} desc={isAr ? 'يُضاف للخطوة مع كل وحدة لوت إضافية (افتراضي 1$)' : 'Added to the step per extra lot unit (default $1)'} />
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm leading-7 text-brand-text/70">
+            {isAr
+              ? 'يُحسب التريلنغ ستوب تلقائياً من الرصيد (لا من حجم اللوت) لكل الفئات: عند 1000$ تفعيل 0$ وخطوة 5$، وكل زيادة 1000$ تضيف 5$ للتفعيل و2$ للخطوة. مثال: عند 10000$ → تفعيل 45$ وخطوة 23$.'
+              : 'Trailing is now derived from BALANCE (never lot size), identically for every category: at $1,000 activation $0 / step $5, and every extra $1,000 adds $5 activation and $2 step. Example: $10,000 -> activation $45 / step $23.'}
+          </div>
         </div>
       </div>
       )}

@@ -19,8 +19,8 @@ import {
   getTradingValuesOverride,
   tradeQtyFor,
   cryptoUsdLevels,
-  baseUnitForTrade,
   resolvedCryptoRiskUsd,
+  fixedRiskScale,
 } from '../services/tradingValues';
 import { clearOpened as clearAutoOpened, resetGuard as resetAutoGuard } from '../services/autoGuard';
 import { openEventFor, closeEventFor, clearEventFor, resetEventFor, broadcastMirrorEvent, publishDevBook } from '../services/tradeMirror';
@@ -405,12 +405,15 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
       return;
     }
     if (fixed) {
+      // Fixed budgets are $10,000-calibrated — scale with the account exactly
+      // like the auto engine's resolveRiskLevels() and the crypto tiers.
+      const scale = fixedRiskScale(balance);
       setSlPrice((prev) => {
-        const next = fixed.slUsd.toFixed(2);
+        const next = (fixed.slUsd * scale).toFixed(2);
         return prev === next ? prev : next;
       });
       setTpPrice((prev) => {
-        const next = fixed.tpUsd.toFixed(2);
+        const next = (fixed.tpUsd * scale).toFixed(2);
         return prev === next ? prev : next;
       });
       return;
@@ -623,12 +626,7 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
           // Trailing disabled by the owner → keep the original stop, skip trailing.
         } else {
         const trail = calcTrailingStop({
-          qty: t.qty, openPnlUSD: pnlUSD,
-          baseUnit: baseUnitForTrade(t.category || detectCategory(t.symbol), t.symbol),
-          baseActivationUSD: fixed ? fixed.trailingActivationUSD : ts.baseActivationUSD,
-          baseStepUSD: fixed ? fixed.trailingStepUSD : ts.baseStepUSD,
-          activationLotStep: fixed ? 0 : ts.activationLotStep,
-          stepLotStep: fixed ? 0 : ts.stepLotStep,
+          qty: t.qty, openPnlUSD: pnlUSD, balance,
         });
         // active covers BOTH: first activation (offset 0 → stop to breakeven/entry)
         // and every subsequent step (offset > 0 → stop trails into profit).
@@ -1929,14 +1927,8 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
                     if (activeTrade && typeof activeTrade.qty === 'number' && activeTrade.qty > 0 && typeof activeTrade.entryPrice === 'number' && typeof activeTrade.sl === 'number') {
                       const live = (typeof livePrice === 'number' ? livePrice : activeTrade.entryPrice) as number;
                       const pnl = calcPnl(activeTrade, live);
-                      const tfFixed = getTradingValuesOverride(activeTrade.category || detectCategory(activeTrade.symbol), activeTrade.symbol);
                       const trail = calcTrailingStop({
-                        qty: activeTrade.qty, openPnlUSD: pnl,
-                        baseUnit: baseUnitForTrade(activeTrade.category || detectCategory(activeTrade.symbol), activeTrade.symbol),
-                        baseActivationUSD: tfFixed?.trailingActivationUSD,
-                        baseStepUSD: tfFixed?.trailingStepUSD,
-                        activationLotStep: tfFixed ? 0 : undefined,
-                        stepLotStep: tfFixed ? 0 : undefined,
+                        qty: activeTrade.qty, openPnlUSD: pnl, balance,
                       });
                       // Active once the trail has triggered AND the stop is at/into profit.
                       const intoProfit = activeTrade.side === 'buy'

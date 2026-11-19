@@ -1,31 +1,35 @@
-// ---------- Dynamic Trailing Stop (scales with lot size) ----------
-//
-// Rule (per the product owner, verified against their worked examples):
-//   • Base lot = the category's per-$1,000 unit (forex/metals/stocks 0.01, crypto 0.1)
-//     — one "unit" k=1. The worked $ figures below use the 0.01 base:
-//       - trailing ACTIVATES once open profit reaches $5  → stop jumps to breakeven (entry)
-//       - from there the stop trails to (windows × $2) of LOCKED profit, where
-//         windows = floor(profit / $5):
-//         $10 (2×) → entry+4 · $15 (3×) → entry+6 · $20 (4×) → entry+8 …
-//         (every extra full $5 of profit adds $2 of locked profit)
-//   • Every extra base lot (k = lot / categoryBase):
-//       - activation  += $2  (5, 7, 9, …)      →  activation = 5 + 2*(k-1)
-//       - step size   += $1  (2, 3, 4, …)      →  step       = 2 + 1*(k-1)
-//   • The stop NEVER moves backwards (only ratchets toward profit).
-//   • Works for both sides: buy trails the stop UP, sell trails it DOWN.
-//
-// This returns the stop as a PROFIT-OFFSET in USD relative to entry (0 = entry).
-// The caller converts that USD offset into a price via usdToPrice() so the level
-// is correct for every asset class (forex / metals / stocks / crypto).
+/**
+ * Dynamic Trailing Stop — driven by ACCOUNT BALANCE, not lot size.
+ *
+ * Rule (product owner, applied identically to every category):
+ *   • At $1,000 balance: activation $0, step $5.
+ *   • Every extra $1,000 of balance: +$5 activation and +$2 step.
+ *       $1,000  -> activation  0 / step  5
+ *       $2,000  -> activation  5 / step  7
+ *       $10,000 -> activation 45 / step 23
+ *
+ * The old lot-based scaling (k = qty / baseUnit) is intentionally removed: it
+ * made the same $10,000 account get wildly different trailing values across
+ * categories (crypto 0.1-lot vs metals 0.01-lot) and closed trades early.
+ *
+ * Activation 0 means the trail arms at the first positive profit. To avoid a
+ * divide-by-zero, the window unit then falls back to the step size, and the
+ * first completed window only secures breakeven (never the whole profit).
+ *
+ * `qty`, `baseUnit`, `activationLotStep`, `stepLotStep`, `baseActivationUSD`
+ * and `baseStepUSD` remain in the signature for backwards compatibility with
+ * older callers, but are IGNORED — balance is the only input that scales.
+ */
 
 export interface TrailingParams {
-  qty: number;        // trade lot size (0.01, 0.03, 0.07 …)
-  openPnlUSD: number; // current unrealised profit in USD (can be negative)
-  baseUnit?: number;  // category base lot per $1,000 (forex/metals/stocks 0.01, crypto 0.1)
-  baseActivationUSD?: number; // owner-tunable base activation at lot 0.01 (default 5)
-  baseStepUSD?: number;       // owner-tunable base step at lot 0.01 (default 2)
-  activationLotStep?: number; // extra activation per +0.01 lot (default 2)
-  stepLotStep?: number;       // extra step per +0.01 lot (default 1)
+  qty: number;                    // kept for compatibility, no longer scales
+  openPnlUSD: number;             // current unrealised profit in USD
+  balance: number;                // account balance — the only scaling input
+  baseActivationUSD?: number;     // deprecated / ignored
+  baseStepUSD?: number;           // deprecated / ignored
+  activationLotStep?: number;     // deprecated / ignored
+  stepLotStep?: number;           // deprecated / ignored
+  baseUnit?: number;              // deprecated / ignored
 }
 
 export interface TrailingResult {
@@ -33,33 +37,43 @@ export interface TrailingResult {
   offsetUSD: number;  // profit offset from entry to place the stop at (>= 0)
   activationUSD: number;
   stepUSD: number;
-  k: number;
+  k: number;          // now the balance multiplier (1 at $1,000, 10 at $10,000)
 }
 
-export function calcTrailingStop({ qty, openPnlUSD, baseActivationUSD = 5, baseStepUSD = 2, activationLotStep = 2, stepLotStep = 1, baseUnit = 0.01 }: TrailingParams): TrailingResult {
-  // k = how many base-lot "units" this trade is (min 1). The unit is the category's
-  // per-$1,000 base lot (forex/metals/stocks 0.01, crypto 0.1) so activation/step
-  // stay proportional to real risk across categories (e.g. 1.0 crypto lot = k=10).
-  const k = Math.max(1, Math.round((qty || 0) / baseUnit));
-  // Owner-tunable scaling: base values hold at lot 0.01; every extra 0.01 unit
-  // adds activationLotStep to the activation and stepLotStep to the step.
-  // Default: 0.01→(5,2) · 0.02→(7,3) · 0.03→(9,4) …
-  const activationUSD = baseActivationUSD + activationLotStep * (k - 1);
-  const stepUSD = baseStepUSD + stepLotStep * (k - 1);
+/** Base values at a $1,000 balance. */
+export const TRAILING_BASE_ACTIVATION_USD = 0;
+export const TRAILING_BASE_STEP_USD = 5;
+/** Increments for every additional $1,000 of balance. */
+export const TRAILING_ACTIVATION_PER_1K_USD = 5;
+export const TRAILING_STEP_PER_1K_USD = 2;
 
-  // Not enough profit yet → trailing not engaged, keep original stop.
-  if (openPnlUSD < activationUSD) {
+export function calcTrailingStop({
+  openPnlUSD,
+  balance,
+}: TrailingParams): TrailingResult {
+  const b = Number.isFinite(balance) && balance > 0 ? balance : 1000;
+  const k = Math.max(1, Math.floor(b / 1000));
+  const extra = k - 1;
+  const activationUSD = Math.max(0, TRAILING_BASE_ACTIVATION_USD + TRAILING_ACTIVATION_PER_1K_USD * extra);
+  const stepUSD = Math.max(0.01, TRAILING_BASE_STEP_USD + TRAILING_STEP_PER_1K_USD * extra);
+
+  // No profit yet → keep the original stop. With a zero activation we still
+  // require a strictly positive P/L so we never move a stop on a flat trade.
+  if (openPnlUSD < activationUSD || (activationUSD <= 0 && !(openPnlUSD > 0))) {
     return { active: false, offsetUSD: 0, activationUSD, stepUSD, k };
   }
 
-  // windows = how many full "activation" units of profit we have:
-  //   profit $5  → 1 · $10 → 2 · $15 → 3 · $20 → 4 …   (k=1)
-  const windows = Math.floor(openPnlUSD / activationUSD);
-  // First window (profit in [activation, 2×activation)) only SECURES the trade at
-  // breakeven (offset 0 → stop moves to entry). From the 2nd window onward the
-  // stop trails to (windows × step) of LOCKED profit:
-  //   10 → 2×2 = 4 · 15 → 3×2 = 6 · 20 → 4×2 = 8 …        (k=1, step=2)
-  const offsetUSD = windows <= 1 ? 0 : windows * stepUSD;
+  // windows = completed profit units. Normal case: divide by the activation.
+  // Zero-activation case: divide by the step so the math stays finite.
+  const windowUSD = activationUSD > 0 ? activationUSD : stepUSD;
+  const windows = Math.floor(openPnlUSD / windowUSD);
+
+  // First window only secures breakeven. Afterwards the stop ratchets by one
+  // locked-profit step per window. With activation 0 the extra (windows - 1)
+  // keeps one full step of breathing room between price and the stop.
+  const offsetUSD = activationUSD > 0
+    ? (windows <= 1 ? 0 : windows * stepUSD)
+    : (windows <= 1 ? 0 : (windows - 1) * stepUSD);
 
   return { active: true, offsetUSD, activationUSD, stepUSD, k };
 }

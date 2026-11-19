@@ -23,7 +23,6 @@ import {
   getTradingValuesOverride,
   tradeQtyFor,
   resolveRiskLevels,
-  baseUnitForTrade,
 } from './tradingValues';
 import { currentTradeMode, stampLegacyTradeModes } from '../lib/tradeMode';
 import { isDeveloperEmail } from '../lib/clientIds';
@@ -320,22 +319,9 @@ async function mobileManagePositions(): Promise<void> {
       const { calcTrailingStop } = await import('../lib/trailingStop');
       const { usdToPrice } = await import('../lib/positionMath');
       const pnl = calcPnl(t, price);
-      // Per-position trailing settings (edited via the pencil modal in USD)
-      // take precedence over the global strategy_settings defaults.
-      const act = tfFixed
-        ? tfFixed.trailingActivationUSD
-        : ((t as any).trailingActivationUSD != null ? (t as any).trailingActivationUSD : cfg.baseActivationUSD);
-      const step = tfFixed
-        ? tfFixed.trailingStepUSD
-        : ((t as any).trailingStepUSD != null ? (t as any).trailingStepUSD : cfg.baseStepUSD);
+      // Balance is the only scaling input now (no lot/base-unit scaling).
       const tr = calcTrailingStop({
-        qty: t.qty, openPnlUSD: pnl,
-        // Symbol-aware base unit — crypto uses the coin's tier base (0.1/1/10)
-        // so activation/step never explode on a large DOGE/XRP lot.
-        baseUnit: baseUnitForTrade(t.category || detectMobileTradeCategory(t.symbol), t.symbol),
-        baseActivationUSD: act, baseStepUSD: step,
-        activationLotStep: tfFixed ? 0 : cfg.activationLotStep,
-        stepLotStep: tfFixed ? 0 : cfg.stepLotStep,
+        qty: t.qty, openPnlUSD: pnl, balance,
       });
       if (tr.active && typeof t.qty === 'number' && t.qty > 0 && typeof t.entryPrice === 'number' && t.entryPrice > 0) {
         const newSl = usdToPrice(t.symbol, tr.offsetUSD, t.entryPrice, isBuy, t.qty, t.category || detectMobileTradeCategory(t.symbol));

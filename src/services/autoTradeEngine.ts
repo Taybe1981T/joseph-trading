@@ -22,7 +22,6 @@ import {
   getTradingValuesOverride,
   tradeQtyFor,
   resolveRiskLevels,
-  baseUnitForTrade,
 } from './tradingValues';
 import { isOpened, markOpened, markClosed, clearOpened, lastClosedAt } from './autoGuard';
 import { broadcastMirrorEvent, openEventFor, closeEventFor } from './tradeMirror';
@@ -240,17 +239,9 @@ export class AutoTradeEngine {
           const fixed = getTradingValuesOverride(t.category || detectCategory(t.symbol), t.symbol);
           if (fixed || ts.enabled) {
             const pnlUSD = calcPnl(t, price);
-            const trailCat = t.category || detectCategory(t.symbol);
+            // Balance is the only scaling input now (no lot/base-unit scaling).
             const trail = calcTrailingStop({
-              qty: t.qty, openPnlUSD: pnlUSD,
-              // Symbol-aware base unit: crypto must use the COIN's tier base
-              // (0.1 / 1 / 10), otherwise a 100-unit DOGE lot looks like 1000
-              // “lots” to the trailing rule and activation/step explode.
-              baseUnit: baseUnitForTrade(trailCat, t.symbol),
-              baseActivationUSD: fixed ? fixed.trailingActivationUSD : ts.baseActivationUSD,
-              baseStepUSD: fixed ? fixed.trailingStepUSD : ts.baseStepUSD,
-              activationLotStep: fixed ? 0 : ts.activationLotStep,
-              stepLotStep: fixed ? 0 : ts.stepLotStep,
+              qty: t.qty, openPnlUSD: pnlUSD, balance,
             });
             if (trail.active && trail.offsetUSD >= 0) {
               const above = t.side === 'buy';

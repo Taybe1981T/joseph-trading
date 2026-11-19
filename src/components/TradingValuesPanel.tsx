@@ -39,10 +39,8 @@ const TIER_LABEL: Record<CryptoTierKey, { ar: string; en: string }> = {
 
 const FIELDS: Array<{ key: FieldKey; ar: string; en: string; hintAr: string; hintEn: string }> = [
   { key: 'lotSize', ar: 'حجم اللوت', en: 'Lot Size', hintAr: 'يُفرض بدل اللوت المتغيّر مع الرصيد', hintEn: 'Forced instead of the balance-scaled lot' },
-  { key: 'stopLossUSD', ar: 'وقف الخسارة ($)', en: 'Stop Loss ($)', hintAr: 'مسافة الوقف بالدولار', hintEn: 'Stop distance in USD' },
-  { key: 'takeProfitUSD', ar: 'أخذ الربح ($)', en: 'Take Profit ($)', hintAr: 'مسافة الهدف بالدولار', hintEn: 'Target distance in USD' },
-  { key: 'trailingActivationUSD', ar: 'تفعيل الترينلغ ($)', en: 'Trailing Activation ($)', hintAr: 'ربح التفعيل الثابت', hintEn: 'Fixed activation profit' },
-  { key: 'trailingStepUSD', ar: 'خطوة الترينلغ ($)', en: 'Trailing Step ($)', hintAr: 'خطوة تثبيت الربح الثابتة', hintEn: 'Fixed profit-lock step' },
+  { key: 'stopLossUSD', ar: 'وقف الخسارة ($)', en: 'Stop Loss ($)', hintAr: 'القيمة عند رصيد 10000$ — تتضاعف مع الرصيد', hintEn: 'Value at a $10,000 balance — scales with balance' },
+  { key: 'takeProfitUSD', ar: 'أخذ الربح ($)', en: 'Take Profit ($)', hintAr: 'القيمة عند رصيد 10000$ — تتضاعف مع الرصيد', hintEn: 'Value at a $10,000 balance — scales with balance' },
 ];
 
 function fieldLabel(f: { ar: string; en: string }, isAr: boolean): string {

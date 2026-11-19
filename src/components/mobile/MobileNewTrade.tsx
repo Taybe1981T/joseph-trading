@@ -18,7 +18,7 @@ import { broadcastMirrorEvent, resetEventFor, publishDevBook } from '../../servi
 import { notionalInUSD, usdToPrice } from '../../lib/positionMath';
 import { calcTrailingStop } from '../../lib/trailingStop';
 import type { PaperTrade } from '../../services/paperTradingService';
-import { getTradingValuesOverride, tradeQtyFor, baseUnitForTrade } from '../../services/tradingValues';
+import { tradeQtyFor } from '../../services/tradingValues';
 import TradingViewEmbed from '../TradingViewEmbed';
 
 interface MobileNewTradeProps {
@@ -140,15 +140,10 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   if (openForSymbol && openForSymbol.qty > 0 && openForSymbol.entryPrice > 0) {
     const live = chartLivePrice ?? openForSymbol.entryPrice;
     const pnl = calcPnl(openForSymbol, live);
-    const tvFixed = getTradingValuesOverride(chartCategory, symbol);
     const tr = calcTrailingStop({
       qty: openForSymbol.qty,
       openPnlUSD: pnl,
-      baseUnit: baseUnitForTrade(chartCategory, symbol),
-      baseActivationUSD: tvFixed?.trailingActivationUSD ?? ((openForSymbol as any).trailingActivationUSD ?? 5),
-      baseStepUSD: tvFixed?.trailingStepUSD ?? ((openForSymbol as any).trailingStepUSD ?? 2),
-      activationLotStep: tvFixed ? 0 : 2,
-      stepLotStep: tvFixed ? 0 : 1,
+      balance,
     });
     if (tr.active) {
       const isBuy = openForSymbol.side === 'buy';
