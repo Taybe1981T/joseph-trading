@@ -20,7 +20,7 @@ import PortfolioPanel from './components/PortfolioPanel';
 import ClientDashboard from './components/ClientDashboard';
 import AnalysisDetailPage from './components/AnalysisDetailPage';
 
-import { AnalysisResult, StrategySettings, AutoAnalysisSettings, MarketType, TradingStyle } from './types';
+import { AnalysisResult, StrategySettings, AutoAnalysisSettings, MarketType, TradingStyle, SignalType } from './types';
 import { DEFAULT_STRATEGY_SETTINGS, DEFAULT_AUTO_SETTINGS, SYMBOL_CATEGORIES, ALL_SYMBOLS_DB, SYMBOL_GROUPS, FREE_SYMBOLS, STOCKS_BY_EXCHANGE, CRYPTO_SCAN_LIMIT, mergeStrategySettings, needsGoldenWindowMigration } from './constants';
 import { getOpenStockExchanges, exchangeLabel, StockExchangeKey } from './lib/marketHours';
 import { Language, translations } from './lib/i18n';
@@ -3927,32 +3927,76 @@ const started = planGrants
                     </div>
                   </div>
                 ) : analysisResults ? (
-                  <>
-                    <h2 className="text-2xl font-black text-brand-text mb-2 text-center">
-                      {lang === 'ar' ? 'نتائج التحليل اليدوي' : 'Manual Analysis Results'}
-                    </h2>
-                    {!analysisResults.some(r => r.signal === 'strong_buy' || r.signal === 'strong_sell') && (
-                      <div className="bg-brand-alt border border-red-500/20 py-2 px-4 mb-6 text-center rounded-xl">
-                        <span className="text-red-500 text-[10px] font-black uppercase tracking-widest">
-                          {lang === 'ar' ? 'لا توجد إشارات قوية حالياً' : 'No strong signals currently'}
-                        </span>
-                      </div>
-                    )}
-                    {analysisError && (
-                      <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
-                        <p className="text-amber-400 text-sm font-medium">{analysisError}</p>
-                      </div>
-                    )}
-                    <AnalysisResultView
-                      results={analysisResults}
-                      lang={lang}
-                      settings={settings}
-                      onDetail={(r) => { setAnalysisResults(null); setDetailResult(r); }}
-                      onTrade={(sym) => { try { sessionStorage.setItem('joseph_session_ui', JSON.stringify({ symbol: sym })); } catch {} navigateTo('trade'); }}
-                      onRemove={removeAnalysisResult}
-                      onClearAll={handleClearAnalysisResults}
-                    />
-                  </>
+                  (() => {
+                    // Manual-analysis display ONLY. Neutral / no-entry results are
+                    // hidden from the user; they remain in state untouched for the
+                    // radar, top signals, auto-trading and client dashboard.
+                    // Only real entry signals (regular or strong) are shown — exactly
+                    // as before, just without the non-tradeable rows.
+                    const entrySignals = analysisResults.filter((r) =>
+                      !r.isSideways && (
+                        r.signal === SignalType.BUY ||
+                        r.signal === SignalType.SELL ||
+                        r.signal === SignalType.STRONG_BUY ||
+                        r.signal === SignalType.STRONG_SELL
+                      )
+                    );
+
+                    if (entrySignals.length === 0) {
+                      return (
+                        <>
+                          <h2 className="text-2xl font-black text-brand-text mb-2 text-center">
+                            {lang === 'ar' ? 'نتائج التحليل اليدوي' : 'Manual Analysis Results'}
+                          </h2>
+                          {analysisError && (
+                            <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                              <p className="text-amber-400 text-sm font-medium">{analysisError}</p>
+                            </div>
+                          )}
+                          <div className="max-w-2xl mx-auto flex flex-col items-center justify-center p-12 text-center space-y-4 bg-brand-alt rounded-2xl border border-brand-text/5">
+                            <Shield size={48} className="text-amber-500/50" />
+                            <h3 className="text-lg font-black text-brand-text">
+                              {lang === 'ar' ? 'لا توجد إشارات جديدة للتداول حالياً' : 'No new trading signals right now'}
+                            </h3>
+                            <p className="text-brand-muted text-sm leading-7 max-w-lg">
+                              {lang === 'ar'
+                                ? 'لم يعثر التحليل على أي فرصة دخول صالحة (شراء أو بيع) في هذه الفئة. الرموز المحايدة أو غير الصالحة للدخول لا تُعرض. يمكنك إعادة التحليل لاحقاً.'
+                                : 'The analysis found no valid entry opportunity (buy or sell) in this category. Neutral and no-entry symbols are not shown. You can run the analysis again later.'}
+                            </p>
+                          </div>
+                        </>
+                      );
+                    }
+
+                    return (
+                      <>
+                        <h2 className="text-2xl font-black text-brand-text mb-2 text-center">
+                          {lang === 'ar' ? 'نتائج التحليل اليدوي' : 'Manual Analysis Results'}
+                        </h2>
+                        {!entrySignals.some(r => r.signal === 'strong_buy' || r.signal === 'strong_sell') && (
+                          <div className="bg-brand-alt border border-red-500/20 py-2 px-4 mb-6 text-center rounded-xl">
+                            <span className="text-red-500 text-[10px] font-black uppercase tracking-widest">
+                              {lang === 'ar' ? 'لا توجد إشارات قوية حالياً' : 'No strong signals currently'}
+                            </span>
+                          </div>
+                        )}
+                        {analysisError && (
+                          <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                            <p className="text-amber-400 text-sm font-medium">{analysisError}</p>
+                          </div>
+                        )}
+                        <AnalysisResultView
+                          results={entrySignals}
+                          lang={lang}
+                          settings={settings}
+                          onDetail={(r) => { setAnalysisResults(null); setDetailResult(r); }}
+                          onTrade={(sym) => { try { sessionStorage.setItem('joseph_session_ui', JSON.stringify({ symbol: sym })); } catch {} navigateTo('trade'); }}
+                          onRemove={removeAnalysisResult}
+                          onClearAll={handleClearAnalysisResults}
+                        />
+                      </>
+                    );
+                  })()
                 ) : null}
               </div>
             )}
