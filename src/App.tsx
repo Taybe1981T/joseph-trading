@@ -3901,7 +3901,17 @@ const started = planGrants
                       try { playAudio('completion'); } catch {}
                     }
                   }}
-                  onError={(errMsg, allFailed) => { setAnalysisResults(null); setAnalysisError(errMsg || null); setIsAnalyzing(false); setProgress(null); try { playAudio('fail'); } catch {} }}
+                  onError={(errMsg, allFailed) => {
+                    // Partial failure must NOT wipe results that already arrived
+                    // via onResult — otherwise the manual-results page renders
+                    // blank (analysisResults === null) even though most symbols
+                    // were analysed successfully. Only a total failure clears.
+                    if (allFailed) setAnalysisResults(null);
+                    setAnalysisError(errMsg || null);
+                    setIsAnalyzing(false);
+                    setProgress(null);
+                    try { playAudio(allFailed ? 'fail' : 'completion'); } catch {}
+                  }}
                 />
                 <ConnectionStatus lang={lang} />
               </div>
