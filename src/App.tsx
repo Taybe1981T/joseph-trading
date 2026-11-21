@@ -2360,10 +2360,12 @@ const isDeveloperSession = () => {
       radarSettingsKey(autoSettingsRef.current, ownsPaidPlan),
     );
 
-    // Clients: a NEW scan never starts from storage after a page load or
-    // refresh — they turn it ON manually. But an INTERRUPTED scan resumes from
-    // where it stopped, exactly as requested.
-    if (user && !isDeveloperSession() && !isRadarArmed() && !canResume) {
+    // FRESH SITE OPEN (browser/app was closed): never leave a stale ON state —
+    // the user must press START again. A PAGE REFRESH is different: the loop is
+    // still live, so keep isEnabled true and let scheduleNext(false) simply
+    // resume the remaining interval (never start a scan just because of the
+    // reload). An interrupted scan also resumes from its saved symbol.
+    if (freshSession && !isRadarArmed() && !canResume) {
       setAutoSettings((prev) => {
         if (!prev.isEnabled) return prev;
         const next = { ...prev, isEnabled: false };
@@ -2426,18 +2428,23 @@ const isDeveloperSession = () => {
         radarBusyRef.current = false;
         // A newer schedule replaced this run: it owns the timer and the UI.
         if (token !== radarTokenRef.current) return;
-        // Save the finish timestamp AND switch the radar OFF. Auto-analysis must
-        // complete and stop: one full pass ends the run instead of re-scanning
-        // forever on the interval timer.
+        // STOP pressed mid-scan: honour it, never resurrect the loop.
+        if (!autoSettingsRef.current.isEnabled) return;
+
+        // CONTINUOUS AUTO-ANALYSIS: keep the radar ON, record the GMT finish
+        // timestamp, then restart after the configured interval. This repeats
+        // until the user presses STOP (isEnabled -> false), which supersedes
+        // this run token. Desktop and phone keep separate on/off flags.
         const nowTs = Date.now();
+        const merged = { ...autoSettingsRef.current, isEnabled: true, lastFinishedAt: nowTs };
+        // Update the ref BEFORE scheduling so scheduleNext() measures the
+        // interval from THIS finish instead of the previous pass.
+        autoSettingsRef.current = merged;
         try {
-          setAutoSettings(prev => {
-            const next = { ...prev, isEnabled: false, lastFinishedAt: nowTs };
-            localStorage.setItem('auto_settings', JSON.stringify(next));
-            if (ownsPaidPlan) localStorage.setItem(cxnAutoKey, JSON.stringify(next));
-            return next;
-          });
+          localStorage.setItem('auto_settings', JSON.stringify(merged));
+          if (ownsPaidPlan) localStorage.setItem(cxnAutoKey, JSON.stringify(merged));
         } catch {}
+        setAutoSettings(merged);
 
         setIsScanningFinished(true);
         setFoundAnyStrong(signalsRef.current.length > 0);
@@ -2445,6 +2452,9 @@ const isDeveloperSession = () => {
         playAudio('completion');
         setShowRadarComplete(true);
         setTimeout(() => setShowRadarComplete(false), 30000);
+
+        // Re-analysis is due `interval` minutes after this pass finished.
+        scheduleNext(false);
       }
     };
 

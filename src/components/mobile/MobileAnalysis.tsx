@@ -9,12 +9,20 @@ interface Props {
   lang: Language;
 }
 
+/** Auto-analysis timestamps are ALWAYS shown in GMT (same rule as the rest of
+ * the app) — never the device's local time. */
+function fmtGmtTime(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} GMT`;
+}
+
 export function MobileAnalysis({ lang }: Props) {
   const isAr = lang === 'ar';
   const [autoOn, setAutoOn] = useState(() => isMobileRadarOn() || isMobileRadarPersisted());
   const [lastRun, setLastRun] = useState<string | null>(() => {
     const t = readMobileAuto().lastFinishedAt;
-    return t ? new Date(t).toLocaleTimeString() : null;
+    return t ? fmtGmtTime(t) : null;
   });
   const [prog, setProg] = useState<MobileProgress | null>(() => {
     const p = getMobileRadarProgress();
@@ -31,7 +39,7 @@ export function MobileAnalysis({ lang }: Props) {
   useEffect(() => {
     const sync = () => {
       const r = readMobileAuto();
-      setLastRun(r.lastFinishedAt ? new Date(r.lastFinishedAt).toLocaleTimeString() : null);
+      setLastRun(r.lastFinishedAt ? fmtGmtTime(r.lastFinishedAt) : null);
     };
     sync();
     // The engine (shared with the header button) is the ONE source of truth for
@@ -78,7 +86,7 @@ export function MobileAnalysis({ lang }: Props) {
     setProg({ current: '…', total: 0, index: 0, failed: 0 });
     setAutoOn(true);
     void startMobileRadar(uid, email, undefined, (r) => {
-      setLastRun(new Date().toLocaleTimeString());
+      setLastRun(fmtGmtTime(Date.now()));
       setDoneMsg(mobileT(lang, `Done: ${r.scanned} scanned, ${r.fresh} fresh`, `اكتمل: ${r.scanned} رمز، ${r.fresh} جديد`));
       setTimeout(() => setDoneMsg(null), 15000);
     }, { immediate: true });

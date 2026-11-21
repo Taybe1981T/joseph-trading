@@ -496,15 +496,18 @@ export async function startMobileRadar(
   // Resume only the FIRST run after a page refresh; a manual start is a full scan.
   let pendingResume = opts?.resume ? readMobileRadarResume() : null;
 
-  /** End this run. Only the owning run may do it, so a stop+start during the
-   *  network call cannot have the old loop switch the new one off. */
-  const finishRun = () => {
-    if (runId !== mRadarRunId) return;
-    mRadarOn = false;
-    writeSessionValue(M_RADAR_ON_KEY, null);
-    writeMobileRadarResume(null);
+  /** Schedule the NEXT pass after the configured interval. The radar stays ON,
+   *  so auto-analysis repeats until the user presses STOP in the app. Only the
+   *  owning run may schedule, so a stop+start during a network call cannot be
+   *  revived by an old loop. The finish timestamp was already written by
+   *  runMobileRadar() (lastFinishedAt, GMT epoch ms). */
+  const scheduleNextPass = () => {
+    if (!mRadarOn || runId !== mRadarRunId) return;
+    if (mRadarTimer) clearTimeout(mRadarTimer);
     mRadarProg = null;
     emitMobileRadar();
+    const ms = (readMobileAuto().interval || 15) * 60000;
+    mRadarTimer = setTimeout(() => { mRadarTimer = null; void loop(); }, ms);
   };
 
   const loop = async () => {
@@ -522,10 +525,10 @@ export async function startMobileRadar(
       if (runId !== mRadarRunId) return;
       mRadarOnDone?.(r);
     } catch {}
-    // COMPLETE-AND-STOP: a scan pass ends the radar. Auto-analysis must finish
-    // and switch OFF — it never reschedules itself on the interval timer, so it
-    // can no longer run forever.
-    finishRun();
+    // CONTINUOUS AUTO-ANALYSIS: keep the radar ON and repeat this pass after
+    // the configured interval (measured from the GMT finish timestamp). The
+    // loop ends only when stopMobileRadar() is called from the app's STOP.
+    scheduleNextPass();
   };
 
   const auto = readMobileAuto();
