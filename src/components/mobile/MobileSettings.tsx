@@ -389,6 +389,83 @@ export function MobileSettings({
                           </button>
                         );
                       })()}
+
+                      {/* Forex-only Entry Mode — next to the 3-candle retrace gate.
+                          OFF by default: forex inherits the global entryMode. */}
+                      {row.suffix === 'Forex' && (() => {
+                        const fxEnabled = (strategy as any).entryModeForexEnabled === true;
+                        const fxMode = (strategy as any).entryModeForex === 'market' ? 'market' : 'pullback';
+                        return (
+                          <div style={{ borderTop: '1px solid #2a2a2a', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            <button
+                              type="button"
+                              onClick={() => updateStrategy('entryModeForexEnabled', !fxEnabled)}
+                              style={{
+                                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                                gap: 10, padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+                                background: fxEnabled ? 'rgba(6,182,212,0.12)' : '#151515',
+                                border: `2px solid ${fxEnabled ? 'rgba(6,182,212,0.5)' : '#2a2a2a'}`,
+                                color: fxEnabled ? '#22d3ee' : '#bbb', textAlign: 'right',
+                              }}
+                            >
+                              <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                <span style={{ fontSize: 14, fontWeight: 900 }}>
+                                  {isAr ? 'تفعيل وضع الدخول للفوركس فقط' : 'Forex-only Entry Mode'}
+                                </span>
+                                <span style={{ fontSize: 11, opacity: 0.75 }}>
+                                  {fxEnabled
+                                    ? (isAr ? 'مفعّل — الفوركس يستخدم وضعه المستقل' : 'Enabled — forex uses its own mode')
+                                    : (isAr ? 'مطفأ — الفوركس يتبع الوضع العام' : 'Off — forex inherits the global mode')}
+                                </span>
+                              </span>
+                              <span style={{ width: 44, height: 24, borderRadius: 99, background: fxEnabled ? '#06b6d4' : '#3a3a3a', display: 'flex', alignItems: 'center', padding: 2, flexShrink: 0 }}>
+                                <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', transform: `translateX(${fxEnabled ? 20 : 0}px)`, transition: 'transform .15s' }} />
+                              </span>
+                            </button>
+
+                            {fxEnabled && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                                  <span style={{ fontSize: 13, fontWeight: 700, color: '#ddd' }}>
+                                    {isAr ? 'وضع الدخول' : 'Entry Mode'}
+                                  </span>
+                                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateStrategy('entryModeForex', 'pullback')}
+                                      style={{
+                                        padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 900,
+                                        background: fxMode === 'pullback' ? '#06b6d4' : '#1c1c1c',
+                                        color: fxMode === 'pullback' ? '#fff' : '#999',
+                                        border: `1px solid ${fxMode === 'pullback' ? '#06b6d4' : '#333'}`,
+                                      }}
+                                    >
+                                      {isAr ? 'ارتداد (آمن)' : 'Pullback (safe)'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateStrategy('entryModeForex', 'market')}
+                                      style={{
+                                        padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 900,
+                                        background: fxMode === 'market' ? '#f59e0b' : '#1c1c1c',
+                                        color: fxMode === 'market' ? '#fff' : '#999',
+                                        border: `1px solid ${fxMode === 'market' ? '#f59e0b' : '#333'}`,
+                                      }}
+                                    >
+                                      {isAr ? 'فوري (مطاردة)' : 'Market (chase)'}
+                                    </button>
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: 11, color: '#888', lineHeight: 1.7 }}>
+                                  {isAr
+                                    ? '«ارتداد» = حدّ دخول أقل من السعر للشراء (أعلى للبيع) فلا تُنفَّذ إلا عند وصول السعر إليك. «فوري» = الدخول عند السعر الحالي كالسابق. يؤثّر على الفوركس وحده.'
+                                    : '“Pullback” = entry sits below price for buys (above for sells), filled only if price reaches you. “Market” = enter at current price (old behaviour). Affects forex only.'}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}

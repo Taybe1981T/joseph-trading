@@ -151,6 +151,11 @@ export interface StrategySettings {
   retraceStrictModeCrypto?: boolean;
   retraceStrictModeStocks?: boolean;
   retraceStrictModeMetals?: boolean;
+  // ── Forex-only Entry Mode override (sits with the 3-candle retrace gate) ──
+  // OFF by default: forex inherits the global `entryMode`. When enabled, ONLY
+  // forex uses `entryModeForex`; all other categories keep the global mode.
+  entryModeForexEnabled?: boolean;
+  entryModeForex?: 'market' | 'pullback';
   // ── Golden confidence window (surface only the best-timed entries) ──
   goldenRangeEnabled?: boolean;        // when true, only signals inside [goldenConfMin..goldenConfMax] are shown
   goldenConfMin?: number;              // legacy global fallback (default 70) — below → neutral

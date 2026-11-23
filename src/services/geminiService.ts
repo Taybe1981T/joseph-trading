@@ -1,5 +1,6 @@
 import { MarketType, AnalysisResult, TradingStyle, SignalType, StrategySettings } from "../types";
 import { DEFAULT_STRATEGY_SETTINGS, gateProfileFor, resolveGoldenWindow } from "../constants";
+import { resolveEntryMode } from "../lib/entryMode";
 import { fetchMarketContext } from "./marketContextService";
 import { onRateLimited, waitIfRateLimited } from "./rateLimitTracker";
 import { fetchMarketDataDirect } from './apiDirect';
@@ -2144,7 +2145,9 @@ Return ONLY valid JSON:
       // DEEPEN the zone to a full 1 ATR so we never buy the top / sell the bottom.
       const isBuy = finalSignal.includes('buy');
       const isSell = finalSignal.includes('sell');
-      var usePullback = settings.entryMode === 'pullback' && (isBuy || isSell);
+      // The global entryMode still drives every category. When the forex-only
+      // override is enabled, resolveEntryMode swaps it for forex alone.
+      var usePullback = resolveEntryMode(settings, type) === 'pullback' && (isBuy || isSell);
       var entryAnchor = currentPrice;
       var pullbackDist = 0;
       if (usePullback && atr > 0) {
