@@ -325,13 +325,17 @@ export interface LiquidityAbsorptionResult {
 /**
  * Liquidity-absorption confirmation for the retrace gate.
  *
- * For a BUY we look for a BEARISH retrace candle that:
- *   1. swept the low of the previous swing (took sell-side liquidity),
- *   2. closed back ABOVE that swept low (the sell was absorbed), and
- *   3. shows either a rejection wick or elevated volume (when the feed has it).
+ * For a BUY we look for a BEARISH retrace candle whose sell-side liquidity was
+ * taken and then absorbed. This is accepted in either of two places:
+ *   1. SAME candle: it swept the prior swing low and closed back ABOVE it with
+ *      a rejection wick (or elevated volume when the feed has it).
+ *   2. NEXT candle (including the forming one): it swept the retrace candle's
+ *      low and closed back ABOVE it with a bullish reaction. This is the common
+ *      case on short timeframes such as 15m with a 1-candle retrace — checking
+ *      only the bearish candle itself missed it and blocked valid signals.
  *
- * A SELL uses the mirror image: a BULLISH candle sweeps the prior swing high,
- * closes back below it, and shows rejection / volume confirmation.
+ * A SELL uses the mirror image (bullish retrace candle, swept high, bearish
+ * reaction / close back below).
  *
  * This replaced the old hard rule "the current candle must align with the
  * trade". That rule is now only a soft note. The candle direction is allowed
@@ -372,49 +376,94 @@ export function detectLiquidityAbsorption(
       ? Math.min(...prior.map((p) => p.low))
       : Math.max(...prior.map((p) => p.high));
 
-    const swept = isBuy ? c.low < extreme : c.high > extreme;
-    const reclaimed = isBuy ? c.close > extreme : c.close < extreme;
-    if (!swept || !reclaimed) continue;
-
-    const body = Math.abs(c.close - c.open);
-    if (body <= 0) continue; // doji is never absorption
-    const range = c.high - c.low;
-    const wick = isBuy
-      ? Math.min(c.open, c.close) - c.low
-      : c.high - Math.max(c.open, c.close);
-    const rejection = wick >= body && range > 0 && wick / range >= 0.35;
-
     const priorVols = prior
       .map((p) => p.volume)
       .filter((v): v is number => typeof v === 'number' && v > 0);
     const avgPriorVol = priorVols.length
       ? priorVols.reduce((sum, v) => sum + v, 0) / priorVols.length
       : 0;
-    const volumeConfirmed =
-      typeof c.volume === 'number' && c.volume > 0 && avgPriorVol > 0 && c.volume >= avgPriorVol * 1.2;
+    const volumeConfirmed = (v: number | undefined): boolean =>
+      typeof v === 'number' && v > 0 && avgPriorVol > 0 && v >= avgPriorVol * 1.2;
 
-    if (!rejection && !volumeConfirmed) continue;
+    // 1) Same-candle rejection: the retrace candle swept the prior extreme
+    //    and closed back inside on a rejection wick / volume spike.
+    const body = Math.abs(c.close - c.open);
+    const range = c.high - c.low;
+    if (body > 0 && range > 0) {
+      const swept = isBuy ? c.low < extreme : c.high > extreme;
+      const reclaimed = isBuy ? c.close > extreme : c.close < extreme;
+      const wick = isBuy
+        ? Math.min(c.open, c.close) - c.low
+        : c.high - Math.max(c.open, c.close);
+      const rejection = wick >= body && wick / range >= 0.35;
+      const vol = volumeConfirmed(c.volume);
+      if (swept && reclaimed && (rejection || vol)) {
+        base.detected = true;
+        base.candleIndex = idx;
+        base.volumeConfirmed = vol;
+        base.reasons.push(
+          isBuy
+            ? `bearish candle swept the swing low (${extreme.toFixed(5)}) and closed back above it`
+            : `bullish candle swept the swing high (${extreme.toFixed(5)}) and closed back below it`,
+        );
+        base.reasons.push(
+          rejection ? 'rejection wick absorbed the liquidity' : 'elevated volume confirmed the absorption',
+        );
+        return base;
+      }
+    }
 
-    base.detected = true;
-    base.candleIndex = idx;
-    base.volumeConfirmed = volumeConfirmed;
-    base.reasons.push(
-      isBuy
-        ? `bearish candle swept the swing low (${extreme.toFixed(5)}) and closed back above it`
-        : `bullish candle swept the swing high (${extreme.toFixed(5)}) and closed back below it`,
-    );
-    base.reasons.push(
-      rejection
-        ? 'rejection wick absorbed the liquidity'
-        : 'elevated volume confirmed the absorption',
-    );
-    return base;
+    // 2) Next-candle absorption — the short-timeframe case (15m + 1 candle).
+    //    The following candle (possibly still forming) sweeps the retrace
+    //    candle's extreme and closes back inside with a with-trend reaction.
+    //    Checking only the retrace candle itself missed this and blocked
+    //    perfectly valid single-candle pullbacks.
+    const confirm = list[idx + 1];
+    if (confirm) {
+      const sweepLevel = isBuy ? Math.min(c.low, extreme) : Math.max(c.high, extreme);
+      const eps = Math.max(Math.abs(sweepLevel), 1) * 1e-6;
+      const confBody = Math.abs(confirm.close - confirm.open);
+      const confRange = confirm.high - confirm.low;
+      const confWick = isBuy
+        ? Math.min(confirm.open, confirm.close) - confirm.low
+        : confirm.high - Math.max(confirm.open, confirm.close);
+      const sweptNext = isBuy
+        ? confirm.low <= sweepLevel + eps
+        : confirm.high >= sweepLevel - eps;
+      const reclaimedNext = isBuy
+        ? confirm.close > sweepLevel + eps && confirm.close > confirm.open
+        : confirm.close < sweepLevel - eps && confirm.close < confirm.open;
+      const rejectionNext =
+        confBody > 0 && confRange > 0 && confWick >= confBody && confWick / confRange >= 0.35;
+      const mid = (c.open + c.close) / 2;
+      const strongClose = isBuy ? confirm.close > mid : confirm.close < mid;
+      const volNext = volumeConfirmed(confirm.volume);
+
+      if (sweptNext && reclaimedNext && (rejectionNext || strongClose || volNext)) {
+        base.detected = true;
+        base.candleIndex = idx + 1;
+        base.volumeConfirmed = volNext;
+        base.reasons.push(
+          isBuy
+            ? `next candle swept the bearish retrace low (${sweepLevel.toFixed(5)}) and closed back above it`
+            : `next candle swept the bullish retrace high (${sweepLevel.toFixed(5)}) and closed back below it`,
+        );
+        base.reasons.push(
+          rejectionNext
+            ? 'rejection wick on the reaction candle absorbed the liquidity'
+            : strongClose
+              ? 'with-trend close reclaimed the retrace candle body'
+              : 'elevated volume confirmed the absorption',
+        );
+        return base;
+      }
+    }
   }
 
   base.reasons.push(
     isBuy
-      ? 'no bearish candle swept and reclaimed a prior swing low'
-      : 'no bullish candle swept and reclaimed a prior swing high',
+      ? 'no bearish retrace candle had its liquidity absorbed (same or next candle)'
+      : 'no bullish retrace candle had its liquidity absorbed (same or next candle)',
   );
   return base;
 }
