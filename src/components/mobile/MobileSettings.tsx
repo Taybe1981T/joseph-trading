@@ -276,8 +276,8 @@ export function MobileSettings({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
                   {isAr
-                    ? 'آخر بوابة بعد استيفاء كل الشروط: تعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. تحقّق العدد + شمعة الإشارة مع الاتجاه ← الإشارة مسموحة. غيابه ← إخفاء (مانع final). الدوجي/المحايدة لا تُحتسب. الفوركس مفعّل افتراضيًا (3 شموع)، وبقية الفئات معطّلة افتراضيًا.'
-                    : 'Final gate after all conditions: counts consecutive candles moving against the trade on the chosen timeframe. Count reached + signal candle aligned → signal allowed. Missing → hidden (final blocker). Neutral/doji never counted. Forex is ON by default (3 candles); all other categories are OFF by default.'}
+                    ? 'آخر بوابة بعد استيفاء كل الشروط: تعدّ الشموع المعاكسة للاتجاه على الفريم المحدد، ثم تطلب امتصاص سيولة في إحداها (هابطة للشراء / صاعدة للبيع تسحب قاعاً أو قمةً سابقة ثم تغلق داخله مع رفض أو حجم مرتفع). اتجاه الشمعة الحالية ملاحظة فقط لا تمنع. العدد + الامتصاص ← إشارة مسموحة، وإلا إخفاء. الدوجي لا يُحتسب. الفوركس مفعّل افتراضيًا (3 شموع).'
+                    : 'Final gate: counts candles against the trade on the chosen timeframe, then requires liquidity absorption in one of them — bearish for BUY / bullish for SELL sweeping a prior low/high and closing back inside with rejection or volume. Current candle direction is a note only, never a blocker. Count + absorption → allowed, otherwise hidden. Doji is never counted. Forex is ON by default (3 candles).'}
                 </div>
 
                 {retraceRows.map((row) => {

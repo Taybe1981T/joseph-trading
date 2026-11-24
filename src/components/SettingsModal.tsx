@@ -586,13 +586,13 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
         <div className="bg-white/5 border border-white/5 rounded-2xl p-5 md:p-6 space-y-4">
           <p className="text-sm md:text-[17px] text-brand-text/55 leading-relaxed">
             {isAr
-              ? 'يعمل كآخر بوابة بعد استيفاء كل الشروط: يعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد. عند تحقّق العدد + شمعة الإشارة مع اتجاه الصفقة → الإشارة مسموحة (قوتها تحدّدها نسبة الثقة). عند غيابه → إخفاء الإشارة (مانع final). شموع الدوجي/المحايدة لا تُحتسب ولا تقطع التسلسل. الفوركس مفعّل افتراضيًا (3 شموع)، وبقية الفئات معطّلة افتراضيًا.'
-              : 'Runs as the very last gate after every other condition: it counts consecutive candles moving AGAINST the trade on the chosen timeframe. Count reached AND the signal candle aligned with the trade → signal allowed (strength set by confidence). Missing → signal hidden (final blocker). Neutral/doji candles are never counted and never break the run. Forex is ON by default (3 candles); all other categories are OFF by default.'}
+              ? 'يعمل كآخر بوابة بعد استيفاء كل الشروط: يعدّ الشموع المتتالية المعاكسة لاتجاه الصفقة على الفريم المحدد، ثم يطلب أن تكون إحداها قد ابتلعت سيولة: شمعة هابطة للشراء أو صاعدة للبيع تسحب قاعاً/قمةً سابقة ثم تغلق داخله مع رفض واضح أو حجم مرتفع. اتجاه الشمعة الحالية ملاحظة فقط ولا يمنع الإشارة. تحقّق العدد + الامتصاص ← إشارة مسموحة؛ غياب أي منهما ← إخفاء. الدوجي لا يُحتسب ولا يقطع التسلسل. الفوركس مفعّل افتراضيًا (3 شموع)، وبقية الفئات معطّلة افتراضيًا.'
+              : 'Runs as the very last gate after every other condition: it counts consecutive candles moving AGAINST the trade on the chosen timeframe, then requires one of them to have absorbed liquidity — a bearish candle for BUY / bullish for SELL that sweeps a prior swing low/high and closes back inside on a rejection wick or elevated volume. The current candle direction is a note only and never blocks. Count + absorption → allowed; either missing → hidden. Doji candles are never counted or break the run. Forex is ON by default (3 candles); all other categories are OFF by default.'}
           </p>
           <div className="bg-black/30 rounded-xl p-3 text-xs md:text-sm text-amber-300/80 leading-relaxed">
             {isAr
-              ? 'مثال شراء: 3 شموع هابطة متتالية (ويمكن أن تتخللها دوجي) ← تأكيد قوي. مثال بيع: 3 شموع صاعدة متتالية ← تأكيد قوي.'
-              : 'Buy example: 3 consecutive bearish candles (doji may sit between them) → strong confirmation. Sell example: 3 consecutive bullish candles → strong confirmation.'}
+              ? 'مثال شراء: 3 شموع هابطة (يجوز بينها دوجي) إحداها تسحب قاعاً سابقاً ثم تغلق فوقه ← بداية تصحيح مقبولة. مثال بيع: 3 شموع صاعدة إحداها تسحب قمة سابقة ثم تغلق تحتها.'
+              : 'Buy example: 3 bearish candles (doji may sit between them), one sweeps a prior low and closes back above it → accepted correction start. Sell example: 3 bullish candles, one sweeps a prior high and closes back below it.'}
           </div>
 
           {RETRACE_ROWS.map((row) => {

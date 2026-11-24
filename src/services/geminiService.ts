@@ -14,6 +14,7 @@ import {
   isLastCandleForming,
   countRetraceCandles,
   currentCandleAligns,
+  detectLiquidityAbsorption,
   type RetraceCandle,
 } from './retraceFilter';
 
@@ -2268,8 +2269,11 @@ Return ONLY valid JSON:
     // match, volume guard, golden window). It only engages for a live
     // BUY/SELL signal and only when its category switch is ON (forex default ON,
     // other categories default OFF).
-    //   • retrace found  → signal allowed (strength stays as confidence decides)
-    //   • retrace absent → hide the signal (neutral) — final blocking gate
+    //   • retrace found + liquidity absorbed → signal allowed
+    //   • retrace absent OR absorption missing → hide the signal (neutral)
+    // The current candle direction is only a soft note: it may oppose the
+    // trade. What confirms the start of the correction is the bearish (BUY)
+    // / bullish (SELL) retrace candle that swept and reclaimed liquidity.
     // Doji candles are never counted (and do not break the run).
     var retraceFound = 0;
     var retraceConfirmed = false;
@@ -2284,25 +2288,34 @@ Return ONLY valid JSON:
       const tfLabel = retraceCfg.timeframe;
       const candleWord = retraceSide === 'buy' ? 'هابطة' : 'صاعدة';
       const candleWordEn = retraceSide === 'buy' ? 'bearish' : 'bullish';
-      const candleAligned = currentCandleAligns(retraceCandles, retraceSide);
-      if (retraceConfirmed && candleAligned) {
+      // The current candle direction is now a NOTE, never a hard blocker.
+      // Confirmation comes from liquidity absorption on the counted retrace
+      // candles: a bearish candle sweeping the prior low for BUY (mirror for
+      // SELL) that closes back inside on a rejection wick / volume spike.
+      const candleNote = currentCandleAligns(retraceCandles, retraceSide)
+        ? 'signal candle aligned (note only, not a gate)'
+        : 'signal candle opposes trade (note only, not a gate)';
+      const absorption = retraceConfirmed
+        ? detectLiquidityAbsorption(retraceCandles, retraceSide, count.indices)
+        : { detected: false, candleIndex: null, side: retraceSide, reasons: [] as string[], volumeConfirmed: false };
+      if (retraceConfirmed && absorption.detected) {
         detailedReasons.push({
           check: 'Retrace Filter',
-          value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji: ${count.dojiSkipped}, neutral: ${count.neutralSkipped})`,
+          value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji: ${count.dojiSkipped}, neutral: ${count.neutralSkipped}) | liquidity absorbed${absorption.volumeConfirmed ? ' (volume)' : ' (rejection wick)'}`,
           status: 'positive',
-          impact: `Retrace confirmed on ${tfLabel} — signal allowed (signal candle aligns with ${retraceSide})`,
+          impact: `Retrace confirmed on ${tfLabel}: ${absorption.reasons.join('; ')} — ${candleNote}`,
         });
         // No promotion: STRONG/BUY is already decided by confidence percentage.
-      } else if (retraceConfirmed && !candleAligned) {
+      } else if (retraceConfirmed && !absorption.detected) {
         detailedReasons.push({
           check: 'Retrace Filter',
           value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji: ${count.dojiSkipped}, neutral: ${count.neutralSkipped})`,
           status: 'negative',
-          impact: `BLOCKED: retrace confirmed but the signal candle is NOT aligned with ${retraceSide} — wait for the bounce`,
+          impact: `BLOCKED: retrace counted but no ${candleWordEn} candle swept and reclaimed liquidity — absorption missing; ${candleNote}`,
         });
         finalSignal = SignalType.NEUTRAL;
         finalConfidence = Math.min(finalConfidence, 30);
-        decisiveBlock = `Retrace Filter (${tfLabel}: signal candle misaligned)`;
+        decisiveBlock = `Retrace Filter (${tfLabel}: liquidity absorption missing)`;
         retraceConfirmed = false;
       } else {
         detailedReasons.push({

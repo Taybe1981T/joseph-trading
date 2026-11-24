@@ -15,9 +15,12 @@ import { gateProfileFor } from '../constants';
  * run): bearish → doji → bearish → bearish = 3 retrace candles.
  * A candle moving WITH the trade direction ends the run.
  *
- * When the configured category is enabled and the count is reached, the engine
- * promotes the signal to STRONG (final confirmation). When the retrace is not
- * found, the signal is hidden as neutral (the filter is a blocking gate).
+ * When the configured category is enabled, the count must be reached AND one
+ * of those retrace candles must show liquidity absorption (a sweep of the prior
+ * swing extreme followed by a close back inside, with a rejection wick or a
+ * volume spike). The current candle direction is only a soft note — it may
+ * oppose the trade without hiding it. Missing count OR missing absorption hides
+ * the signal as neutral (the filter is the final blocking gate).
  * Forex is enabled by default (3 candles, lenient body counting); all other
  * categories are disabled by default.
  */
@@ -40,6 +43,9 @@ export interface RetraceCandle {
   low: number;
   close: number;
   ts?: number;
+  /** Optional volume from the feed. FX often sends zero, so price-action
+   *  rejection is used as a fallback absorption signal there. */
+  volume?: number;
 }
 
 export const DEFAULT_RETRACE_CANDLES = 3;
@@ -121,6 +127,7 @@ export function extractRetraceCandles(raw: any): RetraceCandle[] | null {
       low: low == null ? Math.min(open, close) : low,
       close,
       ts: ts?.[i] == null ? undefined : ts[i],
+      volume: q.volume?.[i] == null ? undefined : Number(q.volume[i]),
     });
   }
   return out.length ? out : null;
@@ -172,9 +179,11 @@ export function isDojiCandle(candle: RetraceCandle): boolean {
  * A neutral candle is skipped (not counted, does not break the run).
  */
 /**
- * The signal candle (current/forming) must move WITH the trade direction.
- * Buy → current candle must be bullish; Sell → bearish.
- * Neutral/doji/unknown candles do not block (they don't oppose the trade).
+ * LEGACY NOTE ONLY — no longer a blocking condition in the retrace gate.
+ * It reports whether the current/forming candle moves WITH the trade direction
+ * so the engine can add a soft annotation. An opposing candle is no longer a
+ * reason to hide a signal; liquidity absorption on the counted retrace candles
+ * is the confirmation instead (see detectLiquidityAbsorption below).
  */
 export function currentCandleAligns(
   candles: RetraceCandle[] | null | undefined,
@@ -233,6 +242,10 @@ export interface RetraceCountResult {
   scanned: number;
   lastCandleSkipped: boolean;
   strictMode: boolean;
+  /** Chronological positions of the counted retrace candles, newest first.
+   *  Used by the liquidity-absorption confirmation that replaced the old
+   *  "signal candle must align" hard gate. */
+  indices: number[];
 }
 
 /**
@@ -260,6 +273,7 @@ export function countRetraceCandles(
   let dojiSkipped = 0;
   let neutralSkipped = 0;
   let scanned = 0;
+  const indices: number[] = [];
 
   for (; i >= 0; i--) {
     const c = list[i];
@@ -280,6 +294,7 @@ export function countRetraceCandles(
       continue;
     }
     if (dir !== wanted) break; // a with-trend candle ends the retrace run
+    indices.push(i);
     found++;
     if (found >= req) break;
   }
@@ -293,5 +308,113 @@ export function countRetraceCandles(
     scanned,
     lastCandleSkipped: skipLast && list.length > 0,
     strictMode: strict,
+    indices,
   };
+}
+
+export interface LiquidityAbsorptionResult {
+  detected: boolean;
+  /** Position of the absorption candle in the original candle array. */
+  candleIndex: number | null;
+  side: RetraceSide;
+  reasons: string[];
+  /** True when a real volume spike confirmed the sweep (FX often has no volume). */
+  volumeConfirmed: boolean;
+}
+
+/**
+ * Liquidity-absorption confirmation for the retrace gate.
+ *
+ * For a BUY we look for a BEARISH retrace candle that:
+ *   1. swept the low of the previous swing (took sell-side liquidity),
+ *   2. closed back ABOVE that swept low (the sell was absorbed), and
+ *   3. shows either a rejection wick or elevated volume (when the feed has it).
+ *
+ * A SELL uses the mirror image: a BULLISH candle sweeps the prior swing high,
+ * closes back below it, and shows rejection / volume confirmation.
+ *
+ * This replaced the old hard rule "the current candle must align with the
+ * trade". That rule is now only a soft note. The candle direction is allowed
+ * to oppose the trade here — the absorbed liquidity is what confirms the
+ * start of the correction in the direction of the larger trend.
+ */
+export function detectLiquidityAbsorption(
+  candles: RetraceCandle[] | null | undefined,
+  side: RetraceSide,
+  indices: readonly number[] | null | undefined,
+  lookback = 5,
+): LiquidityAbsorptionResult {
+  const base: LiquidityAbsorptionResult = {
+    detected: false,
+    candleIndex: null,
+    side,
+    reasons: [],
+    volumeConfirmed: false,
+  };
+  const list = candles || [];
+  const checks = [...(indices || [])].sort((a, b) => b - a); // newest counted candle first
+  if (!checks.length) {
+    base.reasons.push('no retrace candles available to check absorption');
+    return base;
+  }
+
+  const isBuy = side === 'buy';
+  for (const idx of checks) {
+    const c = list[idx];
+    if (!c) continue;
+    // The counted candle must still be a genuine retrace candle.
+    const isRetraceCandle = isBuy ? c.close < c.open : c.close > c.open;
+    if (!isRetraceCandle) continue;
+
+    const prior = list.slice(Math.max(0, idx - lookback), idx).filter(Boolean);
+    if (prior.length < 2) continue;
+    const extreme = isBuy
+      ? Math.min(...prior.map((p) => p.low))
+      : Math.max(...prior.map((p) => p.high));
+
+    const swept = isBuy ? c.low < extreme : c.high > extreme;
+    const reclaimed = isBuy ? c.close > extreme : c.close < extreme;
+    if (!swept || !reclaimed) continue;
+
+    const body = Math.abs(c.close - c.open);
+    if (body <= 0) continue; // doji is never absorption
+    const range = c.high - c.low;
+    const wick = isBuy
+      ? Math.min(c.open, c.close) - c.low
+      : c.high - Math.max(c.open, c.close);
+    const rejection = wick >= body && range > 0 && wick / range >= 0.35;
+
+    const priorVols = prior
+      .map((p) => p.volume)
+      .filter((v): v is number => typeof v === 'number' && v > 0);
+    const avgPriorVol = priorVols.length
+      ? priorVols.reduce((sum, v) => sum + v, 0) / priorVols.length
+      : 0;
+    const volumeConfirmed =
+      typeof c.volume === 'number' && c.volume > 0 && avgPriorVol > 0 && c.volume >= avgPriorVol * 1.2;
+
+    if (!rejection && !volumeConfirmed) continue;
+
+    base.detected = true;
+    base.candleIndex = idx;
+    base.volumeConfirmed = volumeConfirmed;
+    base.reasons.push(
+      isBuy
+        ? `bearish candle swept the swing low (${extreme.toFixed(5)}) and closed back above it`
+        : `bullish candle swept the swing high (${extreme.toFixed(5)}) and closed back below it`,
+    );
+    base.reasons.push(
+      rejection
+        ? 'rejection wick absorbed the liquidity'
+        : 'elevated volume confirmed the absorption',
+    );
+    return base;
+  }
+
+  base.reasons.push(
+    isBuy
+      ? 'no bearish candle swept and reclaimed a prior swing low'
+      : 'no bullish candle swept and reclaimed a prior swing high',
+  );
+  return base;
 }
