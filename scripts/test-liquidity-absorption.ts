@@ -55,7 +55,27 @@ const sellNextCount = countRetraceCandles(sellNext, 'sell', 1, { skipLast: true,
 check('sell 15m/1 count', sellNextCount.confirmed, true);
 check('sell 15m/1 next-candle absorption', detectLiquidityAbsorption(sellNext, 'sell', sellNextCount.indices).detected, true);
 
-// 5) No sweep anywhere → still blocked.
+// 5) FINAL BUG CASE: no low/high sweep at all, but the next candle reclaims
+//    the retrace body midpoint with a with-trend close. This must now pass.
+const buyReclaim = [
+  { open: 1.1000, high: 1.1010, low: 1.0995, close: 1.1005 },
+  { open: 1.1005, high: 1.1015, low: 1.1000, close: 1.1012 },
+  { open: 1.1012, high: 1.1013, low: 1.0995, close: 1.0998 }, // bearish retrace
+  { open: 1.0998, high: 1.1008, low: 1.0999, close: 1.1006 }, // low above 1.0995, close above mid 1.1005
+];
+const buyReclaimCount = countRetraceCandles(buyReclaim, 'buy', 1, { skipLast: true, strictMode: false });
+check('buy 15m/1 reclaim without sweep', detectLiquidityAbsorption(buyReclaim, 'buy', buyReclaimCount.indices).detected, true);
+
+const sellReclaim = [
+  { open: 1.0900, high: 1.0910, low: 1.0895, close: 1.0905 },
+  { open: 1.0905, high: 1.0915, low: 1.0900, close: 1.0912 },
+  { open: 1.0912, high: 1.0925, low: 1.0911, close: 1.0924 }, // bullish retrace
+  { open: 1.0924, high: 1.0924, low: 1.0914, close: 1.0917 }, // high below 1.0925, close below mid 1.0918
+];
+const sellReclaimCount = countRetraceCandles(sellReclaim, 'sell', 1, { skipLast: true, strictMode: false });
+check('sell 15m/1 reclaim without sweep', detectLiquidityAbsorption(sellReclaim, 'sell', sellReclaimCount.indices).detected, true);
+
+// 6) No sweep and no body reclaim → still blocked.
 const noSweep = [
   { open: 1.100, high: 1.101, low: 1.099, close: 1.0995 },
   { open: 1.0995, high: 1.100, low: 1.0985, close: 1.099 },

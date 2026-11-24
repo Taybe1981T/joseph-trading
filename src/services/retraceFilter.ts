@@ -15,12 +15,11 @@ import { gateProfileFor } from '../constants';
  * run): bearish → doji → bearish → bearish = 3 retrace candles.
  * A candle moving WITH the trade direction ends the run.
  *
- * When the configured category is enabled, the count must be reached AND one
- * of those retrace candles must show liquidity absorption (a sweep of the prior
- * swing extreme followed by a close back inside, with a rejection wick or a
- * volume spike). The current candle direction is only a soft note — it may
- * oppose the trade without hiding it. Missing count OR missing absorption hides
- * the signal as neutral (the filter is the final blocking gate).
+ * When the configured category is enabled, the GATE is the candle count alone.
+ * The current candle direction and the liquidity-absorption read are diagnostic
+ * notes only — neither can hide a signal. This matters on 15m forex feeds,
+ * which often return doji / wickless bars where absorption cannot be read.
+ * Missing the required count hides the signal as neutral (final blocking gate).
  * Forex is enabled by default (3 candles, lenient body counting); all other
  * categories are disabled by default.
  */
@@ -323,19 +322,22 @@ export interface LiquidityAbsorptionResult {
 }
 
 /**
- * Liquidity-absorption confirmation for the retrace gate.
+ * Diagnostic liquidity-absorption read for the retrace gate. NOT a blocker:
+ * the engine only uses it as an informational note in detailedReasons.
  *
  * For a BUY we look for a BEARISH retrace candle whose sell-side liquidity was
  * taken and then absorbed. This is accepted in either of two places:
  *   1. SAME candle: it swept the prior swing low and closed back ABOVE it with
  *      a rejection wick (or elevated volume when the feed has it).
- *   2. NEXT candle (including the forming one): it swept the retrace candle's
- *      low and closed back ABOVE it with a bullish reaction. This is the common
- *      case on short timeframes such as 15m with a 1-candle retrace — checking
- *      only the bearish candle itself missed it and blocked valid signals.
+ *   2. NEXT candle (including the forming one): it reclaimed at least the
+ *      MIDPOINT of the bearish candle's body with a bullish close. Sweeping the
+ *      absolute low is NOT required — that extra condition made 15m / 1-candle
+ *      retraces almost impossible and was the reason valid signals stayed
+ *      hidden. A sweep + rejection wick / volume is still accepted as an
+ *      alternative, but is no longer mandatory.
  *
- * A SELL uses the mirror image (bullish retrace candle, swept high, bearish
- * reaction / close back below).
+ * A SELL uses the mirror image (bullish retrace candle, bearish close back
+ * below its body midpoint).
  *
  * This replaced the old hard rule "the current candle must align with the
  * trade". That rule is now only a soft note. The candle direction is allowed
@@ -414,10 +416,13 @@ export function detectLiquidityAbsorption(
     }
 
     // 2) Next-candle absorption — the short-timeframe case (15m + 1 candle).
-    //    The following candle (possibly still forming) sweeps the retrace
-    //    candle's extreme and closes back inside with a with-trend reaction.
-    //    Checking only the retrace candle itself missed this and blocked
-    //    perfectly valid single-candle pullbacks.
+    //    The sell pressure of the bearish candle is treated as ABSORBED when
+    //    the next candle closes back above at least the midpoint of its body
+    //    with a with-trend (bullish for BUY / bearish for SELL) close.
+    //    Sweeping the absolute low is NOT required: that extra condition made
+    //    15m / 1-candle retraces almost unreachable and was the real cause of
+    //    forex signals staying hidden. A sweep + rejection/volume is still
+    //    accepted as an alternative, but is no longer mandatory.
     const confirm = list[idx + 1];
     if (confirm) {
       const sweepLevel = isBuy ? Math.min(c.low, extreme) : Math.max(c.high, extreme);
@@ -430,29 +435,33 @@ export function detectLiquidityAbsorption(
       const sweptNext = isBuy
         ? confirm.low <= sweepLevel + eps
         : confirm.high >= sweepLevel - eps;
-      const reclaimedNext = isBuy
-        ? confirm.close > sweepLevel + eps && confirm.close > confirm.open
-        : confirm.close < sweepLevel - eps && confirm.close < confirm.open;
       const rejectionNext =
         confBody > 0 && confRange > 0 && confWick >= confBody && confWick / confRange >= 0.35;
       const mid = (c.open + c.close) / 2;
-      const strongClose = isBuy ? confirm.close > mid : confirm.close < mid;
+      const withTrendClose = isBuy
+        ? confirm.close > mid && confirm.close > confirm.open
+        : confirm.close < mid && confirm.close < confirm.open;
       const volNext = volumeConfirmed(confirm.volume);
+      const sweepConfirmed = sweptNext && (rejectionNext || volNext);
 
-      if (sweptNext && reclaimedNext && (rejectionNext || strongClose || volNext)) {
+      if (withTrendClose || sweepConfirmed) {
         base.detected = true;
         base.candleIndex = idx + 1;
         base.volumeConfirmed = volNext;
         base.reasons.push(
-          isBuy
-            ? `next candle swept the bearish retrace low (${sweepLevel.toFixed(5)}) and closed back above it`
-            : `next candle swept the bullish retrace high (${sweepLevel.toFixed(5)}) and closed back below it`,
+          withTrendClose
+            ? isBuy
+              ? `next candle reclaimed the bearish retrace body (mid ${mid.toFixed(5)}) with a bullish close`
+              : `next candle reclaimed the bullish retrace body (mid ${mid.toFixed(5)}) with a bearish close`
+            : isBuy
+              ? `next candle swept the bearish retrace low (${sweepLevel.toFixed(5)}) and rejected it`
+              : `next candle swept the bullish retrace high (${sweepLevel.toFixed(5)}) and rejected it`,
         );
         base.reasons.push(
-          rejectionNext
-            ? 'rejection wick on the reaction candle absorbed the liquidity'
-            : strongClose
-              ? 'with-trend close reclaimed the retrace candle body'
+          withTrendClose
+            ? 'sell/buy pressure absorbed — no absolute low/high sweep required'
+            : rejectionNext
+              ? 'rejection wick on the reaction candle absorbed the liquidity'
               : 'elevated volume confirmed the absorption',
         );
         return base;
