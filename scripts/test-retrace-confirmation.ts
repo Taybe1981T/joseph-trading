@@ -1,4 +1,4 @@
-import { countRetraceCandles, detectPostRetraceAlignment } from '../src/services/retraceFilter';
+import { countRetraceCandles, detectPostRetraceAlignment, isLastCandleForming } from '../src/services/retraceFilter';
 
 let ok = true;
 function check(label: string, actual: unknown, expected: unknown) {
@@ -66,6 +66,30 @@ check('forming candle skipped', detectPostRetraceAlignment(buyRun, 'buy', buyCou
 
 // 6) No completed retrace run → no confirmation.
 check('no retrace run', detectPostRetraceAlignment(buyRun, 'buy', [], false).confirmed, false);
+
+// 7) Timestamp units: Yahoo sends SECONDS, Date.now() is MILLISECONDS. Both
+//    formats must be recognised; a still-forming bar must never be counted.
+const fixedNow = Date.UTC(2026, 10, 24, 22, 40, 0);
+const openedSec = Math.floor(fixedNow / 1000) - 60; // opened 1 minute ago
+const bar = { open: 1.1, high: 1.101, low: 1.099, close: 1.1 };
+check('forming candle with seconds timestamp', isLastCandleForming([{ ...bar, ts: openedSec }], '15m', fixedNow), true);
+check('forming candle with milliseconds timestamp', isLastCandleForming([{ ...bar, ts: fixedNow - 60_000 }], '15m', fixedNow), true);
+check('closed candle with seconds timestamp', isLastCandleForming([{ ...bar, ts: openedSec - 20 * 60 }], '15m', fixedNow), false);
+
+// 8) Live feeds sometimes return a zero/doji forming bar. It must not be read
+//    as a with-trade close and erase the two real bearish candles behind it.
+const zeroDojiRun = [
+  { open: 1.1030, high: 1.1032, low: 1.1025, close: 1.1028 },
+  { open: 1.1028, high: 1.1029, low: 1.1020, close: 1.1022 },
+  { open: 1.1022, high: 1.1023, low: 1.1015, close: 1.1017 },
+  { open: 0, high: 0, low: 0, close: 0, ts: openedSec },
+];
+check('zero forming bar is detected as forming', isLastCandleForming(zeroDojiRun, '15m', fixedNow), true);
+const zeroDojiCount = countRetraceCandles(zeroDojiRun, 'buy', 2, {
+  skipLast: false, strictMode: false, skipTrailingAligned: true,
+});
+check('zero doji does not erase the 2-candle retrace', zeroDojiCount.confirmed, true);
+check('zero doji count indices', zeroDojiCount.indices, [2, 1]);
 
 console.log(ok ? '\nPASS: post-retrace good-signal confirmation' : '\nFAIL: post-retrace good-signal confirmation');
 if (!ok) process.exit(1);

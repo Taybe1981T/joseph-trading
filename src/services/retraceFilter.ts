@@ -43,6 +43,8 @@ export interface RetraceCandle {
   high: number;
   low: number;
   close: number;
+  /** Unix timestamp from the feed. Yahoo sends SECONDS; some other feeds send
+   *  milliseconds. `isLastCandleForming` normalises both before comparing. */
   ts?: number;
   /** Optional volume from the feed. FX often sends zero, so price-action
    *  rejection is used as a fallback absorption signal there. */
@@ -147,8 +149,12 @@ export function isLastCandleForming(
   const last = candles?.[candles.length - 1];
   if (!last || !last.ts) return true;
   const duration = TF_DURATION_MS[timeframe] || TF_DURATION_MS[DEFAULT_RETRACE_TIMEFRAME];
+  // Yahoo timestamps are in SECONDS while Date.now() is in MILLISECONDS.
+  // Comparing them directly made this function always return false, so the
+  // still-forming candle was treated as closed (and broke/counted the run).
+  const lastMs = last.ts < 1e12 ? last.ts * 1000 : last.ts;
   // Small 1-minute tolerance so a just-closed bar is treated as closed.
-  return now < last.ts + duration - 60 * 1000;
+  return now < lastMs + duration - 60 * 1000;
 }
 
 /**
@@ -279,15 +285,23 @@ export function countRetraceCandles(
   if (opts?.skipTrailingAligned) {
     while (i >= 0) {
       const c = list[i];
-      const prev = i > 0 ? list[i - 1] : null;
       const dir = c.close > c.open ? 'bullish' : c.close < c.open ? 'bearish' : 'doji';
+      // A zero/doji bar (common on a live feed) is NOT a confirmation and must
+      // never be compared by close — its close can be 0 and would wrongly skip
+      // real retrace candles behind it. The main loop already skips dojis.
+      if (dir === 'doji') {
+        i--;
+        continue;
+      }
+      const prev = i > 0 ? list[i - 1] : null;
+      const hasRange = Number.isFinite(c.high) && Number.isFinite(c.low) && c.high > c.low;
       // Any candle type counts here: a with-trade CLOSE matters even if the
       // body itself is opposite (mirror of detectPostRetraceAlignment).
-      const withTradeClose = prev
+      const withTradeClose = prev && hasRange
         ? (side === 'buy' ? c.close > prev.close : c.close < prev.close)
         : false;
-      if (dir !== withTradeDir && !withTradeClose) break;
-      i--;
+      if (dir === withTradeDir || withTradeClose) i--;
+      else break;
     }
   }
   let found = 0;
