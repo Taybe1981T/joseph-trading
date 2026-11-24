@@ -27,7 +27,6 @@ import { Language, translations } from './lib/i18n';
 import { analyzeMarket } from './services/geminiService';
 import { waitIfRateLimited } from './services/rateLimitTracker';
 import { consumeSymbolAnalyses } from './services/manualQuota';
-import { resolveConflicts } from './services/portfolioRiskService';
 import ApiKeyModal from './components/ApiKeyModal';
 import SubscriptionModal from './components/SubscriptionModal';
 import PaymentModal from './components/PaymentModal';
@@ -1685,25 +1684,18 @@ const isDeveloperSession = () => {
     });
 
     if (changed) {
-      const previousMap = new Map(signalsRef.current.map(s => [s.symbol, s]));
-      const resolved = resolveConflicts(updated);
-      const resolvedSet = new Set(resolved.map(s => s.symbol));
-
-      // BUG FIX: Restore signals that were previously visible but removed by
-      // resolveCorrelationConflicts when new correlated symbols appeared
-      for (const [sym, prevSig] of previousMap) {
-        if (!resolvedSet.has(sym)) {
-          const currentSig = updated.find(u => u.symbol === sym);
-          if (currentSig) resolved.push(currentSig);
-        }
-      }
-
       // Canonical display rule: the SAME "Top 3 per category" set that
       // auto-trading uses (strong first, then confidence). De-dupe by
       // symbol+timeframe so the shared feed can never carry a signal twice
       // (the phone renders whatever is published). Capping here also keeps the
       // number of auto-opened trades equal to the number of displayed signals.
-      const published = topPerCategory(resolved, 3);
+      //
+      // IMPORTANT: no correlation/cluster filter may run before this ranking.
+      // During a radar pass cards must keep swapping live (a stronger symbol
+      // replaces a weaker one) and settle on the final best 3 for the category
+      // when its scan finishes. Deleting correlated signals here used to make
+      // good signals vanish instead of competing for the three slots.
+      const published = topPerCategory(updated, 3);
       setTopSignals(published);
       // Keep the ref in sync IMMEDIATELY (not just via the [topSignals] effect,
       // which only runs after the next render). The radar calls this
