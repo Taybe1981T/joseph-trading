@@ -2219,6 +2219,9 @@ Return ONLY valid JSON:
           finalSignal === SignalType.SELL || finalSignal === SignalType.STRONG_SELL) {
         finalSignal = SignalType.NEUTRAL;
         finalConfidence = Math.min(finalConfidence, 30);
+        // Diagnostic only: make this silent final safety visible in the
+        // [Engine] decisive-block log like every other blocking gate.
+        decisiveBlock = `Pre-Pullback Age (${prePullbackAgeVal}c ${prePullbackAgeVal < minPreAge ? '<' : '>'} ${prePullbackAgeVal < minPreAge ? minPreAge : maxPreAge})`;
       }
     }
 

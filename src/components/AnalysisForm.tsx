@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { Language, translations } from '../lib/i18n';
 import { getStatus, subscribe } from '../services/rateLimitTracker';
-import { getOpenStockExchanges } from '../lib/marketHours';
+import { isExchangeOpen, StockExchangeKey } from '../lib/marketHours';
 import { isDeveloperEmail } from '../lib/clientIds';
 import { consumeSymbolAnalyses } from '../services/manualQuota';
 import { normalizeSymbolInput, registerCustomSymbol, readCustomTvMap } from '../lib/customSymbols';
@@ -160,12 +160,23 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
     setSelectedSymbols(prev => prev.filter(s => s !== sym));
   };
 
-  const isMarketOpen = (category: string) => {
-    if (category === 'crypto') return true;
-    if (category === 'stocks') return getOpenStockExchanges().length > 0;
+  // Map a stock symbol to its trading session. The suffix rules mirror the
+  // engine's Market Hours gate (geminiService.ts) so the form can no longer
+  // start a batch that the engine immediately rejects per symbol.
+  const stockExchangeForSymbol = (symbol: string): StockExchangeKey => {
+    const s = String(symbol || '').toUpperCase();
+    if (/\.T$/.test(s)) return 'jp';
+    if (/\.(AS|PA|DE|L|SW|CO|MI|STO|HEL|OSL|WSE|MCX|COP)$/.test(s)) return 'eu';
+    return 'us';
+  };
+
+  const isSymbolMarketOpen = (category: string, symbol: string): boolean => {
+    if (category === MarketType.CRYPTO) return true;
+    if (category === MarketType.STOCKS) {
+      return isExchangeOpen(stockExchangeForSymbol(symbol));
+    }
     const day = new Date().getUTCDay();
-    if (day === 0 || day === 6) return false;
-    return true;
+    return day !== 0 && day !== 6;
   };
 
   const clearAll = () => {
@@ -179,11 +190,6 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
     if (!hasActivePlan) {
       data.timeframe = '1d';
       data.tradingStyle = TradingStyle.DAY_TRADING;
-    }
-
-    if (!isMarketOpen(data.type)) {
-      setFormErrors([lang === 'ar' ? 'عفواً.. هذه الأسواق مغلقة حالياً ولا يمكن تحليلها' : 'Sorry.. These markets are currently closed and cannot be analyzed']);
-      return;
     }
 
     console.log("[Form] Submit clicked. Symbols:", selectedSymbols, "Manual:", data.symbol);
@@ -228,6 +234,23 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
     if (allSymbolsToAnalyze.length === 0) {
       setFormErrors([t.selectAtLeastOne]);
       return;
+    }
+
+    // Market Hours parity with the engine. Stocks are filtered per symbol
+    // (US / EU / JP sessions) instead of relying on "any exchange is open";
+    // otherwise a US-only batch started during the EU session would return
+    // no_entry for every symbol and the results page would look empty.
+    const closedSymbols = allSymbolsToAnalyze.filter(sym => !isSymbolMarketOpen(data.type, sym));
+    if (closedSymbols.length === allSymbolsToAnalyze.length) {
+      const suffix = closedSymbols.length ? ` (${closedSymbols.join(', ')})` : '';
+      setFormErrors([lang === 'ar'
+        ? `عفواً.. هذه الأسواق مغلقة حالياً ولا يمكن تحليلها${suffix}`
+        : `Sorry.. These markets are currently closed and cannot be analyzed${suffix}`]);
+      return;
+    }
+    if (closedSymbols.length > 0) {
+      console.log('[Form] Skipping closed-market symbols:', closedSymbols);
+      allSymbolsToAnalyze = allSymbolsToAnalyze.filter(sym => isSymbolMarketOpen(data.type, sym));
     }
 
     // Paid-client analysis quota: 5 analyses per symbol per UTC day, shared
