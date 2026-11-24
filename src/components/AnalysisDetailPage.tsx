@@ -187,6 +187,15 @@ export default function AnalysisDetailPage({ result, onBack, lang, isClient = fa
               <span className={`px-3 py-1 rounded-lg text-xs font-black text-white ${colors.bg} shadow-lg ${colors.glow}`}>
                 {getSignalLabel(result.signal, lang)}
               </span>
+              {result.retraceAligned && (
+                <span
+                  className="px-2 py-1 rounded-lg text-[11px] font-black text-emerald-300 bg-emerald-500/15 border border-emerald-500/40 flex items-center gap-1"
+                  title={isAr ? 'اكتمل عدّاد Retrace وأغلقت شمعة مع اتجاه الصفقة' : 'Retrace count complete and a candle closed with the trade'}
+                >
+                  <CheckCircle size={13} />
+                  {isAr ? 'إشارة جيدة' : 'Good signal'}
+                </span>
+              )}
               <span className={`text-2xl font-black ${colors.text}`}>{fmt(result.confidence)}%</span>
             </div>
             )}
@@ -318,10 +327,13 @@ export default function AnalysisDetailPage({ result, onBack, lang, isClient = fa
               <div className="text-lg font-black text-white capitalize">{result.trendMaturity} {result.trendAge ? `(${result.trendAge}c)` : ''}</div>
             </div>
           )}
-          {result.microSignal && (
+          {(result.prePullbackAge !== undefined || result.microSignal) && (
             <div className="bg-white/5 rounded-xl p-5 border border-white/5">
-              <div className="text-sm text-white/40 uppercase tracking-wider mb-1">{isAr ? 'عمر ما بعد السحب' : 'Pre-Pullback Age'}</div>
-              <div className="text-lg font-black text-white capitalize">{result.microSignal} {result.microTF ? `(${result.microTF})` : ''}</div>
+              <div className="text-sm text-white/40 uppercase tracking-wider mb-1">{isAr ? 'عمر الاتجاه قبل السحب' : 'Pre-Pullback Age'}</div>
+              <div className="text-lg font-black text-white">{result.prePullbackAge !== undefined ? `${result.prePullbackAge}c` : '—'}</div>
+              {result.microSignal && (
+                <div className="text-xs text-white/40 capitalize mt-1">{result.microSignal}{result.microTF ? ` (${result.microTF})` : ''}</div>
+              )}
             </div>
           )}
           {result.adx !== undefined && (

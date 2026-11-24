@@ -20,8 +20,10 @@ import { gateProfileFor } from '../constants';
  * notes only — neither can hide a signal. This matters on 15m forex feeds,
  * which often return doji / wickless bars where absorption cannot be read.
  * Missing the required count hides the signal as neutral (final blocking gate).
- * Forex is enabled by default (3 candles, lenient body counting); all other
- * categories are disabled by default.
+ * Once the count is reached, the first subsequent candle closing WITH the trade
+ * adds a green "good signal" note (see detectPostRetraceAlignment) — it is also
+ * informational only. Forex is enabled by default (3 candles, lenient body
+ * counting); all other categories are disabled by default.
  */
 
 export type RetraceCategory = 'forex' | 'crypto' | 'stocks' | 'metals';
@@ -258,7 +260,7 @@ export function countRetraceCandles(
   candles: RetraceCandle[] | null | undefined,
   side: RetraceSide,
   required: number,
-  opts?: { skipLast?: boolean; strictMode?: boolean },
+  opts?: { skipLast?: boolean; strictMode?: boolean; skipTrailingAligned?: boolean },
 ): RetraceCountResult {
   const req = Math.max(MIN_RETRACE_CANDLES, Math.round(Number(required) || DEFAULT_RETRACE_CANDLES));
   const list = candles || [];
@@ -268,6 +270,26 @@ export function countRetraceCandles(
   if (skipLast && i >= 0) i -= 1;
 
   const wanted: 'bullish' | 'bearish' = side === 'buy' ? 'bearish' : 'bullish';
+  const withTradeDir: 'bullish' | 'bearish' = side === 'buy' ? 'bullish' : 'bearish';
+  // Optional: a completed candle that already closed WITH the trade is the
+  // "good signal" confirmation, not a reason to discard the retrace run that
+  // preceded it. Skip those trailing with-trade candles while counting so the
+  // requested number of opposite candles can still be found. Dojis are left to
+  // the main loop, which already skips them without breaking the run.
+  if (opts?.skipTrailingAligned) {
+    while (i >= 0) {
+      const c = list[i];
+      const prev = i > 0 ? list[i - 1] : null;
+      const dir = c.close > c.open ? 'bullish' : c.close < c.open ? 'bearish' : 'doji';
+      // Any candle type counts here: a with-trade CLOSE matters even if the
+      // body itself is opposite (mirror of detectPostRetraceAlignment).
+      const withTradeClose = prev
+        ? (side === 'buy' ? c.close > prev.close : c.close < prev.close)
+        : false;
+      if (dir !== withTradeDir && !withTradeClose) break;
+      i--;
+    }
+  }
   let found = 0;
   let dojiSkipped = 0;
   let neutralSkipped = 0;
@@ -474,5 +496,80 @@ export function detectLiquidityAbsorption(
       ? 'no bearish retrace candle had its liquidity absorbed (same or next candle)'
       : 'no bullish retrace candle had its liquidity absorbed (same or next candle)',
   );
+  return base;
+}
+
+export interface RetraceAlignmentResult {
+  confirmed: boolean;
+  candleIndex: number | null;
+  side: RetraceSide;
+  reasons: string[];
+}
+
+/**
+ * "Good signal" confirmation AFTER a retrace run has reached the required
+ * candle count.
+ *
+ * BUY: once N bearish candles were counted, the first candle after that run
+ *      whose close is WITH the trade (bullish body OR a close above the
+ *      previous candle's close) confirms the correction is over.
+ * SELL: mirror image — bearish body OR a close below the previous close.
+ *
+ * Any candle type is accepted: what matters is the CLOSE direction, not
+ * whether the candle body itself is bullish/bearish. A still-forming final
+ * candle can be excluded with `skipLast`.
+ *
+ * This is DIAGNOSTIC ONLY. It produces the green "good signal" note; it never
+ * blocks or promotes the signal — the required candle count is the sole gate.
+ */
+export function detectPostRetraceAlignment(
+  candles: RetraceCandle[] | null | undefined,
+  side: RetraceSide,
+  indices: readonly number[] | null | undefined,
+  skipLast = false,
+): RetraceAlignmentResult {
+  const base: RetraceAlignmentResult = {
+    confirmed: false,
+    candleIndex: null,
+    side,
+    reasons: [],
+  };
+  const list = candles || [];
+  const idxs = [...(indices || [])];
+  if (!idxs.length) {
+    base.reasons.push('no completed retrace run to confirm');
+    return base;
+  }
+
+  const isBuy = side === 'buy';
+  const lastIdx = Math.max(...idxs);
+  const end = list.length - (skipLast ? 1 : 0);
+  if (lastIdx + 1 >= end) {
+    base.reasons.push('no completed candle after the retrace run yet');
+    return base;
+  }
+
+  for (let i = lastIdx + 1; i < end; i++) {
+    const c = list[i];
+    if (!c) continue;
+    const prev = i > 0 ? list[i - 1] : null;
+    const bodyWithTrade = isBuy ? c.close > c.open : c.close < c.open;
+    const closeWithTrade = prev
+      ? (isBuy ? c.close > prev.close : c.close < prev.close)
+      : false;
+    if (bodyWithTrade || closeWithTrade) {
+      base.confirmed = true;
+      base.candleIndex = i;
+      base.reasons.push(
+        bodyWithTrade
+          ? `post-retrace candle ${i} closed with the trade (${isBuy ? 'bullish' : 'bearish'} body)`
+          : `post-retrace candle ${i} closed with the trade (close ${isBuy ? 'above' : 'below'} the prior close)`,
+      );
+      base.reasons.push('retrace complete — good signal shown (diagnostic only, never a blocker)');
+      return base;
+    }
+  }
+
+  base.reasons.push('no candle after the retrace run has closed with the trade yet');
   return base;
 }

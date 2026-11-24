@@ -205,6 +205,7 @@ export async function persistMobileResults(results: AnalysisResult[], uid: strin
         confidence: Number(r.confidence) || 0, summary: String(r.summary || ''),
         technicalScore: Number(r.technicalScore) || 0, sentimentScore: Number(r.sentimentScore) || 0,
         trendAge: Number(r.trendAge) || 0, trendMaturity: String(r.trendMaturity || 'unknown'),
+        prePullbackAge: r.prePullbackAge ?? null, retraceAligned: r.retraceAligned ?? null,
         entryPrice: Number(r.entryPrice) || 0, stopLoss: Number(r.stopLoss) || 0,
         takeProfit: Number(r.takeProfit) || 0, timestamp: serverTimestamp(), userId: uid,
       });

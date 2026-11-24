@@ -15,6 +15,7 @@ import {
   countRetraceCandles,
   currentCandleAligns,
   detectLiquidityAbsorption,
+  detectPostRetraceAlignment,
   type RetraceCandle,
 } from './retraceFilter';
 
@@ -751,7 +752,11 @@ function generateLocalAnalysis(
   const supportRatio = supportTotal > 0 ? supportAligned / supportTotal : 0;
   const primaryConf = maxPrimary > 0 ? Math.round(Math.abs(primaryScore) / 5 * maxPrimary) : 0;
   const supportConf = supportTotal > 0 ? Math.round(supportRatio * maxSupport) : 0;
-  let confidence = Math.min(100, primaryConf + supportConf + baseConf);
+  // The Pre-Pullback Age weight was previously read only by the settings UI.
+  // Give it a real effect: a healthy pre-pullback age adds half its configured
+  // weight to confidence (default 10 → +5). It never blocks a signal.
+  const preAgeConf = prePullbackAgeMet ? Math.round((settings?.primaryPrePullbackAgeWeight ?? 10) / 2) : 0;
+  let confidence = Math.min(100, primaryConf + supportConf + baseConf + preAgeConf);
 
   // ΓöÇΓöÇ Signal classification ΓöÇΓöÇ
   let rawSignal: SignalType;
@@ -835,6 +840,7 @@ function generateLocalAnalysis(
     userId: '',
     primaryMetCount,
     direction: dir,
+    prePullbackAge: prePullbackAgeVal,
   };
 }
 
@@ -1624,11 +1630,14 @@ Return ONLY valid JSON:
       if (age < minAge) finalConfidence = Math.round(finalConfidence * 0.8);
     }
 
-    // ΓöÇΓöÇ STEP 4b: Pre-Pullback Age ΓöÇΓöÇ — filter blocks STRONG only; regular signals bypass
+    // ΓöÇΓöÇ STEP 4b: Pre-Pullback Age ΓöÇΓöÇ — this step downgrades STRONG, and
+    // the FINAL SAFETY near the end of analyzeMarket blocks ALL BUY/SELL when
+    // the value is outside the range. The two checks must agree.
     const rawMinPreAge = settings?.minPrePullbackAge ?? 15;
     const maxPreAge = settings?.maxPrePullbackAge ?? 50;
     const minPreAge = Math.min(rawMinPreAge, Math.max(3, Math.floor(totalAge * 0.5)));
     const prePullbackAgeVal = metrics?.prePullbackAge ?? 0;
+    const prePullbackAgeMet = prePullbackAgeVal >= minPreAge && prePullbackAgeVal <= maxPreAge;
     const pullbackPtAI = metrics?.pullbackPoint;
     const lastSwingAI = metrics?.lastSwingPoint;
     // Calculate dates from timestamps using indices
@@ -1654,9 +1663,9 @@ Return ONLY valid JSON:
         finalConfidence = Math.min(finalConfidence, 30);
       }
       if (prePullbackAgeVal < minPreAge) {
-        detailedReasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö ${isAr ? `صغير (أقل من ${minPreAge})` : `Young (<${minPreAge})`}`, dates: preDatesInfo, status: isStrongCandidate ? 'neutral' : 'positive', impact: isStrongCandidate ? 'trend before pullback too short ΓÇö blocks STRONG' : 'trend short but regular signal bypasses' });
+        detailedReasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö ${isAr ? `صغير (أقل من ${minPreAge})` : `Young (<${minPreAge})`}`, dates: preDatesInfo, status: isStrongCandidate ? 'neutral' : 'negative', impact: 'trend before pullback too short ΓÇö blocks STRONG here and every BUY/SELL in the final safety' });
       } else {
-        detailedReasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö ${isAr ? `كهل (أكثر من ${maxPreAge})` : `Old (>${maxPreAge})`}`, dates: preDatesInfo, status: isStrongCandidate ? 'negative' : 'positive', impact: isStrongCandidate ? 'trend exhausted ΓÇö blocks STRONG' : 'trend exhausted but regular signal bypasses' });
+        detailedReasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö ${isAr ? `كهل (أكثر من ${maxPreAge})` : `Old (>${maxPreAge})`}`, dates: preDatesInfo, status: 'negative', impact: 'trend exhausted ΓÇö blocks STRONG here and every BUY/SELL in the final safety' });
       }
     } else if (prePullbackAgeVal >= minPreAge && prePullbackAgeVal <= maxPreAge) {
       detailedReasons.push({ check: 'Pre-Pullback Age', value: `${prePullbackAgeVal}c ΓÇö ${isAr ? `شاب (${minPreAge}-${maxPreAge})` : `Healthy (${minPreAge}-${maxPreAge})`}`, dates: preDatesInfo, status: 'positive', impact: 'trend healthy ΓÇö all signals allowed' });
@@ -1984,6 +1993,13 @@ Return ONLY valid JSON:
     }
     finalConfidence = Math.min(100, finalConfidence + volumeBoost);
 
+    // Give the previously-inactive Pre-Pullback Age weight a real effect in the
+    // AI path too: a healthy pre-pullback adds half of its configured weight
+    // (default 10 → +5). Out-of-range values are capped by the final safety.
+    if (prePullbackAgeMet) {
+      finalConfidence = Math.min(100, finalConfidence + Math.round((settings?.primaryPrePullbackAgeWeight ?? 10) / 2));
+    }
+
     if (finalSignal === ('no_entry' as any)) {
       // Sideways enforcement already blocked — do NOT override
       decisiveBlock = 'Sideways enforcement (no_entry)';
@@ -2023,7 +2039,6 @@ Return ONLY valid JSON:
       const buyThreshold = settings?.buyThreshold ?? 40;
       const minStrongSupport = (settings?.minStrongSupport ?? 50) / 100;
       const CONF_BUFFER = 5;
-      const prePullbackAgeMet = prePullbackAgeVal >= minPreAge && prePullbackAgeVal <= maxPreAge;
       // ΓöÉ STRONG: all 5 gates (BB + Supply/Demand + Trend Age + Pre-Pullback + News) + supporting ratio + confidence
       const allGatesMet = bbMet && !sdConflict && ageMet && prePullbackAgeMet && newsMet;
       const qualifiesForStrong = allGatesMet && supportRatio >= minStrongSupport && finalConfidence >= (strongThreshold - CONF_BUFFER);
@@ -2279,12 +2294,19 @@ Return ONLY valid JSON:
     // Doji candles are never counted (and do not break the run).
     var retraceFound = 0;
     var retraceConfirmed = false;
+    var retraceAligned = false;
     const isTradeSignalForRetrace = finalSignal === SignalType.BUY || finalSignal === SignalType.STRONG_BUY ||
                                     finalSignal === SignalType.SELL || finalSignal === SignalType.STRONG_SELL;
     if (retraceCfg.enabled && isTradeSignalForRetrace) {
       const retraceSide = (finalSignal === SignalType.BUY || finalSignal === SignalType.STRONG_BUY) ? 'buy' : 'sell';
       const skipForming = isLastCandleForming(retraceCandles, retraceCfg.timeframe);
-      const count = countRetraceCandles(retraceCandles, retraceSide, retraceCfg.candles, { skipLast: skipForming, strictMode: retraceCfg.strictMode });
+      const count = countRetraceCandles(retraceCandles, retraceSide, retraceCfg.candles, {
+        skipLast: skipForming,
+        strictMode: retraceCfg.strictMode,
+        // The candle that confirms the correction closes WITH the trade; it
+        // must not erase the retrace run that came before it.
+        skipTrailingAligned: true,
+      });
       retraceFound = count.found;
       retraceConfirmed = count.confirmed;
       const tfLabel = retraceCfg.timeframe;
@@ -2307,12 +2329,38 @@ Return ONLY valid JSON:
         : absorption.detected
           ? `liquidity absorbed: ${absorption.reasons.join('; ')}`
           : `liquidity absorption not visible: ${absorption.reasons.join('; ')}`;
+      // GOOD-SIGNAL NOTE (all categories, forex ON by default): once the count
+      // is complete, the first later candle that CLOSES with the trade adds a
+      // visible green confirmation. Any candle body is accepted — close
+      // direction is what matters. This stays diagnostic; it never blocks.
+      const alignment = retraceConfirmed
+        ? detectPostRetraceAlignment(retraceCandles, retraceSide, count.indices, skipForming)
+        : null;
+      retraceAligned = alignment?.confirmed ?? false;
       if (retraceConfirmed) {
         detailedReasons.push({
           check: 'Retrace Filter',
           value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji: ${count.dojiSkipped}, neutral: ${count.neutralSkipped}) | ${absorbNote}`,
           status: 'positive',
           impact: `Retrace confirmed on ${tfLabel} — ${candleNote}; absorption is informational only`,
+        });
+        detailedReasons.push({
+          check: 'Retrace Confirmation',
+          value: alignment?.confirmed
+            ? (isAr
+              ? `شمعة بعد اكتمال العدّاد أغلقت مع الصفقة (${tfLabel})`
+              : `with-trade close after the count (${tfLabel}, candle #${alignment.candleIndex})`)
+            : (isAr
+              ? `في انتظار إغلاق مع اتجاه الصفقة بعد العدّاد (${tfLabel})`
+              : `awaiting a with-trade close after the count (${tfLabel})`),
+          status: alignment?.confirmed ? 'positive' : 'neutral',
+          impact: alignment?.confirmed
+            ? (isAr
+              ? 'إشارة جيدة: اكتمل العدّاد وأغلقت شمعة مع اتجاه الصفقة — تُعرض الإشارة مهما كان نوع الشمعة (ملاحظة لا تمنع)'
+              : 'good signal: count complete and a candle closed with the trade — signal shown regardless of candle type (note only, never a blocker)')
+            : (isAr
+              ? 'اكتمل العدّاد؛ لا يوجد إغلاق مع اتجاه الصفقة بعدُ (ملاحظة فقط لا تمنع الإشارة)'
+              : 'count complete; no with-trade close yet (note only, never a blocker)'),
         });
         // No promotion: STRONG/BUY is already decided by confidence percentage.
       } else {
@@ -2365,6 +2413,7 @@ Return ONLY valid JSON:
       sentimentScore: contextFearGreed?.value ?? 50,
       trendMaturity: totalAge < infantAgeThreshold ? 'infancy' : (totalAge < matureAgeThreshold ? 'youth' : (totalAge <= oldAgeThreshold ? 'mature' : 'aging')),
       trendAge: totalAge,
+      prePullbackAge: prePullbackAgeVal,
       microTF,
       microSignal: resultData.microSignal || 'unknown',
       microTrend: resultData.microTrend || "",
@@ -2399,6 +2448,7 @@ Return ONLY valid JSON:
       retraceCandlesRequired: retraceCfg.enabled ? retraceCfg.candles : undefined,
       retraceCandlesFound: retraceCfg.enabled ? retraceFound : undefined,
       retraceConfirmed: retraceCfg.enabled ? retraceConfirmed : undefined,
+      retraceAligned: retraceCfg.enabled ? retraceAligned : undefined,
     };
 
     // Cache the result

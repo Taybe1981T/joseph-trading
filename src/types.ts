@@ -35,6 +35,9 @@ export interface AnalysisResult {
   historicalMatch?: string;
   trendMaturity?: 'infancy' | 'youth' | 'mature' | 'aging' | 'unknown';
   trendAge?: number; // Number of candles
+  /** Candles that moved WITH the trend BEFORE the last pullback (real number,
+   *  as computed by calculateTechnicalMetrics — not the micro-signal label). */
+  prePullbackAge?: number;
   microTF?: string;
   microSignal?: 'pullback' | 'aligned' | 'unknown';
   microTrend?: string;
@@ -64,6 +67,10 @@ export interface AnalysisResult {
   retraceCandlesRequired?: number;
   retraceCandlesFound?: number;
   retraceConfirmed?: boolean;
+  /** True when the first candle(s) after a completed retrace run closed WITH
+   *  the trade direction — shown as a green "good signal" note. Diagnostic
+   *  only: it never blocks a signal. */
+  retraceAligned?: boolean;
 }
 
 export interface UserPreference {

@@ -302,6 +302,8 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
               sentimentScore: Number(r.sentimentScore) || 0,
               trendAge: Number(r.trendAge) || 0,
               trendMaturity: String(r.trendMaturity || 'unknown'),
+              prePullbackAge: r.prePullbackAge ?? null,
+              retraceAligned: r.retraceAligned ?? null,
               microTF: String(r.microTF || ''),
               microSignal: String(r.microSignal || 'unknown'),
               microTrend: String(r.microTrend || ''),
