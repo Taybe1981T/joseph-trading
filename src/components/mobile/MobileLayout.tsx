@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Save } from 'lucide-react';
 import { MobileBottomNav, MobileTab } from './MobileBottomNav';
 import { MobileHeader } from './MobileHeader';
 import { MobileHome } from './MobileHome';
@@ -85,6 +85,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // whether "back" means "leave this settings sub-page/panel" first.
   const [settingsSystem, setSettingsSystem] = useState<MobileSystem | null>(null);
   const [radarSettingsOpen, setRadarSettingsOpen] = useState(false);
+  // Bumped by the header Save icon; editable screens flush drafts on change.
+  const [saveTick, setSaveTick] = useState(0);
   // Back-navigation history: every section jump pushes the previous tab, Back pops it (desktop parity: always a way back)
   const histRef = useRef<MobileTab[]>([]);
   const goTab = useCallback((t: MobileTab) => {
@@ -1399,6 +1401,35 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     goBack();
   };
 
+  // ONE save action for editable screens: tell the open settings panel to
+  // flush anything still focused, then confirm visibly. Values themselves are
+  // already persisted on change; this makes the explicit icon meaningful.
+  const showSaved = (text?: string) => {
+    setAlert(text || (lang === 'ar' ? 'تم حفظ الإعدادات' : 'Settings saved'));
+    setTimeout(() => setAlert(null), 2500);
+  };
+  const handleMobileSave = () => {
+    setSaveTick((t) => t + 1);
+    showSaved();
+  };
+  const saveLoginState = () => {
+    const em = String(user?.email || email || '').toLowerCase().trim();
+    if (!em) {
+      setAlert(lang === 'ar' ? 'سجّل الدخول أولاً قبل الحفظ' : 'Sign in first to save');
+      setTimeout(() => setAlert(null), 3000);
+      return;
+    }
+    try {
+      const raw = localStorage.getItem('finalyze_saved_accounts');
+      const arr: unknown = raw ? JSON.parse(raw) : [];
+      const list = Array.isArray(arr) ? arr.map((x) => String(x).toLowerCase().trim()).filter(Boolean) : [];
+      const next = [em, ...list.filter((x) => x !== em)].slice(0, 8);
+      localStorage.setItem('finalyze_saved_accounts', JSON.stringify(next));
+      setSavedAccounts(next);
+    } catch {}
+    showSaved(lang === 'ar' ? 'تم حفظ بيانات الدخول' : 'Login settings saved');
+  };
+
   return (
     <div className="mobile-only" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', paddingBottom: 72 }}>
       <MobileHeader title={TITLES[tab]} lang={lang}
@@ -1418,7 +1449,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         autoAnalysisRunning={autoAnalysisOn}
         radarCategory={radarProgress?.category ?? null}
         onAutoAnalysisToggle={canUseAnalysis ? toggleAutoAnalysis : undefined}
-        onBack={tab !== 'home' && tab !== 'store' ? handleMobileBack : undefined} />
+        onBack={tab !== 'home' && tab !== 'store' ? handleMobileBack : undefined}
+        onSave={(tab === 'settings' || tab === 'profile' || (tab === 'analysis' && radarSettingsOpen)) ? handleMobileSave : undefined} />
       {/* The single back icon is in MobileHeader (and in full-screen overlays).
           No second text/icon button is rendered here any more. */}
       {/* Paid plan strip: the client's plan is visible on every section of the
@@ -1460,7 +1492,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} canTrade={isDev || isPlanClient} onDeleteHistory={deleteHistoryTradeMobile} onClearHistory={clearHistoryMobile} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} canTrade={isDev || isPlanClient} canOpenManual={isDev || isPlanClient} isDeveloper={isDev} devEmail={user?.email || email || ''} />}
         {/* Desktop parity: a paid-plan client in paid mode gets Auto + Manual too. */}
-        {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} settingsOpen={radarSettingsOpen} onSettingsOpenChange={setRadarSettingsOpen} />}
+        {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} settingsOpen={radarSettingsOpen} onSettingsOpenChange={setRadarSettingsOpen} saveTick={saveTick} />}
         {tab === 'manual' && canUseAnalysis && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goBack} hideBack autoEmail={email} isDeveloper={isDev} onGoToStore={() => goTab('store')} onResumeSession={resumeStorePayment} />}
         {tab === 'store' && !storePlan && (
@@ -1516,8 +1548,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
             onConfirm={completeStorePayment}
           />
         )}
-        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} activeSystem={settingsSystem} onActiveSystemChange={setSettingsSystem} />}
-        {tab === 'profile' && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} isLoggedIn={!!(user?.email || email)} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} isFollowing={following} onFollowToggle={toggleFollowing} />}
+        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} activeSystem={settingsSystem} onActiveSystemChange={setSettingsSystem} saveTick={saveTick} />}
+        {tab === 'profile' && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} isLoggedIn={!!(user?.email || email)} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} isFollowing={following} onFollowToggle={toggleFollowing} saveTick={saveTick} />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} onCountChange={setClientCount} />}
         {children}
       </div>
@@ -1549,6 +1581,15 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
                 style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', color: '#fff', cursor: 'pointer', padding: 0 }}
               >
                 <ArrowLeft size={18} />
+              </button>
+              <button
+                type="button"
+                onClick={saveLoginState}
+                aria-label={lang === 'ar' ? 'حفظ المتغيرات' : 'Save settings'}
+                title={lang === 'ar' ? 'حفظ المتغيرات' : 'Save settings'}
+                style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', color: '#fff', cursor: 'pointer', padding: 0 }}
+              >
+                <Save size={18} />
               </button>
               <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{lang === 'ar' ? 'تسجيل الدخول' : 'Login'}</h3>
             </div>

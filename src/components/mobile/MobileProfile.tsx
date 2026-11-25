@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, Shield, Camera, LogOut, LogIn, Check, X } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 
@@ -13,11 +13,13 @@ interface MobileProfileProps {
   onLogoChange?: (url: string) => void;
   isFollowing?: boolean;
   onFollowToggle?: () => void;
+  /** Incremented by the header save icon to re-persist profile assets. */
+  saveTick?: number;
 }
 
 export function MobileProfile({
   language, userEmail, avatarUrl, isLoggedIn = false, onLoginClick, onLogoutClick,
-  onProfileImageChange, onLogoChange, isFollowing = false, onFollowToggle,
+  onProfileImageChange, onLogoChange, isFollowing = false, onFollowToggle, saveTick = 0,
 }: MobileProfileProps) {
   const isAr = language === 'ar';
   const [customAvatar, setCustomAvatar] = useState(() => {
@@ -32,6 +34,19 @@ export function MobileProfile({
       return email ? (localStorage.getItem('finalyze_custom_logo_' + email) || null) : null;
     } catch { return null; }
   });
+
+  // Avatar/logo already save on upload; the header save icon simply re-writes
+  // the current values for the signed-in account so nothing stays pending.
+  useEffect(() => {
+    if (saveTick <= 0) return;
+    const em = String(userEmail || '').toLowerCase().trim();
+    if (!em) return;
+    try {
+      if (customAvatar) localStorage.setItem('finalyze_custom_avatar_' + em, customAvatar);
+      if (customLogo) localStorage.setItem('finalyze_custom_logo_' + em, customLogo);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveTick]);
 
   const handleAvatarChange = (e: any) => {
     if (!isLoggedIn) return;

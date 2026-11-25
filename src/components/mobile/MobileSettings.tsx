@@ -36,6 +36,8 @@ interface MobileSettingsProps {
   /** Lifted to MobileLayout so the ONE header back icon can leave a sub-page. */
   activeSystem?: MobileSystem | null;
   onActiveSystemChange?: (id: MobileSystem | null) => void;
+  /** Incremented by the header save icon; flushes any still-focused drafts. */
+  saveTick?: number;
 }
 
 // Mobile parity with desktop: Settings shows ONLY the system names (one per
@@ -61,6 +63,7 @@ export function MobileSettings({
   avatarUrl,
   activeSystem = null,
   onActiveSystemChange,
+  saveTick = 0,
 }: MobileSettingsProps) {
   const isAr = language === 'ar';
   const mode = useMobileMode();
@@ -123,6 +126,40 @@ export function MobileSettings({
     { suffix: 'Stocks', ar: 'الأسهم', en: 'Stocks' },
     { suffix: 'Metals', ar: 'المعادن', en: 'Metals' },
   ];
+
+  // The header save icon flushes text fields that are still focused. Normal
+  // edits already persist on change/blur; this only makes the explicit Save
+  // action deterministic and shows the user that nothing is left pending.
+  useEffect(() => {
+    if (saveTick <= 0) return;
+    const next: any = { ...strategy };
+    let dirty = false;
+    const clamp = (raw: string | undefined, min: number, max: number) => {
+      const n = parseInt(raw ?? '', 10);
+      return Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : null;
+    };
+    for (const row of retraceRows) {
+      const count = clamp(retraceDrafts[row.suffix], 1, 10);
+      if (count !== null) { next[`retraceCandles${row.suffix}`] = count; dirty = true; }
+      for (const kind of ['min', 'max'] as const) {
+        const value = clamp(thresholdDrafts[`${kind}${row.suffix}`], 0, 100);
+        if (value !== null) {
+          next[`${kind === 'min' ? 'goldenConfMin' : 'goldenConfMax'}${row.suffix}`] = value;
+          dirty = true;
+        }
+      }
+    }
+    if (dirty) {
+      setStrategy(next);
+      try { localStorage.setItem('strategy_settings', JSON.stringify(next)); } catch {}
+      try { window.dispatchEvent(new CustomEvent(DEV_SETTINGS_EVENT)); } catch {}
+    }
+    setRetraceDrafts({});
+    setThresholdDrafts({});
+    // Drafts are read at the moment the icon is tapped; re-running on every
+    // keystroke would erase what the user is still typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveTick]);
 
   const systems: Array<{ id: MobileSystem; ar: string; en: string; devOnly?: boolean; color: string }> = [
     { id: 'autoTrade', ar: 'التداول التلقائي', en: 'Auto Trade', color: '#3b82f6' },

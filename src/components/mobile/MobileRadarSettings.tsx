@@ -30,7 +30,7 @@ const STYLES = [
   { id: 'swing_trading', en: 'Swing', ar: 'سوينج' },
 ];
 
-export function MobileRadarSettings({ lang }: { lang: Language }) {
+export function MobileRadarSettings({ lang, saveTick = 0 }: { lang: Language; saveTick?: number }) {
   const isAr = lang === 'ar';
   // Sound / alert options are developer-only (desktop parity: RadarSettingsPage
   // hides the whole audio section for clients).
@@ -66,6 +66,15 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
     const next = { ...s, ...patch }; setS(next); writeAuto(next);
     try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
   };
+  // Every change already writes auto_settings. The header save icon repeats
+  // that write explicitly, so the user gets a clear "saved" confirmation and
+  // the manual sheet re-reads the same frame even if it was open in a tab.
+  useEffect(() => {
+    if (saveTick <= 0) return;
+    writeAuto(s);
+    try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveTick]);
   // ON/OFF starts/stops the engine directly (no separate arming flag), so the
   // settings card, the header button and the progress bar stay in lockstep.
   const toggleRadar = () => {

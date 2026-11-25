@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Globe, Sun, Moon, Bell, User, Activity } from 'lucide-react';
+import { ArrowLeft, Save, Globe, Sun, Moon, Bell, User, Activity } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { getOpenStockExchanges } from '../../lib/marketHours';
 
@@ -20,6 +20,8 @@ interface MobileHeaderProps {
   onAutoAnalysisToggle?: () => void;
   /** ONE back icon for every secondary mobile screen. Only rendered when set. */
   onBack?: () => void;
+  /** ONE save icon for editable mobile settings. Only rendered when set. */
+  onSave?: () => void;
 }
 
 function isCatOpen(key: string, now: Date): boolean {
@@ -55,7 +57,7 @@ const barBtn: React.CSSProperties = {
 
 export function MobileHeader({
   title, lang, onLangChange, isDark, toggleTheme, clientCount, onClientsClick,
-  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning, radarCategory, onAutoAnalysisToggle, onBack,
+  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning, radarCategory, onAutoAnalysisToggle, onBack, onSave,
 }: MobileHeaderProps) {
   const [logo, setLogo] = useState<string | null>(null);
   const [showLang, setShowLang] = useState(false);
@@ -217,8 +219,8 @@ export function MobileHeader({
           </div>
 
           {/* Top icons — all solid yellow; auto analysis is the middle & largest.
-              The back icon is rendered ONLY for secondary screens, so a page
-              never shows two back controls. */}
+              Back/save icons are rendered ONLY for the screens that need them,
+              so a page never shows either control twice. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
             {onBack && (
               <button
@@ -229,6 +231,17 @@ export function MobileHeader({
                 title={isAr ? 'رجوع' : 'Back'}
               >
                 <ArrowLeft size={15} style={{ color: '#111827' }} />
+              </button>
+            )}
+            {onSave && (
+              <button
+                className="mt5-icon-btn"
+                style={barBtn}
+                onClick={onSave}
+                aria-label={isAr ? 'حفظ المتغيرات' : 'Save settings'}
+                title={isAr ? 'حفظ المتغيرات' : 'Save settings'}
+              >
+                <Save size={15} style={{ color: '#111827' }} />
               </button>
             )}
             <div style={{ position: 'relative' }}>
