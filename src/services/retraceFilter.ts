@@ -12,17 +12,21 @@ import { MarketType, StrategySettings } from '../types';
  *
  * A doji candle is NEVER counted as a retrace candle (and does not break the
  * run): bearish → doji → bearish → bearish = 3 retrace candles.
- * A candle moving WITH the trade direction ends the run.
+ * A candle moving WITH the trade direction ends the run, EXCEPT for the
+ * optional post-retrace confirmation allowance below.
  *
  * When the configured category is enabled, the GATE is the candle count alone.
  * The current candle direction and the liquidity-absorption read are diagnostic
  * notes only — neither can hide a signal. This matters on 15m forex feeds,
  * which often return doji / wickless bars where absorption cannot be read.
  * Missing the required count hides the signal as neutral (final blocking gate).
- * Once the count is reached, the first subsequent candle closing WITH the trade
- * adds a green "good signal" note (see detectPostRetraceAlignment) — it is also
- * informational only. Every category now starts with the same lenient body
- * counting as forex, but each category keeps its own ON/OFF switch so it can be
+ * Once the count is reached, up to MAX_POST_RETRACE_ALIGNED_CANDLES subsequent
+ * candles closing WITH the trade are treated as a completed confirmation and do
+ * not erase the run. Any more of them mean the move already ran away and the
+ * signal is neutral. Dojis never consume that allowance. This confirmation is
+ * informational only (see detectPostRetraceAlignment). Every category now starts
+ * with the same lenient body counting as forex, but each category keeps its own
+ * ON/OFF switch so it can be
  * disabled manually and fall back to its previous behaviour.
  */
 
@@ -55,6 +59,14 @@ export const DEFAULT_RETRACE_CANDLES = 3;
 export const DEFAULT_RETRACE_TIMEFRAME = '1d';
 export const MIN_RETRACE_CANDLES = 1;
 export const MAX_RETRACE_CANDLES = 10;
+
+/**
+ * After the required retrace run is complete, this many consecutive CLOSED
+ * candles may close WITH the trade (bullish for BUY, bearish for SELL) before
+ * the run is considered stale. Dojis are neutral and do not consume the
+ * allowance. 0 = no confirmation tolerated; 2 = the current default.
+ */
+export const MAX_POST_RETRACE_ALIGNED_CANDLES = 2;
 
 /** Timeframes offered in the settings UI (any other stored value falls back to 1d). */
 export const RETRACE_TIMEFRAMES = ['15m', '30m', '1h', '4h', '1d', '1w', '1M'] as const;
@@ -278,20 +290,25 @@ export function countRetraceCandles(
   const withTradeDir: 'bullish' | 'bearish' = side === 'buy' ? 'bullish' : 'bearish';
   // Optional: a completed candle that already closed WITH the trade is the
   // "good signal" confirmation, not a reason to discard the retrace run that
-  // preceded it. Skip those trailing with-trade candles while counting so the
-  // requested number of opposite candles can still be found. Dojis are left to
-  // the main loop, which already skips them without breaking the run.
+  // preceded it. Skip at most MAX_POST_RETRACE_ALIGNED_CANDLES trailing
+  // with-trade candles while counting so the requested number of opposite
+  // candles can still be found. A third such candle means the move already ran
+  // away → the signal stays neutral instead of using an old downtrend. Dojis
+  // are neutral and never consume the allowance (the main loop skips them too).
   if (opts?.skipTrailingAligned) {
+    let alignedSkipped = 0;
     while (i >= 0) {
       const c = list[i];
       const dir = c.close > c.open ? 'bullish' : c.close < c.open ? 'bearish' : 'doji';
       // A zero/doji bar (common on a live feed) is NOT a confirmation and must
       // never be compared by close — its close can be 0 and would wrongly skip
-      // real retrace candles behind it. The main loop already skips dojis.
+      // real retrace candles behind it. The main loop already skips dojis, and
+      // a doji must not consume the two-candle confirmation allowance.
       if (dir === 'doji') {
         i--;
         continue;
       }
+      if (alignedSkipped >= MAX_POST_RETRACE_ALIGNED_CANDLES) break;
       const prev = i > 0 ? list[i - 1] : null;
       const hasRange = Number.isFinite(c.high) && Number.isFinite(c.low) && c.high > c.low;
       // Any candle type counts here: a with-trade CLOSE matters even if the
@@ -299,8 +316,10 @@ export function countRetraceCandles(
       const withTradeClose = prev && hasRange
         ? (side === 'buy' ? c.close > prev.close : c.close < prev.close)
         : false;
-      if (dir === withTradeDir || withTradeClose) i--;
-      else break;
+      if (dir === withTradeDir || withTradeClose) {
+        alignedSkipped++;
+        i--;
+      } else break;
     }
   }
   let found = 0;
