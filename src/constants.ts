@@ -26,10 +26,10 @@ export interface CategoryGateProfile {
 
 export const CATEGORY_GATE_PROFILES: Record<string, CategoryGateProfile> = {
   forex:   { sidewaysVotes: 3, goldenOverride: [60, 88], ignoreZeroVolume: true,  usesPips: true,  skipFormingVolumeCandle: false, retraceDefault: true,  retraceStrict: false },
-  crypto:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: true,  retraceDefault: false, retraceStrict: true },
-  stocks:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: false, retraceDefault: false, retraceStrict: true },
-  metals:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: false, retraceDefault: false, retraceStrict: true },
-  default: { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: false, retraceDefault: false, retraceStrict: true },
+  crypto:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: true,  retraceDefault: true,  retraceStrict: false },
+  stocks:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: false, retraceDefault: true,  retraceStrict: false },
+  metals:  { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: false, retraceDefault: true,  retraceStrict: false },
+  default: { sidewaysVotes: 2, ignoreZeroVolume: false, usesPips: false, skipFormingVolumeCandle: false, retraceDefault: true,  retraceStrict: false },
 };
 
 export function gateProfileFor(type: MarketType | string): CategoryGateProfile {
@@ -141,20 +141,23 @@ export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   stopAtrMultiplier: 3,    // wider, breathable stop (crypto always 3×)
   minPullbackAtr: 0.5,     // entry zone depth in ATR
   pullbackRsiConfirm: true, // deepen the zone to 1 ATR when RSI is stretched
-  // ── Retrace (pullback) final-confirmation filter — forex ON, others OFF ──
-  retraceFilterEnabledForex: CATEGORY_GATE_PROFILES.forex.retraceDefault,  // 3-candle retrace ON by default for forex
+  // ── Retrace (pullback) final-confirmation filter ──
+  // All categories now start with the SAME lenient forex-style counting rule.
+  // Each category keeps its own ON/OFF switch, count and timeframe, so any one
+  // of them can be disabled manually without touching the others.
+  retraceFilterEnabledForex: CATEGORY_GATE_PROFILES.forex.retraceDefault,
   retraceFilterEnabledCrypto: CATEGORY_GATE_PROFILES.crypto.retraceDefault,
   retraceFilterEnabledStocks: CATEGORY_GATE_PROFILES.stocks.retraceDefault,
   retraceFilterEnabledMetals: CATEGORY_GATE_PROFILES.metals.retraceDefault,
   retraceCandlesForex: 3,
-  retraceCandlesCrypto: 3,
-  retraceCandlesStocks: 3,
-  retraceCandlesMetals: 3,
+  retraceCandlesCrypto: 1,  // matches the forex setup that produced good signals
+  retraceCandlesStocks: 1,
+  retraceCandlesMetals: 1,
   retraceTimeframeForex: '1d',
-  retraceTimeframeCrypto: '1d',
-  retraceTimeframeStocks: '1d',
-  retraceTimeframeMetals: '1d',
-  retraceStrictModeForex: CATEGORY_GATE_PROFILES.forex.retraceStrict, // FX counts normal bodies
+  retraceTimeframeCrypto: '15m',
+  retraceTimeframeStocks: '15m',
+  retraceTimeframeMetals: '15m',
+  retraceStrictModeForex: CATEGORY_GATE_PROFILES.forex.retraceStrict,
   retraceStrictModeCrypto: CATEGORY_GATE_PROFILES.crypto.retraceStrict,
   retraceStrictModeStocks: CATEGORY_GATE_PROFILES.stocks.retraceStrict,
   retraceStrictModeMetals: CATEGORY_GATE_PROFILES.metals.retraceStrict,

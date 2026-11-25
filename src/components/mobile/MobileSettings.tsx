@@ -6,6 +6,7 @@ import TradingValuesPanel from '../TradingValuesPanel';
 import { StrategySettings } from '../../types';
 import { DEFAULT_STRATEGY_SETTINGS, mergeStrategySettings, resolveGoldenWindow } from '../../constants';
 import { RETRACE_TIMEFRAMES } from '../../services/retraceFilter';
+import { applyRetraceAllCategoriesMigration } from '../../lib/retraceMigration';
 import { DEV_SETTINGS_EVENT } from '../../services/devSettingsSync';
 
 // Western digits only in numeric fields (Arabic-Indic digits → ASCII).
@@ -65,9 +66,17 @@ export function MobileSettings({
   const [strategy, setStrategy] = useState<StrategySettings>(() => {
     try {
       const raw = localStorage.getItem('strategy_settings');
-      if (raw) return mergeStrategySettings(JSON.parse(raw));
+      if (raw) {
+        const merged: any = mergeStrategySettings(JSON.parse(raw));
+        if (applyRetraceAllCategoriesMigration(merged)) {
+          try { localStorage.setItem('strategy_settings', JSON.stringify(merged)); } catch {}
+        }
+        return merged;
+      }
     } catch {}
-    return DEFAULT_STRATEGY_SETTINGS;
+    const fresh: any = { ...DEFAULT_STRATEGY_SETTINGS };
+    applyRetraceAllCategoriesMigration(fresh);
+    return fresh;
   });
   const updateStrategy = (key: keyof StrategySettings, value: any) => {
     setStrategy((prev) => {
@@ -82,7 +91,13 @@ export function MobileSettings({
     const sync = () => {
       try {
         const raw = localStorage.getItem('strategy_settings');
-        if (raw) setStrategy(mergeStrategySettings(JSON.parse(raw)));
+        if (raw) {
+          const merged: any = mergeStrategySettings(JSON.parse(raw));
+          if (applyRetraceAllCategoriesMigration(merged)) {
+            try { localStorage.setItem('strategy_settings', JSON.stringify(merged)); } catch {}
+          }
+          setStrategy(merged);
+        }
       } catch {}
     };
     window.addEventListener(DEV_SETTINGS_EVENT, sync);
@@ -359,8 +374,8 @@ export function MobileSettings({
                       {row.suffix === 'Forex' ? (
                         <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(16,185,129,0.25)', background: 'rgba(16,185,129,0.06)', color: '#10b981', fontSize: 11, lineHeight: 1.7 }}>
                           {isAr
-                            ? 'الوضع المخفّف مطبَّق تلقائياً للفوركس: تُحسب كل شمعة عاكسة بجسم أكبر من 10% من مداها، وقاعدة الثلاث شموع باقية.'
-                            : 'Lenient mode applied automatically to forex: every opposite candle with a body larger than 10% of its range counts, and the 3-candle rule still applies.'}
+                            ? 'الوضع المخفّف مطبَّق تلقائياً لكل الفئات مثل الفوركس: تُحسب كل شمعة عاكسة بجسم أكبر من 10% من مداها، والدوجي فقط يُتجاهل.'
+                            : 'Lenient mode now applies to every category like forex: every opposite candle with a body larger than 10% of its range counts; only doji is skipped.'}
                         </div>
                       ) : (() => {
                         const strictKey = `retraceStrictMode${row.suffix}` as keyof StrategySettings;
@@ -380,7 +395,7 @@ export function MobileSettings({
                             <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                               <span style={{ fontSize: 14, fontWeight: 900 }}>{isAr ? 'وضع صارم (Strict)' : 'Strict mode'}</span>
                               <span style={{ fontSize: 11, opacity: 0.75 }}>
-                                {isAr ? 'تجاهل Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star' : 'Skip Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star'}
+                                {isAr ? 'اختياري — مطفأ افتراضياً مثل الفوركس: تجاهل Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star' : 'Optional — OFF by default like forex: skip Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star'}
                               </span>
                             </span>
                             <span style={{ width: 44, height: 24, borderRadius: 99, background: strict ? '#10b981' : '#3a3a3a', display: 'flex', alignItems: 'center', padding: 2, flexShrink: 0 }}>

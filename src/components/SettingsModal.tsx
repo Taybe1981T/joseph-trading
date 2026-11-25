@@ -666,8 +666,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                 {row.suffix === 'Forex' ? (
                   <div className="w-full p-3 rounded-xl border-2 border-emerald-400/20 bg-emerald-400/5 text-xs md:text-sm text-emerald-300/80 leading-relaxed">
                     {isAr
-                      ? 'الوضع المخفّف مطبَّق تلقائياً للفوركس: تُحسب كل شمعة عاكسة بجسم أكبر من 10% من مداها، وقاعدة الثلاث شموع باقية.'
-                      : 'Lenient mode applied automatically to forex: every opposite candle with a body larger than 10% of its range counts, and the 3-candle rule still applies.'}
+                      ? 'الوضع المخفّف مطبَّق تلقائياً لكل الفئات مثل الفوركس: تُحسب كل شمعة عاكسة بجسم أكبر من 10% من مداها، والدوجي فقط يُتجاهل.'
+                      : 'Lenient mode now applies to every category like forex: every opposite candle with a body larger than 10% of its range counts; only doji is skipped.'}
                   </div>
                 ) : (() => {
                   const strictKey = `retraceStrictMode${row.suffix}` as keyof StrategySettings;
@@ -688,8 +688,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                         </div>
                         <div className="text-xs opacity-70 mt-1">
                           {isAr
-                            ? 'تجاهل Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star (موصى به)'
-                            : 'Skip Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star (recommended)'}
+                            ? 'اختياري — مطفأ افتراضياً مثل الفوركس: تجاهل Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star'
+                            : 'Optional — OFF by default like forex: skip Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star'}
                         </div>
                       </div>
                       <div className={`w-12 h-7 rounded-full transition-colors flex items-center px-1 shrink-0 ${

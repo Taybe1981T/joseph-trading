@@ -2,6 +2,7 @@ import { analyzeMarketBatch } from './geminiService';
 import { MarketType, TradingStyle, StrategySettings, AutoAnalysisSettings, AnalysisResult } from '../types';
 import { DEFAULT_STRATEGY_SETTINGS, SYMBOL_CATEGORIES, SYMBOL_GROUPS, ALL_SYMBOLS_DB, TIMEFRAMES, TRADING_STYLES, CRYPTO_SCAN_LIMIT, mergeStrategySettings } from '../constants';
 import { getOpenStockExchanges, exchangeLabel } from '../lib/marketHours';
+import { applyRetraceAllCategoriesMigration } from '../lib/retraceMigration';
 import { topPerCategory } from '../lib/signalFeed';
 import { waitIfRateLimited } from './rateLimitTracker';
 import { collection, addDoc, serverTimestamp, doc, setDoc } from 'firebase/firestore';
@@ -173,9 +174,17 @@ export function removeMobileCustomSymbol(sym: string): void {
 export function readMobileStrategy(): StrategySettings {
   try {
     const raw = localStorage.getItem('strategy_settings');
-    if (raw) return mergeStrategySettings(JSON.parse(raw));
+    if (raw) {
+      const merged: any = mergeStrategySettings(JSON.parse(raw));
+      if (applyRetraceAllCategoriesMigration(merged)) {
+        try { localStorage.setItem('strategy_settings', JSON.stringify(merged)); } catch {}
+      }
+      return merged;
+    }
   } catch {}
-  return DEFAULT_STRATEGY_SETTINGS;
+  const fresh: any = { ...DEFAULT_STRATEGY_SETTINGS };
+  applyRetraceAllCategoriesMigration(fresh);
+  return fresh;
 }
 
 export function readMobileLang(): Language {

@@ -1,5 +1,4 @@
 import { MarketType, StrategySettings } from '../types';
-import { gateProfileFor } from '../constants';
 
 /**
  * Retrace (pullback) final-confirmation filter.
@@ -22,8 +21,9 @@ import { gateProfileFor } from '../constants';
  * Missing the required count hides the signal as neutral (final blocking gate).
  * Once the count is reached, the first subsequent candle closing WITH the trade
  * adds a green "good signal" note (see detectPostRetraceAlignment) — it is also
- * informational only. Forex is enabled by default (3 candles, lenient body
- * counting); all other categories are disabled by default.
+ * informational only. Every category now starts with the same lenient body
+ * counting as forex, but each category keeps its own ON/OFF switch so it can be
+ * disabled manually and fall back to its previous behaviour.
  */
 
 export type RetraceCategory = 'forex' | 'crypto' | 'stocks' | 'metals';
@@ -102,11 +102,10 @@ export function resolveRetraceConfig(
     ? storedTf
     : DEFAULT_RETRACE_TIMEFRAME;
 
-  // Strict mode ignores doji, sub-30%-body candles, inside bars, hammers and
-  // shooting stars. On daily FX that removes most bars, so the "3 opposite
-  // candles" rule became almost impossible to satisfy. The per-category choice
-  // now lives in CATEGORY_GATE_PROFILES (FX lenient, others strict).
-  const strictMode = gateProfileFor(category).retraceStrict && raw[`retraceStrictMode${suffix}`] !== false;
+  // Lenient counting is now the default for EVERY category (only doji is
+  // skipped). Strict mode is opt-in per category, so turning it ON here still
+  // works and turning the whole filter OFF elsewhere restores the old behaviour.
+  const strictMode = raw[`retraceStrictMode${suffix}`] === true;
 
   return { category, enabled, candles, timeframe, strictMode };
 }

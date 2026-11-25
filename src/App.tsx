@@ -23,6 +23,7 @@ import AnalysisDetailPage from './components/AnalysisDetailPage';
 import { AnalysisResult, StrategySettings, AutoAnalysisSettings, MarketType, TradingStyle, SignalType } from './types';
 import { DEFAULT_STRATEGY_SETTINGS, DEFAULT_AUTO_SETTINGS, SYMBOL_CATEGORIES, ALL_SYMBOLS_DB, SYMBOL_GROUPS, FREE_SYMBOLS, STOCKS_BY_EXCHANGE, CRYPTO_SCAN_LIMIT, mergeStrategySettings, needsGoldenWindowMigration } from './constants';
 import { getOpenStockExchanges, exchangeLabel, StockExchangeKey } from './lib/marketHours';
+import { applyRetraceAllCategoriesMigration } from './lib/retraceMigration';
 import { Language, translations } from './lib/i18n';
 import { analyzeMarket } from './services/geminiService';
 import { waitIfRateLimited } from './services/rateLimitTracker';
@@ -891,6 +892,9 @@ const isDeveloperSession = () => {
           }
           try { localStorage.setItem(RETRACE_FX_KEY, '1'); } catch {}
         }
+        // One-time: crypto / stocks / metals now use the same lenient Retrace
+        // rule as forex. After this flag the developer's manual OFF is kept.
+        if (applyRetraceAllCategoriesMigration(merged)) needsPersist = true;
         if (needsPersist) { try { localStorage.setItem('strategy_settings', JSON.stringify(merged)); } catch {} }
         return merged;
       } catch (e) { return DEFAULT_STRATEGY_SETTINGS; }

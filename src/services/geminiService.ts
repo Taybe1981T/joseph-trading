@@ -1047,7 +1047,9 @@ export async function analyzeMarket(params: {
 
     // ── Retrace filter data (only when the category is enabled) ──
     // Reuses the daily/weekly/monthly fetch above when the chosen timeframe
-    // matches; otherwise fetches that timeframe once. Default = disabled.
+    // matches; otherwise fetches that timeframe once. Every category now starts
+    // enabled with the same lenient forex-style rule, but each has its own
+    // switch and can be disabled manually.
     let retraceCandles: RetraceCandle[] | null = null;
     if (retraceCfg.enabled) {
       const tfKey = retraceCfg.timeframe === '1d' ? 'daily'
@@ -2282,10 +2284,12 @@ Return ONLY valid JSON:
     // ═══════════════════════════════════════════════════════════════════
     // Runs LAST, after every other entry condition (entry gates, candle
     // match, volume guard, golden window). It only engages for a live
-    // BUY/SELL signal and only when its category switch is ON (forex default ON,
-    // other categories default OFF).
+    // BUY/SELL signal and only when that category's own switch is ON.
     //   • retrace count reached   → signal allowed
     //   • retrace count missing   → hide the signal (neutral)
+    // All categories use the same lenient counting as forex by default; each
+    // still has its own ON/OFF switch so any category can be turned off and
+    // return to its previous behaviour.
     // The current candle direction AND the liquidity-absorption read are
     // diagnostics only (soft notes). FX short-timeframe feeds frequently
     // return doji / wickless bars, so requiring a visible sweep made a 15m +
