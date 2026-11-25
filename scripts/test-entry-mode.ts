@@ -10,36 +10,29 @@ function check(label: string, actual: unknown, expected: unknown) {
 }
 
 const ALL = ['forex', 'crypto', 'stocks', 'metals'];
-const modes = (s?: StrategySettings) => ALL.map((m) => resolveEntryMode(s, m));
+// The mode resolver no longer takes a category: the global setting governs all.
+const modes = (s?: StrategySettings) => ALL.map(() => resolveEntryMode(s));
 
-// 1) Default install: override OFF, everything inherits the global 'pullback'.
+// 1) Fresh install / no settings: every category is on the safe pullback mode.
 check('fresh install', modes(DEFAULT_STRATEGY_SETTINGS), ['pullback', 'pullback', 'pullback', 'pullback']);
 check('no settings at all', modes(undefined), ['pullback', 'pullback', 'pullback', 'pullback']);
 
-// 2) Global setting still governs every category while the override is OFF.
+// 2) Global setting still governs every category uniformly.
 const globalMarket: StrategySettings = { ...DEFAULT_STRATEGY_SETTINGS, entryMode: 'market' };
-check('global market, override off', modes(globalMarket), ['market', 'market', 'market', 'market']);
+check('global market', modes(globalMarket), ['market', 'market', 'market', 'market']);
 
-// 3) Override ON with Market: ONLY forex chases, every other category stays pullback.
-const fxMarket: StrategySettings = {
+// 3) Legacy forex-override fields (from old saved settings) are ignored.
+const legacy: StrategySettings = {
   ...globalMarket,
   entryMode: 'pullback',
   entryModeForexEnabled: true,
   entryModeForex: 'market',
-};
-check('forex-only market', modes(fxMarket), ['market', 'pullback', 'pullback', 'pullback']);
+} as unknown as StrategySettings;
+check('legacy forex override ignored', modes(legacy), ['pullback', 'pullback', 'pullback', 'pullback']);
 
-// 4) Override ON with Pullback while the global mode is Market: forex alone is safe.
-const fxSafe: StrategySettings = {
-  ...globalMarket,
-  entryModeForexEnabled: true,
-  entryModeForex: 'pullback',
-};
-check('forex-only pullback', modes(fxSafe), ['pullback', 'market', 'market', 'market']);
+// 4) Stale default fields must not exist on a fresh install any more.
+const stored = DEFAULT_STRATEGY_SETTINGS as unknown as Record<string, unknown>;
+check('no forex override defaults', ['entryModeForexEnabled', 'entryModeForex'].some(k => k in stored), false);
 
-// 5) Enabling the override without choosing a mode falls back to safe pullback.
-const fxUnset: StrategySettings = { ...globalMarket, entryModeForexEnabled: true, entryModeForex: undefined };
-check('override on, mode unset', modes(fxUnset), ['pullback', 'market', 'market', 'market']);
-
-console.log(ok ? 'PASS: forex-only entry mode override' : 'FAIL');
-if (!ok) process.exitCode = 1;
+console.log(ok ? '\nPASS: single global entry mode for all categories' : '\nFAIL: single global entry mode for all categories');
+if (!ok) process.exit(1);

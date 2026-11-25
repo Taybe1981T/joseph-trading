@@ -158,9 +158,6 @@ export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   retraceStrictModeCrypto: CATEGORY_GATE_PROFILES.crypto.retraceStrict,
   retraceStrictModeStocks: CATEGORY_GATE_PROFILES.stocks.retraceStrict,
   retraceStrictModeMetals: CATEGORY_GATE_PROFILES.metals.retraceStrict,
-  // ── Forex-only Entry Mode override — OFF: inherit the global entryMode ──
-  entryModeForexEnabled: false,
-  entryModeForex: 'pullback',
   // ── Golden confidence window (surface only the best-timed entries) ──
   goldenRangeEnabled: true, // only show signals whose confidence is inside the golden window
   goldenConfMin: 70,        // legacy global fallback (below this → neutral)

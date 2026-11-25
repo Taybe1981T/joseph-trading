@@ -703,73 +703,6 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                   );
                 })()}
 
-                {/* Forex-only Entry Mode — lives with the 3-candle retrace gate.
-                    OFF by default: forex inherits the global entryMode. */}
-                {row.suffix === 'Forex' && (() => {
-                  const fxEnabled = (settings as any).entryModeForexEnabled === true;
-                  const fxMode = (settings as any).entryModeForex === 'market' ? 'market' : 'pullback';
-                  return (
-                    <div className="pt-3 border-t border-white/10 space-y-3">
-                      <button
-                        type="button"
-                        onClick={() => handleChange('entryModeForexEnabled', !fxEnabled)}
-                        className={`w-full flex items-center justify-between p-3 rounded-xl border-2 transition-all text-right gap-4 ${
-                          fxEnabled
-                            ? 'bg-cyan-400/10 border-cyan-400/40 text-cyan-300'
-                            : 'bg-white/5 border-white/5 text-brand-muted'
-                        }`}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm md:text-base font-black leading-tight">
-                            {isAr ? 'تفعيل وضع الدخول للفوركس فقط' : 'Forex-only Entry Mode'}
-                          </div>
-                          <div className="text-xs opacity-70 mt-1">
-                            {fxEnabled
-                              ? (isAr ? 'مفعّل — الفوركس يستخدم وضعه المستقل' : 'Enabled — forex uses its own mode')
-                              : (isAr ? 'مطفأ — الفوركس يتبع الوضع العام' : 'Off — forex inherits the global mode')}
-                          </div>
-                        </div>
-                        <div className={`w-12 h-7 rounded-full transition-colors flex items-center px-1 shrink-0 ${
-                          fxEnabled ? 'bg-cyan-400' : 'bg-white/20'
-                        }`}>
-                          <div className={`w-5 h-5 bg-white rounded-full transition-transform shadow ${
-                            fxEnabled ? 'translate-x-5' : 'translate-x-0'
-                          }`} />
-                        </div>
-                      </button>
-
-                      {fxEnabled && (
-                        <div>
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm md:text-base font-bold text-brand-text/70">
-                              {isAr ? 'وضع الدخول' : 'Entry Mode'}
-                            </span>
-                            <div className="flex gap-2 shrink-0">
-                              <button onClick={() => handleChange('entryModeForex', 'pullback')}
-                                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${fxMode === 'pullback' ? 'bg-cyan-500 text-white' : 'bg-white/10 text-brand-text/60'}`}>
-                                {isAr ? 'ارتداد (آمن)' : 'Pullback (safe)'}
-                              </button>
-                              <button onClick={() => handleChange('entryModeForex', 'market')}
-                                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${fxMode === 'market' ? 'bg-amber-500 text-white' : 'bg-white/10 text-brand-text/60'}`}>
-                                {isAr ? 'فوري (مطاردة)' : 'Market (chase)'}
-                              </button>
-                            </div>
-                          </div>
-                          <p className="text-xs md:text-sm text-brand-text/45 mt-2 leading-snug">
-                            {isAr
-                              ? '«ارتداد» = حدّ دخول أقل من السعر للشراء (أعلى للبيع) فلا تُنفَّذ إلا عند وصول السعر إليك. «فوري» = الدخول عند السعر الحالي كالسابق.'
-                              : '“Pullback” = entry sits below price for buys (above for sells), filled only if price reaches you. “Market” = enter at current price (old behaviour).'}
-                          </p>
-                          <p className="text-xs md:text-sm text-brand-text/35 mt-1 leading-snug">
-                            {isAr
-                              ? 'يؤثّر على الفوركس وحده؛ بقية الفئات تبقى على الوضع العام.'
-                              : 'Affects forex only; every other category keeps the global mode.'}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
               </div>
             );
           })}
@@ -978,7 +911,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                     </button>
                   </div>
                 </div>
-                <p className="text-base md:text-[20px] text-brand-text/40 mt-2 leading-snug">{isAr ? '«ارتداد» = حدّ دخول أقل من السعر للشراء (أعلى للبيع) فلا تُنفَّذ إلا عند وصول السعر إليك. «فوري» = الدخول عند السعر الحالي كالسابق.' : '“Pullback” = entry sits below price for buys (above for sells), filled only if price reaches you. “Market” = enter at current price (old behaviour).'}</p>
+                <p className="text-base md:text-[20px] text-brand-text/40 mt-2 leading-snug">{isAr ? '«ارتداد» = حدّ دخول أقل من السعر للشراء (أعلى للبيع) فلا تُنفَّذ إلا عند وصول السعر إليك. «فوري» = الدخول عند السعر الحالي كالسابق. ينطبق على كل الفئات.' : '“Pullback” = entry sits below price for buys (above for sells), filled only if price reaches you. “Market” = enter at current price (old behaviour). Applies to every category.'}</p>
               </div>
 
               {/* Stop ATR Multiplier */}

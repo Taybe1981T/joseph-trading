@@ -2161,9 +2161,9 @@ Return ONLY valid JSON:
       // DEEPEN the zone to a full 1 ATR so we never buy the top / sell the bottom.
       const isBuy = finalSignal.includes('buy');
       const isSell = finalSignal.includes('sell');
-      // The global entryMode still drives every category. When the forex-only
-      // override is enabled, resolveEntryMode swaps it for forex alone.
-      var usePullback = resolveEntryMode(settings, type) === 'pullback' && (isBuy || isSell);
+      // One global entry mode drives EVERY category (default: safe pullback).
+      // The former forex-only override was removed.
+      var usePullback = resolveEntryMode(settings) === 'pullback' && (isBuy || isSell);
       var entryAnchor = currentPrice;
       var pullbackDist = 0;
       if (usePullback && atr > 0) {
