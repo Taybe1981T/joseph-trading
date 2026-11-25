@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Volume2, Globe, Shield, LogOut, LogIn, Loader2, RefreshCw, User, Camera, ChevronLeft } from 'lucide-react';
+import { Bell, Volume2, Globe, Shield, LogOut, LogIn, Loader2, RefreshCw, User, Camera, ChevronLeft, Save } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { useMobileMode } from '../../lib/mobileMode';
 import TradingValuesPanel from '../TradingValuesPanel';
@@ -36,8 +36,10 @@ interface MobileSettingsProps {
   /** Lifted to MobileLayout so the ONE header back icon can leave a sub-page. */
   activeSystem?: MobileSystem | null;
   onActiveSystemChange?: (id: MobileSystem | null) => void;
-  /** Incremented by the header save icon; flushes any still-focused drafts. */
+  /** Incremented by the Save button; flushes any still-focused drafts. */
   saveTick?: number;
+  /** Renders ONE labelled Save button on this settings page. */
+  onSave?: () => void;
 }
 
 // Mobile parity with desktop: Settings shows ONLY the system names (one per
@@ -64,6 +66,7 @@ export function MobileSettings({
   activeSystem = null,
   onActiveSystemChange,
   saveTick = 0,
+  onSave,
 }: MobileSettingsProps) {
   const isAr = language === 'ar';
   const mode = useMobileMode();
@@ -213,8 +216,19 @@ export function MobileSettings({
       {/* ── Dedicated system page ── */}
       {activeSystem !== null && activeInfo && (
         <>
-          {/* No local Back button here: MobileHeader renders the ONE back icon,
-              which now returns to the systems index from this sub-page. */}
+          {/* No local Back button here: MobileHeader renders the ONE back icon.
+              The Save control is labelled and lives on the page itself so it
+              cannot be missed in the crowded top icon row. */}
+          {onSave && (
+            <button
+              type="button"
+              onClick={onSave}
+              className="mt5-btn mt5-btn-secondary"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', marginBottom: 10, fontWeight: 900 }}
+            >
+              <Save size={16} /> {isAr ? 'حفظ المتغيرات' : 'Save settings'}
+            </button>
+          )}
           <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 16 }}>
             <div style={{ fontSize: 16, fontWeight: 900, color: '#fff' }}>
               {isAr ? activeInfo.ar : activeInfo.en}

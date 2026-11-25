@@ -1450,7 +1450,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         radarCategory={radarProgress?.category ?? null}
         onAutoAnalysisToggle={canUseAnalysis ? toggleAutoAnalysis : undefined}
         onBack={tab !== 'home' && tab !== 'store' ? handleMobileBack : undefined}
-        onSave={(tab === 'settings' || tab === 'profile' || (tab === 'analysis' && radarSettingsOpen)) ? handleMobileSave : undefined} />
+        onSave={tab === 'profile' ? handleMobileSave : undefined} />
       {/* The single back icon is in MobileHeader (and in full-screen overlays).
           No second text/icon button is rendered here any more. */}
       {/* Paid plan strip: the client's plan is visible on every section of the
@@ -1492,7 +1492,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} canTrade={isDev || isPlanClient} onDeleteHistory={deleteHistoryTradeMobile} onClearHistory={clearHistoryMobile} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} canTrade={isDev || isPlanClient} canOpenManual={isDev || isPlanClient} isDeveloper={isDev} devEmail={user?.email || email || ''} />}
         {/* Desktop parity: a paid-plan client in paid mode gets Auto + Manual too. */}
-        {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} settingsOpen={radarSettingsOpen} onSettingsOpenChange={setRadarSettingsOpen} saveTick={saveTick} />}
+        {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} settingsOpen={radarSettingsOpen} onSettingsOpenChange={setRadarSettingsOpen} saveTick={saveTick} onSave={handleMobileSave} />}
         {tab === 'manual' && canUseAnalysis && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goBack} hideBack autoEmail={email} isDeveloper={isDev} onGoToStore={() => goTab('store')} onResumeSession={resumeStorePayment} />}
         {tab === 'store' && !storePlan && (
@@ -1548,7 +1548,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
             onConfirm={completeStorePayment}
           />
         )}
-        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} activeSystem={settingsSystem} onActiveSystemChange={setSettingsSystem} saveTick={saveTick} />}
+        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} activeSystem={settingsSystem} onActiveSystemChange={setSettingsSystem} saveTick={saveTick} onSave={handleMobileSave} />}
         {tab === 'profile' && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} isLoggedIn={!!(user?.email || email)} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} isFollowing={following} onFollowToggle={toggleFollowing} saveTick={saveTick} />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} onCountChange={setClientCount} />}
         {children}

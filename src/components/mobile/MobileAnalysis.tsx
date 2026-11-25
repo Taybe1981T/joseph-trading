@@ -10,8 +10,10 @@ interface Props {
   /** Lifted to MobileLayout: the header's single back icon closes this panel. */
   settingsOpen: boolean;
   onSettingsOpenChange: (v: boolean) => void;
-  /** Incremented by the header save icon while the radar settings are open. */
+  /** Incremented by the Save button while the radar settings are open. */
   saveTick?: number;
+  /** Opens the single labelled Save control inside the radar settings panel. */
+  onSave?: () => void;
 }
 
 /** Auto-analysis timestamps are ALWAYS shown in GMT (same rule as the rest of
@@ -22,7 +24,7 @@ function fmtGmtTime(ms: number): string {
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} GMT`;
 }
 
-export function MobileAnalysis({ lang, settingsOpen, onSettingsOpenChange, saveTick = 0 }: Props) {
+export function MobileAnalysis({ lang, settingsOpen, onSettingsOpenChange, saveTick = 0, onSave }: Props) {
   const isAr = lang === 'ar';
   const [autoOn, setAutoOn] = useState(() => isMobileRadarOn() || isMobileRadarPersisted());
   const [lastRun, setLastRun] = useState<string | null>(() => {
@@ -166,7 +168,7 @@ export function MobileAnalysis({ lang, settingsOpen, onSettingsOpenChange, saveT
         </div>
       </div>
 
-      {showSettings && <MobileRadarSettings lang={lang} saveTick={saveTick} />}
+      {showSettings && <MobileRadarSettings lang={lang} saveTick={saveTick} onSave={onSave} />}
     </div>
   );
 }
