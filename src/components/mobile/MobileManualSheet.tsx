@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
-import { X, Play, Search, Loader2, CheckCircle2, XCircle, Plus, Trash2, Zap, Clock } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { ArrowLeft, Play, Search, Loader2, CheckCircle2, XCircle, Plus, Trash2, Zap, Clock } from 'lucide-react';
 import { AnalysisResult, MarketType, TradingStyle } from '../../types';
-import { MobileProgress, runMobileManual, getMobileSymbolGroups, getMobileAllSymbols, addMobileCustomSymbol, unhideMobileSymbol, detectMobileType } from '../../services/mobileAnalysisEngine';
+import { MobileProgress, runMobileManual, readMobileAuto, getMobileSymbolGroups, getMobileAllSymbols, addMobileCustomSymbol, unhideMobileSymbol, detectMobileType } from '../../services/mobileAnalysisEngine';
 import { TIMEFRAMES, TRADING_STYLES, FREE_SYMBOLS, ALL_SYMBOLS_DB } from '../../constants';
 import { Language } from '../../lib/i18n';
 import { mobileT, isMobilePlanClient, useMobileMode } from '../../lib/mobileMode';
@@ -26,11 +26,14 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const isAr = lang === 'ar';
   const paid = hasPlan();
   const { isDev } = useMobileMode();
+  // Subscribed client (not developer): the radar's single 1-day frame is also
+  // the manual-analysis frame — there is no second, conflicting timeframe here.
+  const isPaidClient = paid && !isDev;
   const [groups, setGroups] = useState(getMobileSymbolGroups);
   const [selectedType, setSelectedType] = useState<string>(groups[0]?.id || 'forex');
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
   const [q, setQ] = useState('');
-  const [tf, setTf] = useState('1d');
+  const [tf, setTf] = useState(() => (isPaidClient ? '1d' : (readMobileAuto().timeframe || '1d')));
   const [style, setStyle] = useState<TradingStyle>(TradingStyle.DAY_TRADING);
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<MobileProgress | null>(null);
@@ -39,6 +42,22 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const [quotaMsg, setQuotaMsg] = useState<string | null>(null);
   const [customInput, setCustomInput] = useState('');
   const [hiddenTick, setHiddenTick] = useState(0);
+
+  // Keep the manual frame locked to the radar frame for a client, even if the
+  // radar settings were changed while this sheet was open.
+  useEffect(() => {
+    if (isDev) return;
+    const sync = () => setTf('1d');
+    sync();
+    window.addEventListener('mobile-radar-settings', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('mobile-radar-settings', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, [isDev]);
+
+  const timeframeChoices = isDev ? TIMEFRAMES : TIMEFRAMES.filter((t) => t.id === '1d');
 
   const allCategorySymbols = useMemo(() => {
     const g = groups.find((x) => x.id === selectedType);
@@ -182,7 +201,7 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
       <div className="mt5-trade-panel" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '92vh' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div className="mt5-trade-title" style={{ margin: 0, textAlign: 'left' }}>{mobileT(lang, 'Manual Analysis', 'التحليل اليدوي')}</div>
-          <button className="mt5-icon-btn" onClick={onClose}><X size={18} /></button>
+          <button className="mt5-icon-btn" onClick={onClose} aria-label="Back"><ArrowLeft size={18} /></button>
         </div>
         {quotaMsg && <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', padding: 10, borderRadius: 10, fontSize: 12, fontWeight: 700, marginBottom: 10 }}>{quotaMsg}</div>}
 
@@ -202,7 +221,7 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
           <div>
             <div style={{ fontSize: 12, fontWeight: 800, color: '#F59E0B', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}><Clock size={13} /> {mobileT(lang, 'Timeframe', 'الإطار')}</div>
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {TIMEFRAMES.map((t) => {
+              {timeframeChoices.map((t) => {
                 const locked = !paid && t.id !== '1d';
                 const on = tf === t.id;
                 return (

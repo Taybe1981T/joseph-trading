@@ -7,6 +7,9 @@ import { mobileT } from '../../lib/mobileMode';
 
 interface Props {
   lang: Language;
+  /** Lifted to MobileLayout: the header's single back icon closes this panel. */
+  settingsOpen: boolean;
+  onSettingsOpenChange: (v: boolean) => void;
 }
 
 /** Auto-analysis timestamps are ALWAYS shown in GMT (same rule as the rest of
@@ -17,7 +20,7 @@ function fmtGmtTime(ms: number): string {
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} GMT`;
 }
 
-export function MobileAnalysis({ lang }: Props) {
+export function MobileAnalysis({ lang, settingsOpen, onSettingsOpenChange }: Props) {
   const isAr = lang === 'ar';
   const [autoOn, setAutoOn] = useState(() => isMobileRadarOn() || isMobileRadarPersisted());
   const [lastRun, setLastRun] = useState<string | null>(() => {
@@ -34,7 +37,7 @@ export function MobileAnalysis({ lang }: Props) {
     return null;
   });
   const [doneMsg, setDoneMsg] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  const showSettings = settingsOpen;
 
   useEffect(() => {
     const sync = () => {
@@ -117,7 +120,7 @@ export function MobileAnalysis({ lang }: Props) {
             <button
               type="button"
               aria-label={isAr ? 'إعدادات التحليل' : 'Analysis settings'}
-              onClick={() => setShowSettings(!showSettings)}
+              onClick={() => onSettingsOpenChange(!showSettings)}
               style={{
                 width: 42,
                 height: 42,

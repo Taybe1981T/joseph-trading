@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Globe, Sun, Moon, Bell, User, Activity } from 'lucide-react';
+import { ArrowLeft, Globe, Sun, Moon, Bell, User, Activity } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { getOpenStockExchanges } from '../../lib/marketHours';
 
@@ -18,6 +18,8 @@ interface MobileHeaderProps {
   autoAnalysisRunning?: boolean;
   radarCategory?: string | null;
   onAutoAnalysisToggle?: () => void;
+  /** ONE back icon for every secondary mobile screen. Only rendered when set. */
+  onBack?: () => void;
 }
 
 function isCatOpen(key: string, now: Date): boolean {
@@ -53,7 +55,7 @@ const barBtn: React.CSSProperties = {
 
 export function MobileHeader({
   title, lang, onLangChange, isDark, toggleTheme, clientCount, onClientsClick,
-  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning, radarCategory, onAutoAnalysisToggle,
+  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning, radarCategory, onAutoAnalysisToggle, onBack,
 }: MobileHeaderProps) {
   const [logo, setLogo] = useState<string | null>(null);
   const [showLang, setShowLang] = useState(false);
@@ -214,8 +216,21 @@ export function MobileHeader({
             </div>
           </div>
 
-          {/* Top icons — all solid yellow; auto analysis is the middle & largest. */}
+          {/* Top icons — all solid yellow; auto analysis is the middle & largest.
+              The back icon is rendered ONLY for secondary screens, so a page
+              never shows two back controls. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            {onBack && (
+              <button
+                className="mt5-icon-btn"
+                style={barBtn}
+                onClick={onBack}
+                aria-label={isAr ? 'رجوع' : 'Back'}
+                title={isAr ? 'رجوع' : 'Back'}
+              >
+                <ArrowLeft size={15} style={{ color: '#111827' }} />
+              </button>
+            )}
             <div style={{ position: 'relative' }}>
               <button
                 className="mt5-icon-btn"

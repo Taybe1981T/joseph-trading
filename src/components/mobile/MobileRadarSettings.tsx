@@ -4,6 +4,7 @@ import { Language } from '../../lib/i18n';
 import { mobileT, useMobileMode, isMobilePlanClient, detectMobileMode } from '../../lib/mobileMode';
 import { getMobileSymbolGroups, isMobileRadarOn, startMobileRadar, stopMobileRadar, subscribeMobileRadar } from '../../services/mobileAnalysisEngine';
 import { DEV_SETTINGS_EVENT } from '../../services/devSettingsSync';
+import { toggleRadarCategory } from '../../lib/mobileRadarCategories';
 
 interface AutoSettings {
   isEnabled: boolean; interval: number; timeframe: string; category: string;
@@ -36,6 +37,10 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
   const { isDev } = useMobileMode();
   const isPaidClient = !isDev && isMobilePlanClient();
   const intervalOptions = isPaidClient ? [240] : INTERVALS;
+  // A client (free OR paid) gets ONE daily frame on the phone: it is the same
+  // frame used by the manual analysis, so no other button is shown. Developers
+  // keep the full list for testing.
+  const timeframeOptions = isDev ? TIMEFRAMES : ['1d'];
   // Clients (free OR paid) may use Day Trading only — desktop parity.
   const styleOptions = isDev ? STYLES : STYLES.filter((st) => st.id === 'day_trading');
   const [s, setS] = useState<AutoSettings>(readAuto);
@@ -73,13 +78,18 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
     if (!isDev && s.tradingStyle !== 'day_trading') commit({ tradingStyle: 'day_trading' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDev, s.tradingStyle]);
-  const selectedList = useMemo(() => s.category === 'all' ? groups.map((g) => g.id) : s.category.split(',').filter(Boolean), [s.category, groups]);
-  const toggleCat = (id: string) => {
-    let list = [...selectedList];
-    if (list.includes(id)) { if (list.length > 1) list = list.filter((x) => x !== id); }
-    else list.push(id);
-    commit({ category: list.length === 4 ? 'all' : list.join(',') } as any);
-  };
+  // A client's old stored timeframe (e.g. 4h) is forced back to 1d, so the
+  // radar and the manual sheet always agree on the single allowed frame.
+  useEffect(() => {
+    if (!isDev && s.timeframe !== '1d') commit({ timeframe: '1d' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPaidClient, s.timeframe]);
+  const groupIds = useMemo(() => groups.map((g) => g.id), [groups]);
+  const selectedList = useMemo(
+    () => s.category === 'all' ? groupIds : String(s.category || '').split(',').filter((x) => groupIds.includes(x)),
+    [s.category, groupIds],
+  );
+  const toggleCat = (id: string) => commit({ category: toggleRadarCategory(s.category, groupIds, id) });
   const Row = ({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) => (
     <div className="mt5-card">
       <div className="mt5-card-header">
@@ -150,7 +160,7 @@ export function MobileRadarSettings({ lang }: { lang: Language }) {
 
       <Row icon={<Clock size={16} />} label={mobileT(lang, 'Timeframe', 'الإطار الزمني')}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
-          {TIMEFRAMES.map((tf) => {
+          {timeframeOptions.map((tf) => {
             const on = s.timeframe === tf;
             return (
               <button key={tf} type="button" onMouseDown={(e) => e.preventDefault()} onClick={(e) => { e.stopPropagation(); commit({ timeframe: tf }); }}

@@ -42,8 +42,14 @@ export function readMobileAuto(): AutoAnalysisSettings {
       try {
         const u = JSON.parse(localStorage.getItem('finalyze_user') || '{}');
         const email = String(u?.email || '').toLowerCase().trim();
-        if (!isDeveloperEmail(email) && parsed?.tradingStyle && parsed.tradingStyle !== TradingStyle.DAY_TRADING) {
-          parsed.tradingStyle = TradingStyle.DAY_TRADING;
+        if (!isDeveloperEmail(email)) {
+          // Clients (free OR paid) may use Day Trading on the 1-day frame only.
+          // Old stored values are normalized on load so a formerly selectable
+          // timeframe can never leak into a client's radar OR manual analysis.
+          if (parsed?.tradingStyle && parsed.tradingStyle !== TradingStyle.DAY_TRADING) {
+            parsed.tradingStyle = TradingStyle.DAY_TRADING;
+          }
+          if (parsed?.timeframe && parsed.timeframe !== '1d') parsed.timeframe = '1d';
         }
       } catch {}
       return { ...parsed };

@@ -15,6 +15,8 @@ interface TransactionsPageProps {
   onGoToStore?: () => void;
   autoEmail?: string;
   isDeveloper?: boolean;
+  /** Mobile uses the single header back icon instead of this page-level one. */
+  hideBack?: boolean;
 }
 
 type RowStatus = 'active' | 'pending' | 'confirmed' | 'cancelled' | 'completed';
@@ -41,7 +43,7 @@ const fmtGmt = (ts?: number): string => {
   return `${d.getUTCFullYear()}/${pad(d.getUTCMonth() + 1)}/${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} GMT`;
 };
 
-export default function TransactionsPage({ lang, onBack, onResumeSession, onGoToStore, autoEmail, isDeveloper }: TransactionsPageProps) {
+export default function TransactionsPage({ lang, onBack, onResumeSession, onGoToStore, autoEmail, isDeveloper, hideBack = false }: TransactionsPageProps) {
   const [rows, setRows] = useState<TxRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -368,9 +370,11 @@ export default function TransactionsPage({ lang, onBack, onResumeSession, onGoTo
     <div className="w-full px-2 pb-10">
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="flex items-center gap-4 mb-2">
-          <button onClick={onBack} className="p-3 rounded-2xl border border-white/10 text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 transition-all shadow-md">
-            <ArrowLeft size={22} />
-          </button>
+          {!hideBack && (
+            <button onClick={onBack} className="p-3 rounded-2xl border border-white/10 text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 transition-all shadow-md">
+              <ArrowLeft size={22} />
+            </button>
+          )}
           <div>
             <h2 className="text-2xl sm:text-3xl font-black text-white flex items-center gap-2.5">
               <Receipt size={26} className="text-[#F59E0B]" />

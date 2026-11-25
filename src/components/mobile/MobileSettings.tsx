@@ -33,11 +33,14 @@ interface MobileSettingsProps {
   onLogoutClick?: () => void;
   userEmail?: string | null;
   avatarUrl?: string | null;
+  /** Lifted to MobileLayout so the ONE header back icon can leave a sub-page. */
+  activeSystem?: MobileSystem | null;
+  onActiveSystemChange?: (id: MobileSystem | null) => void;
 }
 
 // Mobile parity with desktop: Settings shows ONLY the system names (one per
 // line). Tapping a name opens that system's own page with its controls.
-type MobileSystem = 'autoTrade' | 'thresholds' | 'retrace' | 'sound' | 'language' | 'devLogin' | 'tradingValues';
+export type MobileSystem = 'autoTrade' | 'thresholds' | 'retrace' | 'sound' | 'language' | 'devLogin' | 'tradingValues';
 
 export function MobileSettings({
   autoTradeEnabled,
@@ -56,10 +59,14 @@ export function MobileSettings({
   onLogoutClick,
   userEmail,
   avatarUrl,
+  activeSystem = null,
+  onActiveSystemChange,
 }: MobileSettingsProps) {
   const isAr = language === 'ar';
   const mode = useMobileMode();
-  const [activeSystem, setActiveSystem] = useState<MobileSystem | null>(null);
+  // The header owns the single back icon; this state lives in MobileLayout so
+  // that icon knows whether it must leave a system page or the Settings tab.
+  const setActiveSystem = (id: MobileSystem | null) => onActiveSystemChange?.(id);
 
   // Mobile reads/writes the SAME strategy settings store used by the shared
   // analysis engine, so this filter behaves exactly like the desktop one.
@@ -169,16 +176,8 @@ export function MobileSettings({
       {/* ── Dedicated system page ── */}
       {activeSystem !== null && activeInfo && (
         <>
-          <button
-            type="button"
-            className="mt5-btn mt5-btn-secondary"
-            onClick={() => setActiveSystem(null)}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontWeight: 900 }}
-          >
-            <ChevronLeft size={18} style={{ transform: 'rotate(180deg)' }} />
-            {isAr ? 'رجوع' : 'Back'}
-          </button>
-
+          {/* No local Back button here: MobileHeader renders the ONE back icon,
+              which now returns to the systems index from this sub-page. */}
           <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 16 }}>
             <div style={{ fontSize: 16, fontWeight: 900, color: '#fff' }}>
               {isAr ? activeInfo.ar : activeInfo.en}

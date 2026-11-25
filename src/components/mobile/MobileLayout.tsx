@@ -7,7 +7,7 @@ import { MobileQuotes, MobileQuote } from './MobileQuotes';
 import { useLiveQuotes } from './useLiveQuotes';
 import { MobilePositions, MobilePosition } from './MobilePositions';
 import { MobileNewTrade } from './MobileNewTrade';
-import { MobileSettings } from './MobileSettings';
+import { MobileSettings, MobileSystem } from './MobileSettings';
 import { MobileProfile } from './MobileProfile';
 import { MobileTradeDialog } from './MobileTradeDialog';
 import { MobileSignalDetail } from './MobileSignalDetail';
@@ -81,20 +81,30 @@ const TITLES: Record<MobileTab, string> = {
 export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const quotes = useLiveQuotes();
   const [tab, setTab] = useState<MobileTab>('home');
+  // ONE back icon lives in MobileHeader. These two nested-panel states tell it
+  // whether "back" means "leave this settings sub-page/panel" first.
+  const [settingsSystem, setSettingsSystem] = useState<MobileSystem | null>(null);
+  const [radarSettingsOpen, setRadarSettingsOpen] = useState(false);
   // Back-navigation history: every section jump pushes the previous tab, Back pops it (desktop parity: always a way back)
   const histRef = useRef<MobileTab[]>([]);
   const goTab = useCallback((t: MobileTab) => {
+    if (t !== 'settings') setSettingsSystem(null);
+    if (t !== 'analysis') setRadarSettingsOpen(false);
     setTab((cur) => {
       if (cur !== t && histRef.current[histRef.current.length - 1] !== cur) histRef.current.push(cur);
       return t;
     });
   }, []);
   const goBack = useCallback(() => {
+    setSettingsSystem(null);
+    setRadarSettingsOpen(false);
     const prev = histRef.current.pop();
     setTab(prev || 'home');
   }, []);
   const goHome = useCallback(() => {
     histRef.current = [];
+    setSettingsSystem(null);
+    setRadarSettingsOpen(false);
     setTab('home');
   }, []);
   const [dialog, setDialog] = useState<MobileQuote | null>(null);
@@ -1379,6 +1389,16 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     goHome();
   };
 
+  // Single back action for every secondary screen: leave the deepest open
+  // settings panel first, otherwise pop one tab from the navigation history.
+  // Full-screen overlays (login, signal detail, payment) have their own back
+  // icon and cover the header, so they never receive this one.
+  const handleMobileBack = () => {
+    if (settingsSystem !== null) { setSettingsSystem(null); return; }
+    if (radarSettingsOpen) { setRadarSettingsOpen(false); return; }
+    goBack();
+  };
+
   return (
     <div className="mobile-only" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', paddingBottom: 72 }}>
       <MobileHeader title={TITLES[tab]} lang={lang}
@@ -1397,16 +1417,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         onProfileClick={() => goTab('profile')}
         autoAnalysisRunning={autoAnalysisOn}
         radarCategory={radarProgress?.category ?? null}
-        onAutoAnalysisToggle={canUseAnalysis ? toggleAutoAnalysis : undefined} />
-      {tab !== 'home' && tab !== 'store' && (
-        <button
-          type="button"
-          onClick={goBack}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#F59E0B', fontSize: 13, fontWeight: 800, cursor: 'pointer', padding: '8px 16px 0', alignSelf: 'flex-start' }}
-        >
-          <ArrowLeft size={15} /> {lang === 'ar' ? 'عودة' : 'Back'}
-        </button>
-      )}
+        onAutoAnalysisToggle={canUseAnalysis ? toggleAutoAnalysis : undefined}
+        onBack={tab !== 'home' && tab !== 'store' ? handleMobileBack : undefined} />
+      {/* The single back icon is in MobileHeader (and in full-screen overlays).
+          No second text/icon button is rendered here any more. */}
       {/* Paid plan strip: the client's plan is visible on every section of the
           app, with the same paid/free switch the desktop site has. SOLID YELLOW
           (brand accent) so it is impossible to miss as the free/paid link. */}
@@ -1446,9 +1460,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} canTrade={isDev || isPlanClient} onDeleteHistory={deleteHistoryTradeMobile} onClearHistory={clearHistoryMobile} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} canTrade={isDev || isPlanClient} canOpenManual={isDev || isPlanClient} isDeveloper={isDev} devEmail={user?.email || email || ''} />}
         {/* Desktop parity: a paid-plan client in paid mode gets Auto + Manual too. */}
-        {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} />}
+        {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} settingsOpen={radarSettingsOpen} onSettingsOpenChange={setRadarSettingsOpen} />}
         {tab === 'manual' && canUseAnalysis && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
-        {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goHome} autoEmail={email} isDeveloper={isDev} onGoToStore={() => goTab('store')} onResumeSession={resumeStorePayment} />}
+        {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goBack} hideBack autoEmail={email} isDeveloper={isDev} onGoToStore={() => goTab('store')} onResumeSession={resumeStorePayment} />}
         {tab === 'store' && !storePlan && (
           <StorePage
             lang={lang}
@@ -1502,7 +1516,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
             onConfirm={completeStorePayment}
           />
         )}
-        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} />}
+        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} activeSystem={settingsSystem} onActiveSystemChange={setSettingsSystem} />}
         {tab === 'profile' && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} isLoggedIn={!!(user?.email || email)} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} isFollowing={following} onFollowToggle={toggleFollowing} />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} onCountChange={setClientCount} />}
         {children}
@@ -1523,11 +1537,21 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => { void executeDialogTrade(dialog.symbol, t, v); }} onClose={() => setDialog(null)} />}
       {detail && (isDev
         ? <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />
-        : <AnalysisDetailPage result={detail} onBack={() => setDetail(null)} lang={lang} isClient compact />)}
+        : <AnalysisDetailPage result={detail} onBack={() => setDetail(null)} lang={lang} isClient compact singleBack />)}
       {showLoginModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#1a1a1a', borderRadius: 16, padding: 24, width: '90%', maxWidth: 400, color: '#fff' }}>
-            <h3 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>{lang === 'ar' ? 'تسجيل الدخول' : 'Login'}</h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+              <button
+                type="button"
+                onClick={() => { setLoginError(null); setShowLoginModal(false); }}
+                aria-label={lang === 'ar' ? 'رجوع' : 'Back'}
+                style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', color: '#fff', cursor: 'pointer', padding: 0 }}
+              >
+                <ArrowLeft size={18} />
+              </button>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{lang === 'ar' ? 'تسجيل الدخول' : 'Login'}</h3>
+            </div>
             {loginError && (
               <div style={{ marginBottom: 12, padding: '8px 10px', borderRadius: 8, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', fontSize: 12, lineHeight: 1.5 }}>
                 {loginError}

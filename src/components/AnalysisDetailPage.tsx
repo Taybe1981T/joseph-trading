@@ -16,6 +16,8 @@ interface AnalysisDetailPageProps {
    * the mobile bottom navigation. Content and logic stay identical to desktop.
    */
   compact?: boolean;
+  /** Phone: keep only the back arrow (no second X button on the same page). */
+  singleBack?: boolean;
 }
 
 function getSignalColor(signal: SignalType) {
@@ -83,7 +85,7 @@ function parseCandleInfo(value: string) {
   }).filter(Boolean);
 }
 
-export default function AnalysisDetailPage({ result, onBack, lang, isClient = false, compact = false }: AnalysisDetailPageProps) {
+export default function AnalysisDetailPage({ result, onBack, lang, isClient = false, compact = false, singleBack = false }: AnalysisDetailPageProps) {
   const [copied, setCopied] = useState(false);
   const isAr = lang === 'ar';
   const colors = getSignalColor(result.signal);
@@ -210,8 +212,9 @@ export default function AnalysisDetailPage({ result, onBack, lang, isClient = fa
           </button>
           )}
           {/* Phone layout: an explicit, always-visible X so the client can leave
-              the reasons screen and reach the other bottom tabs. */}
-          {compact && (
+              the reasons screen and reach the other bottom tabs. Suppressed when
+              the mobile shell already owns the single back icon. */}
+          {compact && !singleBack && (
             <button
               onClick={onBack}
               className="p-2.5 rounded-xl bg-red-500/25 hover:bg-red-500/40 transition-all border border-red-500/50 shadow-lg"
