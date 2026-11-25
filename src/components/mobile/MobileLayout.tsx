@@ -1473,7 +1473,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         onNotificationsClick={goHome}
         userEmail={user?.email || email || null}
         avatarUrl={customAvatar || user?.photoURL || null}
-        onProfileClick={isDev ? () => goTab('profile') : undefined}
+        onProfileClick={() => goTab('profile')}
         autoAnalysisRunning={autoAnalysisOn}
         radarCategory={radarProgress?.category ?? null}
         onAutoAnalysisToggle={canUseAnalysis ? toggleAutoAnalysis : undefined} />
@@ -1579,7 +1579,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
           />
         )}
         {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} activeSystem={settingsSystem} onActiveSystemChange={setSettingsSystem} saveTick={saveTick} />}
-        {tab === 'profile' && isDev && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} isLoggedIn={!!(user?.email || email)} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} isFollowing={following} onFollowToggle={toggleFollowing} saveTick={saveTick} />}
+        {tab === 'profile' && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} isLoggedIn={!!(user?.email || email)} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} isFollowing={following} onFollowToggle={toggleFollowing} saveTick={saveTick} />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} onCountChange={setClientCount} />}
         {children}
       </div>
@@ -1634,8 +1634,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
 
       {/* ── THE two phone controls ─────────────────────────────────────────
           One floating back arrow, always bottom-right and above every layer
-          (overlays included). One solid-yellow Save control at the bottom of
-          editable settings. Neither is ever rendered anywhere else. */}
+          (overlays included). One solid-yellow rectangular Save button pinned
+          at the bottom of every editable section, shaped like the sign-in/out
+          buttons. Neither control is ever rendered anywhere else. */}
       <button
         type="button"
         onClick={handleMobileBack}
@@ -1655,15 +1656,16 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         <button
           type="button"
           onClick={handleFloatingSave}
+          className="mt5-btn mt5-btn-primary mt5-btn-block"
           aria-label={lang === 'ar' ? 'حفظ المتغيرات' : 'Save settings'}
           title={lang === 'ar' ? 'حفظ المتغيرات' : 'Save settings'}
           style={{
-            position: 'fixed', bottom: 84, right: 72, height: 46,
-            padding: '0 16px', borderRadius: 999, border: '2px solid #111827',
-            background: '#FACC15', color: '#111827', display: 'flex',
-            alignItems: 'center', justifyContent: 'center', gap: 7,
+            position: 'fixed', bottom: 84, left: 14, right: 72, width: 'auto',
+            height: 46, padding: '0 16px', borderRadius: 10,
+            border: '2px solid #111827', background: '#FACC15', color: '#111827',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
             fontSize: 13, fontWeight: 900, cursor: 'pointer', zIndex: 2147483646,
-            boxShadow: '0 4px 18px rgba(0,0,0,0.55)',
+            boxShadow: '0 4px 18px rgba(0,0,0,0.55)', boxSizing: 'border-box',
           }}
         >
           <Save size={18} /> {lang === 'ar' ? 'حفظ المتغيرات' : 'Save'}

@@ -53,7 +53,7 @@ const barBtn: React.CSSProperties = {
 
 export function MobileHeader({
   title, lang, onLangChange, isDark, toggleTheme, clientCount, onClientsClick,
-  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning, radarCategory, onAutoAnalysisToggle,
+  onNotificationsClick, userEmail, onProfileClick, autoAnalysisRunning, radarCategory, onAutoAnalysisToggle,
 }: MobileHeaderProps) {
   const [logo, setLogo] = useState<string | null>(null);
   const [showLang, setShowLang] = useState(false);
@@ -290,37 +290,44 @@ export function MobileHeader({
               </button>
             )}
 
-            {/* Profile icon — developer only. A client has no login/account
-                controls, so the icon is not rendered at all for them. */}
+            {/* Sign-in / account icon. Restored for every account, opened exactly
+                as before, but now a LARGER solid-green circle with a white
+                person so it stands out from the yellow icons on its left. */}
             {onProfileClick && (
-              <div style={{ position: 'relative' }}>
+              <div style={{ position: 'relative', marginInlineStart: 4 }}>
                 <button
                   className="mt5-icon-btn"
-                  style={barBtn}
                   onClick={onProfileClick}
-                  aria-label="Profile"
+                  aria-label={isAr ? 'تسجيل الدخول / الحساب' : 'Sign in / Account'}
+                  title={isAr ? 'تسجيل الدخول / الحساب' : 'Sign in / Account'}
+                  style={{
+                    width: 42,
+                    height: 42,
+                    borderRadius: '50%',
+                    background: '#16A34A',
+                    border: '2px solid #065F46',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    padding: 0,
+                    flexShrink: 0,
+                    boxShadow: '0 2px 10px rgba(22,163,74,0.45)',
+                  }}
                 >
-                  {avatarUrl ? (
-                    <img
-                      src={avatarUrl}
-                      alt="Avatar"
-                      style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover' }}
-                    />
-                  ) : (
-                    <User size={15} style={{ color: '#111827' }} />
-                  )}
+                  <User size={22} style={{ color: '#ffffff' }} strokeWidth={2.4} />
                 </button>
                 {userEmail && (
                   <div
                     style={{
                       position: 'absolute',
-                      top: -5,
-                      right: -5,
+                      top: -2,
+                      right: -2,
                       background: '#ffffff',
                       borderRadius: '50%',
-                      width: 9,
-                      height: 9,
-                      border: '2px solid #EAB308',
+                      width: 10,
+                      height: 10,
+                      border: '2px solid #16A34A',
                     }}
                   />
                 )}
