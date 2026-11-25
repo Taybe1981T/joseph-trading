@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { ArrowLeft, Play, Search, Loader2, CheckCircle2, XCircle, Plus, Trash2, Zap, Clock } from 'lucide-react';
+import { Play, Search, Loader2, CheckCircle2, XCircle, Plus, Trash2, Zap, Clock } from 'lucide-react';
 import { AnalysisResult, MarketType, TradingStyle } from '../../types';
 import { MobileProgress, runMobileManual, readMobileAuto, getMobileSymbolGroups, getMobileAllSymbols, addMobileCustomSymbol, unhideMobileSymbol, detectMobileType } from '../../services/mobileAnalysisEngine';
 import { TIMEFRAMES, TRADING_STYLES, FREE_SYMBOLS, ALL_SYMBOLS_DB } from '../../constants';
@@ -199,10 +199,8 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   return (
     <div className="mt5-trade-overlay" onClick={onClose}>
       <div className="mt5-trade-panel" onClick={(e) => e.stopPropagation()} style={{ maxHeight: '92vh' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <div className="mt5-trade-title" style={{ margin: 0, textAlign: 'left' }}>{mobileT(lang, 'Manual Analysis', 'التحليل اليدوي')}</div>
-          <button className="mt5-icon-btn" onClick={onClose} aria-label="Back"><ArrowLeft size={18} /></button>
-        </div>
+        {/* One floating back arrow (MobileLayout) replaces this local button. */}
+        <div className="mt5-trade-title" style={{ margin: 0, textAlign: 'left', marginBottom: 12 }}>{mobileT(lang, 'Manual Analysis', 'التحليل اليدوي')}</div>
         {quotaMsg && <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', padding: 10, borderRadius: 10, fontSize: 12, fontWeight: 700, marginBottom: 10 }}>{quotaMsg}</div>}
 
         <div style={{ fontSize: 12, fontWeight: 800, color: '#F59E0B', marginBottom: 6 }}>{mobileT(lang, 'Category', 'الفئة')}</div>

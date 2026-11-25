@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Zap, Layers, Sparkles, Clock, Music, Save } from 'lucide-react';
+import { Zap, Layers, Sparkles, Clock, Music } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { mobileT, useMobileMode, isMobilePlanClient, detectMobileMode } from '../../lib/mobileMode';
 import { getMobileSymbolGroups, isMobileRadarOn, startMobileRadar, stopMobileRadar, subscribeMobileRadar } from '../../services/mobileAnalysisEngine';
@@ -30,7 +30,7 @@ const STYLES = [
   { id: 'swing_trading', en: 'Swing', ar: 'سوينج' },
 ];
 
-export function MobileRadarSettings({ lang, saveTick = 0, onSave }: { lang: Language; saveTick?: number; onSave?: () => void }) {
+export function MobileRadarSettings({ lang, saveTick = 0 }: { lang: Language; saveTick?: number }) {
   const isAr = lang === 'ar';
   // Sound / alert options are developer-only (desktop parity: RadarSettingsPage
   // hides the whole audio section for clients).
@@ -66,7 +66,7 @@ export function MobileRadarSettings({ lang, saveTick = 0, onSave }: { lang: Lang
     const next = { ...s, ...patch }; setS(next); writeAuto(next);
     try { window.dispatchEvent(new CustomEvent('mobile-radar-settings')); } catch {}
   };
-  // Every change already writes auto_settings. The header save icon repeats
+  // Every change already writes auto_settings. The floating save button repeats
   // that write explicitly, so the user gets a clear "saved" confirmation and
   // the manual sheet re-reads the same frame even if it was open in a tab.
   useEffect(() => {
@@ -110,16 +110,6 @@ export function MobileRadarSettings({ lang, saveTick = 0, onSave }: { lang: Lang
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, overflowAnchor: 'none' }}>
-      {onSave && (
-        <button
-          type="button"
-          onClick={onSave}
-          className="mt5-btn mt5-btn-secondary"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontWeight: 900 }}
-        >
-          <Save size={16} /> {mobileT(lang, 'Save settings', 'حفظ المتغيرات')}
-        </button>
-      )}
       <div className="mt5-card" style={radarOn ? { borderColor: 'rgba(0,255,136,0.4)' } : undefined}>
         <div className="mt5-card-header">
           <div className="mt5-card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

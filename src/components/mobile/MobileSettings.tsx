@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bell, Volume2, Globe, Shield, LogOut, LogIn, Loader2, RefreshCw, User, Camera, ChevronLeft, Save } from 'lucide-react';
+import { Bell, Volume2, Globe, Shield, LogOut, LogIn, Loader2, RefreshCw, User, Camera, ChevronLeft } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { useMobileMode } from '../../lib/mobileMode';
 import TradingValuesPanel from '../TradingValuesPanel';
@@ -36,10 +36,8 @@ interface MobileSettingsProps {
   /** Lifted to MobileLayout so the ONE header back icon can leave a sub-page. */
   activeSystem?: MobileSystem | null;
   onActiveSystemChange?: (id: MobileSystem | null) => void;
-  /** Incremented by the Save button; flushes any still-focused drafts. */
+  /** Incremented by the floating Save button; flushes focused drafts. */
   saveTick?: number;
-  /** Renders ONE labelled Save button on this settings page. */
-  onSave?: () => void;
 }
 
 // Mobile parity with desktop: Settings shows ONLY the system names (one per
@@ -66,7 +64,6 @@ export function MobileSettings({
   activeSystem = null,
   onActiveSystemChange,
   saveTick = 0,
-  onSave,
 }: MobileSettingsProps) {
   const isAr = language === 'ar';
   const mode = useMobileMode();
@@ -130,7 +127,7 @@ export function MobileSettings({
     { suffix: 'Metals', ar: 'المعادن', en: 'Metals' },
   ];
 
-  // The header save icon flushes text fields that are still focused. Normal
+  // The floating save button flushes text fields that are still focused. Normal
   // edits already persist on change/blur; this only makes the explicit Save
   // action deterministic and shows the user that nothing is left pending.
   useEffect(() => {
@@ -173,12 +170,21 @@ export function MobileSettings({
     { id: 'devLogin', ar: 'تسجيل دخول المطور', en: 'Developer Login', devOnly: true, color: '#f59e0b' },
     { id: 'tradingValues', ar: 'نظام القيم الثابتة للتداول (مطور)', en: 'Fixed Trading Values (Dev)', devOnly: true, color: '#14b8a6' },
   ];
+  // A client (free OR paid) may only change language and sound/alerts. Every
+  // strategy/access control stays developer-only — there is no login-related
+  // setting exposed to a client account.
+  const isClient = !mode.isDev;
+  const clientAllowed = new Set<MobileSystem>(['sound', 'language']);
   const visibleSystems = systems.filter((s) => {
+    if (isClient) return clientAllowed.has(s.id);
     if (s.id === 'devLogin') return !!onDeveloperLogin;
     if (s.devOnly) return mode.isDev;
     return true;
   });
-  const activeInfo = activeSystem ? systems.find((s) => s.id === activeSystem) : null;
+  // If the account changes while a strategy sub-page is open, never leave that
+  // page reachable for a client.
+  const shownSystem = isClient && activeSystem !== null && !clientAllowed.has(activeSystem) ? null : activeSystem;
+  const activeInfo = shownSystem ? systems.find((s) => s.id === shownSystem) : null;
 
   return (
     <div className="mt5-page-container">
@@ -187,7 +193,7 @@ export function MobileSettings({
       </div>
 
       {/* ── Systems index: names only ── */}
-      {activeSystem === null && (
+      {shownSystem === null && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ fontSize: 12, color: '#888', fontWeight: 700, padding: '0 4px' }}>
             {isAr ? 'اختر النظام الذي تريد تعديله — كل نظام في صفحة مستقلة.' : 'Choose a system to edit — each one opens on its own page.'}
@@ -214,27 +220,15 @@ export function MobileSettings({
       )}
 
       {/* ── Dedicated system page ── */}
-      {activeSystem !== null && activeInfo && (
+      {shownSystem !== null && activeInfo && (
         <>
-          {/* No local Back button here: MobileHeader renders the ONE back icon.
-              The Save control is labelled and lives on the page itself so it
-              cannot be missed in the crowded top icon row. */}
-          {onSave && (
-            <button
-              type="button"
-              onClick={onSave}
-              className="mt5-btn mt5-btn-secondary"
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', marginBottom: 10, fontWeight: 900 }}
-            >
-              <Save size={16} /> {isAr ? 'حفظ المتغيرات' : 'Save settings'}
-            </button>
-          )}
+          {/* Back and Save are the two floating controls owned by MobileLayout. */}
           <div className="mt5-signal-card" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12, padding: 16 }}>
             <div style={{ fontSize: 16, fontWeight: 900, color: '#fff' }}>
               {isAr ? activeInfo.ar : activeInfo.en}
             </div>
 
-            {activeSystem === 'autoTrade' && (
+            {shownSystem === 'autoTrade' && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span>{isAr ? 'التداول التلقائي' : 'Auto Trade'}</span>
                 <button className="mt5-btn mt5-btn-secondary" onClick={() => onAutoTradeToggle(!autoTradeEnabled)}>
@@ -243,7 +237,7 @@ export function MobileSettings({
               </div>
             )}
 
-            {activeSystem === 'thresholds' && (
+            {shownSystem === 'thresholds' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
                   {isAr
@@ -337,7 +331,7 @@ export function MobileSettings({
               </div>
             )}
 
-            {activeSystem === 'retrace' && (
+            {shownSystem === 'retrace' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
                   {isAr
@@ -461,7 +455,7 @@ export function MobileSettings({
               </div>
             )}
 
-            {activeSystem === 'sound' && (
+            {shownSystem === 'sound' && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span>{isAr ? 'الصوت' : 'Sound'}</span>
                 <button className="mt5-btn mt5-btn-secondary" onClick={() => onSoundToggle(!soundEnabled)}>
@@ -470,7 +464,7 @@ export function MobileSettings({
               </div>
             )}
 
-            {activeSystem === 'language' && (
+            {shownSystem === 'language' && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span>{isAr ? 'اللغة' : 'Language'}</span>
                 <select value={language} onChange={(e) => onLanguageChange(e.target.value as Language)}>
@@ -480,7 +474,7 @@ export function MobileSettings({
               </div>
             )}
 
-            {activeSystem === 'devLogin' && onDeveloperLogin && (
+            {shownSystem === 'devLogin' && onDeveloperLogin && (
               <>
                 <button className="mt5-btn mt5-btn-secondary mt5-btn-block" onClick={onDeveloperLogin} disabled={devLoginBusy}>
                   {devLoginBusy ? <Loader2 size={16} className="spin" /> : <Shield size={16} />} {isAr ? 'تسجيل دخول المطور' : 'Developer Login'}
@@ -489,7 +483,7 @@ export function MobileSettings({
               </>
             )}
 
-            {activeSystem === 'tradingValues' && mode.isDev && (
+            {shownSystem === 'tradingValues' && mode.isDev && (
               <TradingValuesPanel lang={language} />
             )}
           </div>

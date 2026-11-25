@@ -24,6 +24,12 @@ interface StorePageProps {
   onCustomerDeletePlan?: () => void;
   /** A guest tried to buy/download: open the sign-in / sign-up modal. */
   onRequireAuth?: (kind: 'plan' | 'product') => void;
+  /** Phone shell owns the single floating back arrow; hide local level links. */
+  hideInternalBack?: boolean;
+  /** Bumped by the floating arrow to step one level back inside the store. */
+  backSignal?: number;
+  /** Reports the current internal depth so the shell can choose back vs. leave. */
+  onBackDepthChange?: (depth: number) => void;
 }
 
 const MAX_DESC_LEN = 55;
@@ -51,7 +57,7 @@ function catLabel(isAr: boolean, key: StoreCategory): string {
   return isAr ? (c?.labelAr || '') : (c?.labelEn || '');
 }
 
-export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, userName, userEmail, customerPlan, planKeyEntered = false, paidMode = true, onCustomerEnterKey, onCustomerUseFree, onCustomerUsePaid, onCustomerDeletePlan, onRequireAuth }: StorePageProps) {
+export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, userName, userEmail, customerPlan, planKeyEntered = false, paidMode = true, onCustomerEnterKey, onCustomerUseFree, onCustomerUsePaid, onCustomerDeletePlan, onRequireAuth, hideInternalBack = false, backSignal = 0, onBackDepthChange }: StorePageProps) {
   const isAr = lang === 'ar';
   const [bots, setBots] = useState<StoreBot[]>([]);
   const [plans, setPlans] = useState<StorePlan[]>([]);
@@ -154,6 +160,19 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
     if (activeType) { setActiveType(null); return; }
     if (activeCat) { setActiveCat(null); return; }
   };
+
+  // The phone shell renders ONE floating arrow. It needs to know whether that
+  // arrow should step back inside the store or leave the store tab entirely.
+  useEffect(() => {
+    const depth = (showRequest ? 1 : 0) + (activeType ? 1 : 0) + (activeCat ? 1 : 0);
+    onBackDepthChange?.(depth);
+    return () => onBackDepthChange?.(0);
+  }, [showRequest, activeType, activeCat, onBackDepthChange]);
+  useEffect(() => {
+    if (backSignal > 0) goBackLevel();
+    // Only a NEW signal from the shell should step back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backSignal]);
 
   // The guest gate. Bold, explicit, and one tap away from the Google sign-in
   // modal — this is what a visitor sees when they try to buy or download.
@@ -383,7 +402,7 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
       </div>
   );
 
-  const levelBack = () => (
+  const levelBack = () => (hideInternalBack ? null : (
     <button
       onClick={goBackLevel}
       className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 text-slate-300 hover:text-white text-xs font-black uppercase tracking-wider transition-all mb-4"
@@ -391,7 +410,7 @@ export default function StorePage({ lang, onBack, isDark, onBuyBot, onBuyPlan, u
       <ArrowLeft size={14} />
       {isAr ? 'رجوع' : 'Back'}
     </button>
-  );
+  ));
 
   const renderCard = (bot: StoreBot) => {
     const desc = isAr ? (bot.descriptionAr || bot.description) : (bot.descriptionEn || bot.description);

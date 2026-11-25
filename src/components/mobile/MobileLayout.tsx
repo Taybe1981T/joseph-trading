@@ -85,8 +85,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   // whether "back" means "leave this settings sub-page/panel" first.
   const [settingsSystem, setSettingsSystem] = useState<MobileSystem | null>(null);
   const [radarSettingsOpen, setRadarSettingsOpen] = useState(false);
-  // Bumped by the header Save icon; editable screens flush drafts on change.
+  // Bumped by the floating Save button; editable screens flush drafts on change.
   const [saveTick, setSaveTick] = useState(0);
+  // The phone shell owns the only back arrow. The store reports its internal
+  // depth so that arrow can step back a level before leaving the tab.
+  const [storeBackDepth, setStoreBackDepth] = useState(0);
+  const [storeBackSignal, setStoreBackSignal] = useState(0);
   // Back-navigation history: every section jump pushes the previous tab, Back pops it (desktop parity: always a way back)
   const histRef = useRef<MobileTab[]>([]);
   const goTab = useCallback((t: MobileTab) => {
@@ -1391,15 +1395,35 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
     goHome();
   };
 
-  // Single back action for every secondary screen: leave the deepest open
-  // settings panel first, otherwise pop one tab from the navigation history.
-  // Full-screen overlays (login, signal detail, payment) have their own back
-  // icon and cover the header, so they never receive this one.
+  // ONE back arrow for the whole phone app, pinned bottom-right above every
+  // layer. It always closes the top-most thing first: login, trade sheet,
+  // signal detail, payment, a settings sub-page, a store level, then the tab.
   const handleMobileBack = () => {
+    if (showLoginModal) { setLoginError(null); setShowLoginModal(false); return; }
+    if (dialog) { setDialog(null); return; }
+    if (detail) { setDetail(null); return; }
+    if (storePlan) {
+      setResumeSessionId(null);
+      setStorePlan(null);
+      setStoreBot(null);
+      goTab('store');
+      return;
+    }
     if (settingsSystem !== null) { setSettingsSystem(null); return; }
     if (radarSettingsOpen) { setRadarSettingsOpen(false); return; }
+    if (tab === 'store' && !storePlan && storeBackDepth > 0) {
+      setStoreBackSignal((n) => n + 1);
+      return;
+    }
     goBack();
   };
+
+  // The save control is visible only on editable settings screens (and the
+  // login sheet). It is solid yellow and pinned at the bottom of the screen.
+  const showFloatingSave = tab === 'settings'
+    || (tab === 'analysis' && radarSettingsOpen)
+    || tab === 'profile'
+    || showLoginModal;
 
   // ONE save action for editable screens: tell the open settings panel to
   // flush anything still focused, then confirm visibly. Values themselves are
@@ -1411,6 +1435,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const handleMobileSave = () => {
     setSaveTick((t) => t + 1);
     showSaved();
+  };
+  const handleFloatingSave = () => {
+    if (showLoginModal) saveLoginState();
+    else handleMobileSave();
   };
   const saveLoginState = () => {
     const em = String(user?.email || email || '').toLowerCase().trim();
@@ -1445,14 +1473,11 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         onNotificationsClick={goHome}
         userEmail={user?.email || email || null}
         avatarUrl={customAvatar || user?.photoURL || null}
-        onProfileClick={() => goTab('profile')}
+        onProfileClick={isDev ? () => goTab('profile') : undefined}
         autoAnalysisRunning={autoAnalysisOn}
         radarCategory={radarProgress?.category ?? null}
-        onAutoAnalysisToggle={canUseAnalysis ? toggleAutoAnalysis : undefined}
-        onBack={tab !== 'home' && tab !== 'store' ? handleMobileBack : undefined}
-        onSave={tab === 'profile' ? handleMobileSave : undefined} />
-      {/* The single back icon is in MobileHeader (and in full-screen overlays).
-          No second text/icon button is rendered here any more. */}
+        onAutoAnalysisToggle={canUseAnalysis ? toggleAutoAnalysis : undefined} />
+      {/* Back and Save are the only floating controls; no header/overlay copies. */}
       {/* Paid plan strip: the client's plan is visible on every section of the
           app, with the same paid/free switch the desktop site has. SOLID YELLOW
           (brand accent) so it is impossible to miss as the free/paid link. */}
@@ -1477,13 +1502,15 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
               )}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => { if (planPaid) returnToFreePlan(); else activatePaidPlan(); }}
-            style={{ flexShrink: 0, padding: '8px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 900, color: '#fff', background: planPaid ? '#111827' : '#065E46' }}
-          >
-            {planPaid ? (lang === 'ar' ? 'رجوع للمجانية' : 'Back to Free') : (lang === 'ar' ? 'تفعيل المدفوعة' : 'Activate Paid')}
-          </button>
+          {isDev && (
+            <button
+              type="button"
+              onClick={() => { if (planPaid) returnToFreePlan(); else activatePaidPlan(); }}
+              style={{ flexShrink: 0, padding: '8px 12px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 900, color: '#fff', background: planPaid ? '#111827' : '#065E46' }}
+            >
+              {planPaid ? (lang === 'ar' ? 'رجوع للمجانية' : 'Back to Free') : (lang === 'ar' ? 'تفعيل المدفوعة' : 'Activate Paid')}
+            </button>
+          )}
         </div>
       )}
       <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
@@ -1492,7 +1519,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} canTrade={isDev || isPlanClient} onDeleteHistory={deleteHistoryTradeMobile} onClearHistory={clearHistoryMobile} />}
         {tab === 'trade' && <MobileNewTrade quotes={quotes} defaultSymbol={selSym} lang={lang} balance={balance} signalFor={signalFor} onOpen={openTrade} canTrade={isDev || isPlanClient} canOpenManual={isDev || isPlanClient} isDeveloper={isDev} devEmail={user?.email || email || ''} />}
         {/* Desktop parity: a paid-plan client in paid mode gets Auto + Manual too. */}
-        {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} settingsOpen={radarSettingsOpen} onSettingsOpenChange={setRadarSettingsOpen} saveTick={saveTick} onSave={handleMobileSave} />}
+        {tab === 'analysis' && canUseAnalysis && <MobileAnalysis lang={lang} settingsOpen={radarSettingsOpen} onSettingsOpenChange={setRadarSettingsOpen} saveTick={saveTick} />}
         {tab === 'manual' && canUseAnalysis && <MobileManualSheet lang={lang} onClose={goHome} onDone={runManual} />}
         {tab === 'transactions' && <TransactionsPage lang={lang} onBack={goBack} hideBack autoEmail={email} isDeveloper={isDev} onGoToStore={() => goTab('store')} onResumeSession={resumeStorePayment} />}
         {tab === 'store' && !storePlan && (
@@ -1521,6 +1548,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
             onCustomerUsePaid={() => activatePaidPlan()}
             onCustomerDeletePlan={() => { void deleteClientPlan(); }}
             onRequireAuth={() => setShowLoginModal(true)}
+            hideInternalBack
+            backSignal={storeBackSignal}
+            onBackDepthChange={setStoreBackDepth}
           />
         )}
         {tab === 'store' && storePlan && (
@@ -1548,8 +1578,8 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
             onConfirm={completeStorePayment}
           />
         )}
-        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} activeSystem={settingsSystem} onActiveSystemChange={setSettingsSystem} saveTick={saveTick} onSave={handleMobileSave} />}
-        {tab === 'profile' && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} isLoggedIn={!!(user?.email || email)} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} isFollowing={following} onFollowToggle={toggleFollowing} saveTick={saveTick} />}
+        {tab === 'settings' && <MobileSettings autoTradeEnabled={auto} soundEnabled={sound} language={lang} onAutoTradeToggle={setAutoBoth} onSoundToggle={setSound} onLanguageChange={setLang} onClearCache={() => { setAlert('Cache cleared'); setTimeout(() => setAlert(null), 3000); }} version="3.1.0" savedAccounts={savedAccounts} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} activeSystem={settingsSystem} onActiveSystemChange={setSettingsSystem} saveTick={saveTick} />}
+        {tab === 'profile' && isDev && <MobileProfile language={lang} userEmail={user?.email || email || null} avatarUrl={customAvatar || user?.photoURL || null} isLoggedIn={!!(user?.email || email)} onLoginClick={() => setShowLoginModal(true)} onLogoutClick={() => doLogout()} onProfileImageChange={onProfileImageChange} onLogoChange={onLogoChange} isFollowing={following} onFollowToggle={toggleFollowing} saveTick={saveTick} />}
         {tab === 'clients' && isDev && <MobileClientMonitor lang={lang} onClose={goHome} onCountChange={setClientCount} />}
         {children}
       </div>
@@ -1569,30 +1599,13 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => { void executeDialogTrade(dialog.symbol, t, v); }} onClose={() => setDialog(null)} />}
       {detail && (isDev
         ? <MobileSignalDetail res={detail} lang={lang} onClose={() => setDetail(null)} />
-        : <AnalysisDetailPage result={detail} onBack={() => setDetail(null)} lang={lang} isClient compact singleBack />)}
+        : <AnalysisDetailPage result={detail} onBack={() => setDetail(null)} lang={lang} isClient compact singleBack hideBack />)}
       {showLoginModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ background: '#1a1a1a', borderRadius: 16, padding: 24, width: '90%', maxWidth: 400, color: '#fff' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-              <button
-                type="button"
-                onClick={() => { setLoginError(null); setShowLoginModal(false); }}
-                aria-label={lang === 'ar' ? 'رجوع' : 'Back'}
-                style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', color: '#fff', cursor: 'pointer', padding: 0 }}
-              >
-                <ArrowLeft size={18} />
-              </button>
-              <button
-                type="button"
-                onClick={saveLoginState}
-                aria-label={lang === 'ar' ? 'حفظ المتغيرات' : 'Save settings'}
-                title={lang === 'ar' ? 'حفظ المتغيرات' : 'Save settings'}
-                style={{ width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 8, border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)', color: '#fff', cursor: 'pointer', padding: 0 }}
-              >
-                <Save size={18} />
-              </button>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{lang === 'ar' ? 'تسجيل الدخول' : 'Login'}</h3>
-            </div>
+            {/* Back and Save use the same two floating controls as the rest of
+                the phone app, so this overlay never duplicates either icon. */}
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, marginBottom: 16 }}>{lang === 'ar' ? 'تسجيل الدخول' : 'Login'}</h3>
             {loginError && (
               <div style={{ marginBottom: 12, padding: '8px 10px', borderRadius: 8, background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)', color: '#fca5a5', fontSize: 12, lineHeight: 1.5 }}>
                 {loginError}
@@ -1617,6 +1630,44 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
             </button>
           </div>
         </div>
+      )}
+
+      {/* ── THE two phone controls ─────────────────────────────────────────
+          One floating back arrow, always bottom-right and above every layer
+          (overlays included). One solid-yellow Save control at the bottom of
+          editable settings. Neither is ever rendered anywhere else. */}
+      <button
+        type="button"
+        onClick={handleMobileBack}
+        aria-label={lang === 'ar' ? 'رجوع' : 'Back'}
+        title={lang === 'ar' ? 'رجوع' : 'Back'}
+        style={{
+          position: 'fixed', bottom: 84, right: 14, width: 46, height: 46,
+          borderRadius: '50%', border: '2px solid #FACC15', background: '#111827',
+          color: '#FACC15', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', padding: 0, zIndex: 2147483647,
+          boxShadow: '0 4px 18px rgba(0,0,0,0.55)',
+        }}
+      >
+        <ArrowLeft size={22} />
+      </button>
+      {showFloatingSave && (
+        <button
+          type="button"
+          onClick={handleFloatingSave}
+          aria-label={lang === 'ar' ? 'حفظ المتغيرات' : 'Save settings'}
+          title={lang === 'ar' ? 'حفظ المتغيرات' : 'Save settings'}
+          style={{
+            position: 'fixed', bottom: 84, right: 72, height: 46,
+            padding: '0 16px', borderRadius: 999, border: '2px solid #111827',
+            background: '#FACC15', color: '#111827', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', gap: 7,
+            fontSize: 13, fontWeight: 900, cursor: 'pointer', zIndex: 2147483646,
+            boxShadow: '0 4px 18px rgba(0,0,0,0.55)',
+          }}
+        >
+          <Save size={18} /> {lang === 'ar' ? 'حفظ المتغيرات' : 'Save'}
+        </button>
       )}
       {alert && <div className="mt5-signal-alert">{alert}</div>}
     </div>

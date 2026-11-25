@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { AnalysisResult } from '../../types';
 import { Language } from '../../lib/i18n';
 import { sigColor, sigLabel, fmtDate } from './MobileSignalCard';
@@ -16,9 +16,9 @@ export function MobileSignalDetail({ res, lang, onClose }: Props) {
   return (
     <div className="mt5-trade-overlay" onClick={onClose}>
       <div className="mt5-trade-panel" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        {/* The single floating back arrow is owned by MobileLayout. */}
+        <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 18, fontWeight: 900, fontStyle: 'italic', color }}>{res.symbol}</div>
-          <button className="mt5-icon-btn" onClick={onClose} aria-label="Back"><ArrowLeft size={18} /></button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
           <span style={{ fontSize: 13, fontWeight: 800, color }}>{sigLabel(String(res.signal), lang)}</span>

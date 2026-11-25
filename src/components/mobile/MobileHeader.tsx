@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Save, Globe, Sun, Moon, Bell, User, Activity } from 'lucide-react';
+import { Globe, Sun, Moon, Bell, User, Activity } from 'lucide-react';
 import { Language } from '../../lib/i18n';
 import { getOpenStockExchanges } from '../../lib/marketHours';
 
@@ -18,10 +18,6 @@ interface MobileHeaderProps {
   autoAnalysisRunning?: boolean;
   radarCategory?: string | null;
   onAutoAnalysisToggle?: () => void;
-  /** ONE back icon for every secondary mobile screen. Only rendered when set. */
-  onBack?: () => void;
-  /** ONE save icon for editable mobile settings. Only rendered when set. */
-  onSave?: () => void;
 }
 
 function isCatOpen(key: string, now: Date): boolean {
@@ -57,7 +53,7 @@ const barBtn: React.CSSProperties = {
 
 export function MobileHeader({
   title, lang, onLangChange, isDark, toggleTheme, clientCount, onClientsClick,
-  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning, radarCategory, onAutoAnalysisToggle, onBack, onSave,
+  onNotificationsClick, userEmail, avatarUrl, onProfileClick, autoAnalysisRunning, radarCategory, onAutoAnalysisToggle,
 }: MobileHeaderProps) {
   const [logo, setLogo] = useState<string | null>(null);
   const [showLang, setShowLang] = useState(false);
@@ -219,31 +215,9 @@ export function MobileHeader({
           </div>
 
           {/* Top icons — all solid yellow; auto analysis is the middle & largest.
-              Back/save icons are rendered ONLY for the screens that need them,
-              so a page never shows either control twice. */}
+              Back and Save are floating controls owned by MobileLayout, so they
+              never appear twice and stay above every overlay. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-            {onBack && (
-              <button
-                className="mt5-icon-btn"
-                style={barBtn}
-                onClick={onBack}
-                aria-label={isAr ? 'رجوع' : 'Back'}
-                title={isAr ? 'رجوع' : 'Back'}
-              >
-                <ArrowLeft size={15} style={{ color: '#111827' }} />
-              </button>
-            )}
-            {onSave && (
-              <button
-                className="mt5-icon-btn"
-                style={barBtn}
-                onClick={onSave}
-                aria-label={isAr ? 'حفظ المتغيرات' : 'Save settings'}
-                title={isAr ? 'حفظ المتغيرات' : 'Save settings'}
-              >
-                <Save size={15} style={{ color: '#111827' }} />
-              </button>
-            )}
             <div style={{ position: 'relative' }}>
               <button
                 className="mt5-icon-btn"
@@ -316,39 +290,42 @@ export function MobileHeader({
               </button>
             )}
 
-            {/* Profile icon — goes to Profile */}
-            <div style={{ position: 'relative' }}>
-              <button
-                className="mt5-icon-btn"
-                style={barBtn}
-                onClick={() => { onProfileClick?.(); }}
-                aria-label="Profile"
-              >
-                {avatarUrl ? (
-                  <img
-                    src={avatarUrl}
-                    alt="Avatar"
-                    style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover' }}
+            {/* Profile icon — developer only. A client has no login/account
+                controls, so the icon is not rendered at all for them. */}
+            {onProfileClick && (
+              <div style={{ position: 'relative' }}>
+                <button
+                  className="mt5-icon-btn"
+                  style={barBtn}
+                  onClick={onProfileClick}
+                  aria-label="Profile"
+                >
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt="Avatar"
+                      style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover' }}
+                    />
+                  ) : (
+                    <User size={15} style={{ color: '#111827' }} />
+                  )}
+                </button>
+                {userEmail && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: -5,
+                      right: -5,
+                      background: '#ffffff',
+                      borderRadius: '50%',
+                      width: 9,
+                      height: 9,
+                      border: '2px solid #EAB308',
+                    }}
                   />
-                ) : (
-                  <User size={15} style={{ color: '#111827' }} />
                 )}
-              </button>
-              {userEmail && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: -5,
-                    right: -5,
-                    background: '#ffffff',
-                    borderRadius: '50%',
-                    width: 9,
-                    height: 9,
-                    border: '2px solid #EAB308',
-                  }}
-                />
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
 

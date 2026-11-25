@@ -18,6 +18,8 @@ interface AnalysisDetailPageProps {
   compact?: boolean;
   /** Phone: keep only the back arrow (no second X button on the same page). */
   singleBack?: boolean;
+  /** Phone shell owns ONE floating back arrow; hide the page-level copy. */
+  hideBack?: boolean;
 }
 
 function getSignalColor(signal: SignalType) {
@@ -85,7 +87,7 @@ function parseCandleInfo(value: string) {
   }).filter(Boolean);
 }
 
-export default function AnalysisDetailPage({ result, onBack, lang, isClient = false, compact = false, singleBack = false }: AnalysisDetailPageProps) {
+export default function AnalysisDetailPage({ result, onBack, lang, isClient = false, compact = false, singleBack = false, hideBack = false }: AnalysisDetailPageProps) {
   const [copied, setCopied] = useState(false);
   const isAr = lang === 'ar';
   const colors = getSignalColor(result.signal);
@@ -179,9 +181,11 @@ export default function AnalysisDetailPage({ result, onBack, lang, isClient = fa
       {/* Header */}
       <div className="sticky top-0 z-40 bg-[#0a0f1a]/95 backdrop-blur-xl border-b border-white/5" style={compact ? { paddingTop: 'env(safe-area-inset-top)' } : undefined}>
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
-          <button onClick={onBack} className="p-2 rounded-xl bg-[#F59E0B] hover:bg-[#d97706] transition-all">
-            <ArrowLeft size={20} className="text-black" />
-          </button>
+          {!hideBack && (
+            <button onClick={onBack} className="p-2 rounded-xl bg-[#F59E0B] hover:bg-[#d97706] transition-all">
+              <ArrowLeft size={20} className="text-black" />
+            </button>
+          )}
           <div className="flex-1">
             {!isClient && (
             <div className="flex items-center gap-2">
