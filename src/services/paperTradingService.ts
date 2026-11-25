@@ -3,7 +3,7 @@ import { collection, doc, getDoc, setDoc, addDoc, updateDoc, query, where, getDo
 import { User } from 'firebase/auth';
 import { SYMBOL_CATEGORIES } from '../constants';
 import { isExchangeOpen } from '../lib/marketHours';
-import { STOCK_CONTRACT_SIZE, currencyToUsdFactor } from '../lib/positionMath';
+import { STOCK_CONTRACT_SIZE, currencyToUsdFactor, forexPnlUSD } from '../lib/positionMath';
 import { cryptoBaseQty } from '../lib/cryptoTiers';
 
 export interface PaperTrade {
@@ -141,11 +141,11 @@ export function calcPnl(trade: Pick<PaperTrade, 'category' | 'symbol' | 'side' |
   const diff = (currentPrice - trade.entryPrice) * dir;
   switch (trade.category) {
     case 'forex': {
-      // Standard lot = 100k units. USD-quote pairs: P&L in USD directly.
-      // Quote-currency pairs (JPY/crosses): convert approximately through price.
-      const s = trade.symbol.toUpperCase();
-      if (s.endsWith('USD')) return diff * trade.qty * 100000;
-      return (diff / Math.max(currentPrice, 0.0001)) * trade.qty * 100000;
+      // Use the SAME pip value as SL/TP/trailing math. The old conversion
+      // `diff / price * qty * 100000` undercounted JPY/cross-quote pairs by
+      // ~100x (GBPJPY showed $0.06 for a 10-pip move worth ~$67), so the trail
+      // stayed dormant until a huge give-back, then parked the stop at entry.
+      return forexPnlUSD(trade.symbol, diff, trade.qty);
     }
     case 'metals':
       return diff * trade.qty * 100; // 1 lot = 100 oz

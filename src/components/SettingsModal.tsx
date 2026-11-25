@@ -541,7 +541,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
             }`}>
             <div className="flex-1 min-w-0">
               <div className="text-lg md:text-xl font-black leading-tight">{isAr ? 'تفعيل الوقف المتحرك (Trailing Stop)' : 'Enable Trailing Stop'}</div>
-              <div className="text-sm md:text-base opacity-70 mt-1 leading-snug">{isAr ? 'يؤمّن الصفقة عند نقطة الدخول ثم يتبع الربح بخطوات؛ القيم أدناه عند لوت 0.01 وتتوسع تلقائيًا مع اللوت' : 'Locks breakeven then trails profit in steps; values below are for lot 0.01 and auto-scale with lot size'}</div>
+              <div className="text-sm md:text-base opacity-70 mt-1 leading-snug">{isAr ? 'لا يحرّك الوقف قبل ربح خطوة كاملة، ثم يقفل خطوة ربح ويتبع الربح بخطوات؛ الحساب عند الرصيد فقط ينطبق على كل الفئات' : 'No stop move before one full step of profit, then it locks a step and trails in steps; balance-only scaling applies to every category'}</div>
             </div>
             <div className={`w-14 h-8 rounded-full transition-colors flex items-center px-1 shrink-0 ${
               settings.trailingEnabled !== false ? 'bg-emerald-400' : 'bg-white/20'

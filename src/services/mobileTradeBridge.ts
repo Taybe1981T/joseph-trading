@@ -323,7 +323,7 @@ async function mobileManagePositions(): Promise<void> {
       const tr = calcTrailingStop({
         qty: t.qty, openPnlUSD: pnl, balance,
       });
-      if (tr.active && typeof t.qty === 'number' && t.qty > 0 && typeof t.entryPrice === 'number' && t.entryPrice > 0) {
+      if (tr.active && tr.offsetUSD > 0 && typeof t.qty === 'number' && t.qty > 0 && typeof t.entryPrice === 'number' && t.entryPrice > 0) {
         const newSl = usdToPrice(t.symbol, tr.offsetUSD, t.entryPrice, isBuy, t.qty, t.category || detectMobileTradeCategory(t.symbol));
         // Guard like the desktop/global paths: an invalid SL (e.g. from a
         // malformed qty) made the sell-side comparison always true and closed

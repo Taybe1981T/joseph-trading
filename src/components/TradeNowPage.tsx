@@ -628,18 +628,15 @@ export default function TradeNowPage({ lang, user, signals = [], canTrade = true
         const trail = calcTrailingStop({
           qty: t.qty, openPnlUSD: pnlUSD, balance,
         });
-        // active covers BOTH: first activation (offset 0 → stop to breakeven/entry)
-        // and every subsequent step (offset > 0 → stop trails into profit).
-        if (trail.active && trail.offsetUSD >= 0) {
+        // The trail only arms after at least one full step of profit, so an
+        // active result always places the stop in profit (never at entry).
+        if (trail.active && trail.offsetUSD > 0) {
           // Place the stop `offsetUSD` in profit from entry:
           //   buy  → stop ABOVE entry · sell → stop BELOW entry
-          // offset 0 → exactly at entry (breakeven lock).
           const above = t.side === 'buy';
           const newSl = usdToPrice(t.symbol, trail.offsetUSD, t.entryPrice, above, t.qty, t.category);
           if (isFinite(newSl) && newSl > 0) {
             // Only ratchet toward profit — never let a good stop fall back.
-            // breakeven (offset 0) for a buy lands ON entry; treat that as an
-            // improvement only if the current stop is still below entry.
             const better = t.side === 'buy'
               ? newSl > (t.sl ?? -Infinity)
               : newSl < (t.sl ?? Infinity);

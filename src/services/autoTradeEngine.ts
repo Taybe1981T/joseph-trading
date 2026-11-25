@@ -243,7 +243,7 @@ export class AutoTradeEngine {
             const trail = calcTrailingStop({
               qty: t.qty, openPnlUSD: pnlUSD, balance,
             });
-            if (trail.active && trail.offsetUSD >= 0) {
+            if (trail.active && trail.offsetUSD > 0) {
               const above = t.side === 'buy';
               const newSl = usdToPrice(t.symbol, trail.offsetUSD, t.entryPrice, above, t.qty, t.category);
               if (isFinite(newSl) && newSl > 0) {

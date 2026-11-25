@@ -171,12 +171,12 @@ export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   goldenConfMaxStocks: 85,
   goldenConfMinMetals: 70,
   goldenConfMaxMetals: 85,
-  // ── Trailing stop (dynamic, scales with lot size) ──
+  // ── Trailing stop (balance-based; legacy lot fields are ignored) ──
   trailingEnabled: true,    // master on/off (each TradeNowPage tick checks it)
-  trailingBaseActivationUSD: 5,  // $ profit that arms the trail at the base lot 0.01
-  trailingBaseStepUSD: 2,        // locked-profit step ($) at the base lot 0.01
-  trailingActivationLotStep: 2,  // +$ activation for each extra 0.01 lot above 0.01
-  trailingStepLotStep: 1,        // +$ step for each extra 0.01 lot above 0.01
+  trailingBaseActivationUSD: 5,  // legacy field, kept for old saved settings
+  trailingBaseStepUSD: 2,        // legacy field, kept for old saved settings
+  trailingActivationLotStep: 2,  // legacy field, kept for old saved settings
+  trailingStepLotStep: 1,        // legacy field, kept for old saved settings
 };
 
 /** Fixed crypto universe size — shared by desktop manual, radar and mobile. */

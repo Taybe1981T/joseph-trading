@@ -172,12 +172,12 @@ export interface StrategySettings {
   goldenConfMaxStocks?: number;
   goldenConfMinMetals?: number;
   goldenConfMaxMetals?: number;
-  // ── Trailing stop (dynamic, scales with lot size) ──
+  // ── Trailing stop (balance-based; legacy lot fields are ignored) ──
   trailingEnabled?: boolean;           // master on/off for the trailing stop (default true)
-  trailingBaseActivationUSD?: number;  // profit ($) that activates the trail at lot 0.01 (default 5)
-  trailingBaseStepUSD?: number;        // trailing step ($) at lot 0.01 (default 2)
-  trailingActivationLotStep?: number;  // extra activation ($) per +0.01 lot above 0.01 (default 2)
-  trailingStepLotStep?: number;        // extra step ($) per +0.01 lot above 0.01 (default 1)
+  trailingBaseActivationUSD?: number;  // legacy field, kept for backward compatibility
+  trailingBaseStepUSD?: number;        // legacy field, kept for backward compatibility
+  trailingActivationLotStep?: number;  // legacy field, kept for backward compatibility
+  trailingStepLotStep?: number;        // legacy field, kept for backward compatibility
 }
 
 export interface AutoAnalysisSettings {

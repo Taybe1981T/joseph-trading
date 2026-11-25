@@ -145,7 +145,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
       openPnlUSD: pnl,
       balance,
     });
-    if (tr.active) {
+    if (tr.active && tr.offsetUSD > 0) {
       const isBuy = openForSymbol.side === 'buy';
       chartTrailingPrice = usdToPrice(symbol, tr.offsetUSD, openForSymbol.entryPrice, isBuy, openForSymbol.qty, chartCategory);
     }

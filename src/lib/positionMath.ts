@@ -110,6 +110,17 @@ export function slAmountUSD(symbol: string, slDistance: number, qty: number, cat
   return slDistance * qty;
 }
 
+/**
+ * Signed USD P/L for a forex price move, using the SAME pip value as SL/TP and
+ * trailing. Keeping this here (instead of a price-ratio approximation in the
+ * trade service) guarantees JPY and cross-quote pairs cannot drift away from
+ * the levels the engine actually places.
+ */
+export function forexPnlUSD(symbol: string, signedPriceDiff: number, qty: number): number {
+  const cfg = getInstrumentConfig(symbol);
+  return (signedPriceDiff / cfg.pipSize) * cfg.pipValuePerLotUSD * qty;
+}
+
 // Convert a USD amount back to a limit price given entry, side of the level,
 // qty and category. `above` = true places the level above entry (profit-side
 // for a buy / loss-side for a sell), `above` = false places it below entry.
