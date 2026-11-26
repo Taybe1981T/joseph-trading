@@ -1061,6 +1061,13 @@ export async function analyzeMarket(params: {
     // enabled with the same lenient forex-style rule, but each has its own
     // switch and can be disabled manually.
     let retraceCandles: RetraceCandle[] | null = null;
+    // Count BOTH sides once, before the volume guard runs. A completed pullback
+    // makes low pullback volume acceptable; without this preview the volume
+    // guard killed crypto/stocks/metals signals before the Retrace gate could
+    // ever allow them. The final gate reuses these exact counts.
+    let retraceSkipForming = false;
+    let retracePreviewBuy: ReturnType<typeof countRetraceCandles> | null = null;
+    let retracePreviewSell: ReturnType<typeof countRetraceCandles> | null = null;
     if (retraceCfg.enabled) {
       const tfKey = retraceCfg.timeframe === '1d' ? 'daily'
         : retraceCfg.timeframe === '1w' ? 'weekly'
@@ -1080,7 +1087,15 @@ export async function analyzeMarket(params: {
       if (!retraceCandles) {
         throw new Error(`Retrace data unavailable (${retraceCfg.timeframe}) — cannot verify entry`);
       }
-      console.log(`[Engine] ${symbol} retrace data (${retraceCfg.timeframe}): ${retraceCandles.length} candles`);
+      retraceSkipForming = isLastCandleForming(retraceCandles, retraceCfg.timeframe);
+      const countOpts = {
+        skipLast: retraceSkipForming,
+        strictMode: retraceCfg.strictMode,
+        skipTrailingAligned: true,
+      };
+      retracePreviewBuy = countRetraceCandles(retraceCandles, 'buy', retraceCfg.candles, countOpts);
+      retracePreviewSell = countRetraceCandles(retraceCandles, 'sell', retraceCfg.candles, countOpts);
+      console.log(`[Engine] ${symbol} retrace data (${retraceCfg.timeframe}): ${retraceCandles.length} candles | buy ${retracePreviewBuy.found}/${retracePreviewBuy.required}, sell ${retracePreviewSell.found}/${retracePreviewSell.required}`);
     }
 
     console.log(`[Engine] ${symbol} data fetched in ${Date.now() - fetchT0}ms`);
@@ -1122,10 +1137,6 @@ export async function analyzeMarket(params: {
       ? supplyDemandZones.map(z => `${z.type === 'supply' ? 'Supply' : 'Demand'} zone: ${z.bottom.toFixed(2)}ΓÇô${z.top.toFixed(2)} (strength ${z.strength.toFixed(0)}%)`).join('. ')
       : 'No clear zones detected.';
 
-    // ── Professional Volume Quality (5-module filter) ──
-    const volumeQuality = computeVolumeQuality(closes, highs, lows, volumes || [], opens, metrics?.direction || 'sideways', gateProfileFor(type).ignoreZeroVolume, gateProfileFor(type).skipFormingVolumeCandle);
-    console.log(`[Engine] ${symbol} VolumeQuality=${volumeQuality.score}/100 detected=${volumeQuality.detected} absorbed=${volumeQuality.absorbed} ${volumeQuality.reasons.join('; ')}`);
-    
     // Process micro data (already fetched in parallel above)
     var microCloses: number[] = [];
     var microMetrics = null;
@@ -1444,6 +1455,25 @@ Return ONLY valid JSON:
     // ΓöÇΓöÇ STEP 2: Compute primary & supporting from METRICS (not AI text) ΓöÇΓöÇ
     const isUp = metrics?.direction === 'uptrend';
     const isDown = metrics?.direction === 'downtrend';
+
+    // ── Professional Volume Quality (5-module filter) ────────────────────────
+    // Computed only now, after direction is known, so a completed retrace can
+    // mark its own low volume as healthy. Absorption and climax guards are
+    // still checked normally — this exception only removes the weak-conviction
+    // penalty for quiet pullback candles.
+    const previewSide = isUp ? 'buy' : isDown ? 'sell' : null;
+    const previewCount = previewSide === 'buy'
+      ? retracePreviewBuy
+      : previewSide === 'sell' ? retracePreviewSell : null;
+    const retraceLowVolumeOk = !!(
+      retraceCfg.enabled && previewSide && previewCount?.confirmed
+    );
+    const volumeQuality = computeVolumeQuality(
+      closes, highs, lows, volumes || [], opens, metrics?.direction || 'sideways',
+      gateProfileFor(type).ignoreZeroVolume, gateProfileFor(type).skipFormingVolumeCandle,
+      retraceLowVolumeOk,
+    );
+    console.log(`[Engine] ${symbol} VolumeQuality=${volumeQuality.score}/100 detected=${volumeQuality.detected} absorbed=${volumeQuality.absorbed} retraceLowVolumeOk=${retraceLowVolumeOk} ${volumeQuality.reasons.join('; ')}`);
 
     // PRIMARY 1 ΓÇö BB Pullback (lenient gate): passes if BB exists and aligns with direction.
     // Strict pullback (touch+3-6c+reversal) is for STRONG upgrade only, not for blocking signals.
@@ -2313,14 +2343,11 @@ Return ONLY valid JSON:
                                     finalSignal === SignalType.SELL || finalSignal === SignalType.STRONG_SELL;
     if (retraceCfg.enabled && isTradeSignalForRetrace) {
       const retraceSide = (finalSignal === SignalType.BUY || finalSignal === SignalType.STRONG_BUY) ? 'buy' : 'sell';
-      const skipForming = isLastCandleForming(retraceCandles, retraceCfg.timeframe);
-      const count = countRetraceCandles(retraceCandles, retraceSide, retraceCfg.candles, {
-        skipLast: skipForming,
-        strictMode: retraceCfg.strictMode,
-        // The candle that confirms the correction closes WITH the trade; it
-        // must not erase the retrace run that came before it.
-        skipTrailingAligned: true,
-      });
+      const skipForming = retraceSkipForming;
+      // Reuse the preview computed before the volume guard: the SAME count now
+      // decides both the low-volume exception and this final gate.
+      const count = (retraceSide === 'buy' ? retracePreviewBuy : retracePreviewSell);
+      if (!count) throw new Error('Retrace count unavailable');
       retraceFound = count.found;
       retraceConfirmed = count.confirmed;
       const tfLabel = retraceCfg.timeframe;

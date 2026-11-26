@@ -5,7 +5,8 @@
 export function computeVolumeQuality(
   closes: number[], highs: number[], lows: number[], volumes: number[], opens: number[], direction: string,
   ignoreZeroVolume = false,
-  useCompletedVolume = false
+  useCompletedVolume = false,
+  pullbackLowVolumeOk = false
 ): { score: number; detected: boolean; absorbed: boolean; absorptionLevel: number; reasons: string[] } {
   const len = closes.length;
   const v = volumes || [];
@@ -27,7 +28,14 @@ export function computeVolumeQuality(
   const volRatio = avgPrevVol > 0 ? lastVol / avgPrevVol : 1;
 
   // ── Module 1: Relative volume (0-25) ──
-  const relScore = Math.max(0, Math.min(25, ((volRatio - 0.8) / 1.7) * 25));
+  let relScore = Math.max(0, Math.min(25, ((volRatio - 0.8) / 1.7) * 25));
+  // A completed retrace is SUPPOSED to print quieter candles. When the engine
+  // has confirmed the pullback, low relative volume is neutral instead of a
+  // weak-conviction penalty; the score simply loses its volume boost.
+  if (pullbackLowVolumeOk && volRatio < 1) {
+    relScore = 12.5;
+    base.reasons.push('low volume during confirmed retrace — accepted (no weak-conviction penalty)');
+  }
 
   // ── Module 2: Effort vs Result (0-25) ──
   const body = Math.abs((closes[len - 1] || 0) - (opens[len - 1] || closes[len - 1] || 0));
@@ -54,7 +62,9 @@ export function computeVolumeQuality(
   const earlierV = v.slice(Math.max(0, volEnd - window * 2), Math.max(0, volEnd - window));
   const recentAvg = recentV.length ? recentV.reduce((a: number, b: number) => a + b, 0) / recentV.length : 1;
   const earlierAvg = earlierV.length ? earlierV.reduce((a: number, b: number) => a + b, 0) / earlierV.length : 1;
-  const volRising = recentAvg > earlierAvg * 1.1;
+  // Declining volume during a confirmed pullback is the healthy "sellers are
+  // exhausted" read the Retrace gate looks for, so do not cost trend points.
+  const volRising = pullbackLowVolumeOk ? true : recentAvg > earlierAvg * 1.1;
   const priceChange = (closes[len - 1] || 0) - (closes[len - 1 - window] || closes[len - 1] || 0);
   const priceUp = priceChange > 0;
   let trendScore = 10;
@@ -96,7 +106,7 @@ export function computeVolumeQuality(
     const flatFollow = follow.length > 0 && follow.every((c: number) => lastClose > 0 && Math.abs(c - lastClose) / lastClose < 0.002);
     if (flatFollow) { absorptionLevel = Math.max(absorptionLevel, 2); base.reasons.push('huge volume spike, no price follow-through'); }
   }
-  if (volRatio < 0.6 && len >= 20) {
+  if (volRatio < 0.6 && len >= 20 && !pullbackLowVolumeOk) {
     absorptionLevel = Math.max(absorptionLevel, 1);
     base.reasons.push('very low volume — weak conviction');
   }
