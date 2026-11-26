@@ -78,18 +78,21 @@ function planEmail(email?: string | null): string {
 
 /**
  * "Paid mode": whether the client is currently USING their paid plan. Stored in
- * the SAME per-account key the desktop site uses, so returning to free on the
- * phone is honoured on the site too (and the other way round). Default = paid.
+ * the SAME per-account key the desktop site uses, so switching on the phone is
+ * honoured on the site too (and the other way round). Default = FREE: the plan
+ * toggle starts on `plan`, and only an explicit activation turns it to `free`.
  */
 export function mobilePaidMode(email?: string | null): boolean {
   try {
-    // The explicit "Return to Free Plan" opt-out (free_mode) is the ONLY thing
-    // that opens a client in free mode. Default = paid (plan mode), so a client
-    // who owns a running plan never drops to free just because the page/app was
-    // refreshed. Desktop hydration uses exactly the same rule.
-    return !mobileFreeModeChosen(email);
+    const raw = localStorage.getItem(clientScopeKey(planEmail(email), 'paid_mode'));
+    // Explicit activation wins; an explicit return-to-free also wins. When the
+    // account has never chosen, the icon must start in free mode.
+    if (raw === 'true') return true;
+    if (raw === 'false') return false;
+    if (mobileFreeModeChosen(email)) return false;
+    return false;
   } catch {
-    return true;
+    return false;
   }
 }
 

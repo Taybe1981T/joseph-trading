@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Briefcase, Settings, Zap, Package, Receipt, TrendingUp, Hand, Users } from 'lucide-react';
+import { Home, Briefcase, Settings, Zap, Package, Receipt, TrendingUp, Hand, Users, Crown } from 'lucide-react';
 
 export type MobileTab = 'home' | 'quotes' | 'positions' | 'trade' | 'settings' | 'profile' | 'analysis' | 'manual' | 'store' | 'clients' | 'transactions';
 
@@ -10,19 +10,26 @@ interface MobileBottomNavProps {
   /** A paid-plan client (paid mode) may use the same analysis tools as a developer. */
   hasPlan?: boolean;
   lang: 'en' | 'ar';
+  /** Subscribed client who OWNS a plan: show the free/paid toggle by the store. */
+  showPlanToggle?: boolean;
+  /** Currently using the paid plan (flashing stops, label becomes `free`). */
+  planPaid?: boolean;
+  onPlanToggle?: () => void;
 }
 
 interface NavItem {
-  id: MobileTab;
+  id: MobileTab | 'plan';
   label: string;
   icon: React.ElementType;
   /** New tool shown to a paid CLIENT (yellow so it stands out as newly unlocked). */
   highlight?: boolean;
   /** Store: enlarged, French-flag blue, always in the middle of the bar. */
   store?: boolean;
+  /** Free/paid switch: green blinking circle immediately left of the store. */
+  plan?: boolean;
 }
 
-export function MobileBottomNav({ activeTab, onTabChange, isDeveloper: isDev, hasPlan = false, lang }: MobileBottomNavProps) {
+export function MobileBottomNav({ activeTab, onTabChange, isDeveloper: isDev, hasPlan = false, lang, showPlanToggle = false, planPaid = false, onPlanToggle }: MobileBottomNavProps) {
   const isAr = lang === 'ar';
   // Desktop parity (App.tsx DEV_ONLY_PAGES + effectivePage):
   // - CLIENT sees: Home, Trade, Positions, Transactions, Store, Settings.
@@ -49,18 +56,26 @@ export function MobileBottomNav({ activeTab, onTabChange, isDeveloper: isDev, ha
   // Insert the Store exactly in the middle of the bar (large blue button).
   const storeItem: NavItem = { id: 'store', label: isAr ? 'المتجر' : 'Store', icon: Package, store: true };
   const mid = Math.ceil(baseItems.length / 2);
-  const leftItems = baseItems.slice(0, mid);
+  // The plan switch is the LAST item on the left side, i.e. immediately to the
+  // left of the centre store button. It is never a navigation tab.
+  const planItem: NavItem = { id: 'plan', label: planPaid ? 'free' : 'plan', icon: Crown, plan: true };
+  const leftItems = showPlanToggle ? [...baseItems.slice(0, mid), planItem] : baseItems.slice(0, mid);
   const rightItems = baseItems.slice(mid);
 
   const renderItem = (item: NavItem) => (
     <button
       key={item.id}
       type="button"
-      className={`mt5-nav-item ${activeTab === item.id ? 'active' : ''} ${item.highlight ? 'mt5-nav-new' : ''} ${item.store ? 'mt5-nav-store' : ''}`}
-      onClick={() => onTabChange(item.id)}
-      aria-pressed={activeTab === item.id}
+      className={`mt5-nav-item ${activeTab === item.id ? 'active' : ''} ${item.highlight ? 'mt5-nav-new' : ''} ${item.store ? 'mt5-nav-store' : ''} ${item.plan ? 'mt5-nav-plan-item' : ''}`}
+      onClick={() => item.plan ? onPlanToggle?.() : onTabChange(item.id as MobileTab)}
+      aria-pressed={item.plan ? planPaid : activeTab === item.id}
+      aria-label={item.plan ? (planPaid ? 'Free mode' : 'Activate paid plan') : undefined}
     >
-      {item.store ? (
+      {item.plan ? (
+        <span className={`mt5-plan-circle${planPaid ? '' : ' blink'}`}>
+          <item.icon className="mt5-nav-icon" size={20} />
+        </span>
+      ) : item.store ? (
         <span className="mt5-nav-store-badge">
           <item.icon className="mt5-nav-icon" size={24} />
         </span>

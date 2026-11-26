@@ -1595,6 +1595,9 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         isDeveloper={isDev}
         hasPlan={canUseAnalysis}
         lang={lang}
+        showPlanToggle={!isDev && planActive}
+        planPaid={planPaid}
+        onPlanToggle={() => { if (planPaid) returnToFreePlan(); else activatePaidPlan(); }}
       />
       {dialog && <MobileTradeDialog symbol={dialog.symbol} bid={dialog.bid} ask={dialog.ask} onOpen={(t, v) => { void executeDialogTrade(dialog.symbol, t, v); }} onClose={() => setDialog(null)} />}
       {detail && (isDev
