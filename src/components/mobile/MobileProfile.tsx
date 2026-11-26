@@ -204,6 +204,11 @@ export function MobileProfile({
             )}
           </div>
         </div>
+
+        {/* Reserved empty band at the bottom of the sign-in/sign-out section.
+            The single floating Save button sits here, so it never covers or
+            touches the login/logout control or any other icon. */}
+        <div aria-hidden="true" style={{ height: 72, flexShrink: 0 }} />
     </div>
   );
 }

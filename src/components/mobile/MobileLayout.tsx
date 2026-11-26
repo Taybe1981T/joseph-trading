@@ -1519,7 +1519,10 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
           )}
         </div>
       )}
-      <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none' }}>
+      {/* Extra scroll space at the bottom of every screen that shows Save, so
+          the floating control always lands in empty space and never collides
+          with the last icon/button on that page. */}
+      <div style={{ flex: 1, overflowY: 'auto', overflowAnchor: 'none', paddingBottom: showFloatingSave ? 68 : 0 }}>
         {tab === 'home' && <MobileHome fullSignals={fullSignals} lang={lang} onDetail={setDetail} onTrade={(s) => { setSelSym(s); goTab('trade'); }} onRemove={removeSignal} onRemoveAll={clearAllSignalsMobile} autoTradeEnabled={auto} onAutoTradeToggle={setAutoBoth} radarOn={freshCount > 0} radarLabel={freshCount > 0 ? (lang === 'ar' ? `${freshCount} إشارة جديدة` : `${freshCount} new signals`) : null} radarProgress={radarProgress} signalsAllowed={canViewSignals} />}
         {tab === 'quotes' && isDev && <MobileQuotes quotes={quotes} onSelect={pickSymbol} />}
         {tab === 'positions' && <MobilePositions positions={positions} closed={closedTrades} onClose={closeTradeById} onSelect={(sym) => { setSelSym(sym); goTab('trade'); }} canTrade={isDev || isPlanClient} onDeleteHistory={deleteHistoryTradeMobile} onClearHistory={clearHistoryMobile} />}
@@ -1611,7 +1614,7 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
         : <AnalysisDetailPage result={detail} onBack={() => setDetail(null)} lang={lang} isClient compact singleBack hideBack />)}
       {showLoginModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ background: '#1a1a1a', borderRadius: 16, padding: 24, width: '90%', maxWidth: 400, color: '#fff' }}>
+          <div style={{ background: '#1a1a1a', borderRadius: 16, padding: 24, width: '90%', maxWidth: 400, color: '#fff', maxHeight: 'calc(100vh - 280px)', overflowY: 'auto' }}>
             {/* Back and Save use the same two floating controls as the rest of
                 the phone app, so this overlay never duplicates either icon. */}
             <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, marginBottom: 16 }}>{lang === 'ar' ? 'تسجيل الدخول' : 'Login'}</h3>

@@ -42,7 +42,7 @@ body.light {
   .mt5-nav-center .mt5-nav-item { width: 78px; }
   /* Plan + Store grouped and nudged right, so the plan circle does not touch
      the last left-side icon (Transactions). */
-  .mt5-nav-center.has-plan { width: 126px; gap: 6px; justify-content: flex-start; transform: translateX(6px); }
+  .mt5-nav-center.has-plan { width: 134px; gap: 6px; justify-content: flex-start; transform: translateX(6px); }
   .mt5-nav-center.has-plan .mt5-nav-item { width: auto; }
   .mt5-nav-center.has-plan .mt5-nav-store { width: 78px; }
   .mt5-nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 70px; height: 100%; justify-content: center; color: var(--mt5-text-muted); font-size: 11px; font-weight: 600; cursor: pointer; background: transparent; border: none; }
@@ -51,7 +51,7 @@ body.light {
   .mt5-nav-item .mt5-nav-label { font-size: 11px; white-space: nowrap; }
   /* Store: enlarged French-flag blue button, always in the CENTRE of the bar. */
   .mt5-nav-item.mt5-nav-store { position: relative; }
-  .mt5-nav-store .mt5-nav-store-badge { width: 46px; height: 46px; border-radius: 999px; background: #0055A4; display: inline-flex; align-items: center; justify-content: center; transform: translateY(-4px); box-shadow: 0 6px 16px rgba(0,85,164,.45), inset 0 0 0 2px rgba(255,255,255,.2); }
+  .mt5-nav-store .mt5-nav-store-badge { width: 46px; height: 46px; border-radius: 999px; background: #0055A4; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 6px 16px rgba(0,85,164,.45), inset 0 0 0 2px rgba(255,255,255,.2); }
   .mt5-nav-store .mt5-nav-store-badge .mt5-nav-icon { color: #fff; }
   .mt5-nav-store .mt5-nav-label { color: #6BB0F3; font-weight: 800; }
   .mt5-nav-item.mt5-nav-store.active .mt5-nav-store-badge { background: #004a8f; box-shadow: 0 0 0 3px rgba(0,85,164,.35), 0 8px 20px rgba(0,85,164,.65), inset 0 0 0 2px rgba(255,255,255,.25); }
@@ -67,12 +67,12 @@ body.light {
   .mt5-nav-new .mt5-nav-dot { position: absolute; top: -3px; right: -6px; width: 8px; height: 8px; border-radius: 999px; background: #F59E0B; box-shadow: 0 0 8px rgba(245,158,11,.9); animation: mt5NavPulse 1.6s ease-in-out infinite; }
   @keyframes mt5NavPulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .55; transform: scale(.8); } }
   @media (prefers-reduced-motion: reduce) { .mt5-nav-new .mt5-nav-dot { animation: none; } }
-  /* Paid-plan switch: green circle, same size as the sign-in circle, immediately
-     left of the Store. It blinks TWICE every 10s only while in free mode. */
+  /* Paid-plan switch: green circle, EXACTLY the same 46px size and vertical
+     level as the Store badge. It blinks TWICE every 10s only in free mode. */
   .mt5-nav-plan-item { color: #fff !important; }
-  .mt5-plan-circle { width: 42px; height: 42px; border-radius: 999px; background: #16A34A; border: 2px solid rgba(255,255,255,.85); display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(22,163,74,.45); }
+  .mt5-plan-circle { width: 46px; height: 46px; border-radius: 999px; background: #16A34A; border: 2px solid rgba(255,255,255,.85); display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(22,163,74,.45); }
   .mt5-plan-circle .mt5-nav-icon { color: #fff; }
-  .mt5-plan-label { color: #fff; font-size: 10px; font-weight: 900; line-height: 1; text-transform: lowercase; }
+  .mt5-nav-plan-item .mt5-nav-label { color: #fff; font-size: 11px; font-weight: 800; }
   .mt5-plan-circle.blink { animation: mt5PlanBlink 10s ease-in-out infinite; }
   @keyframes mt5PlanBlink {
     0%, 17%, 23%, 57%, 63%, 100% { transform: scale(1); opacity: 1; box-shadow: 0 4px 12px rgba(22,163,74,.45); }
