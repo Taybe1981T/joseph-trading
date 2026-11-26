@@ -56,10 +56,10 @@ export function MobileBottomNav({ activeTab, onTabChange, isDeveloper: isDev, ha
   // Insert the Store exactly in the middle of the bar (large blue button).
   const storeItem: NavItem = { id: 'store', label: isAr ? 'المتجر' : 'Store', icon: Package, store: true };
   const mid = Math.ceil(baseItems.length / 2);
-  // The plan switch is the LAST item on the left side, i.e. immediately to the
-  // left of the centre store button. It is never a navigation tab.
+  // Store + plan are ONE compact centre cluster, nudged slightly right so the
+  // plan circle never touches the Transactions icon. The switch is not a tab.
   const planItem: NavItem = { id: 'plan', label: planPaid ? 'free' : 'plan', icon: Crown, plan: true };
-  const leftItems = showPlanToggle ? [...baseItems.slice(0, mid), planItem] : baseItems.slice(0, mid);
+  const leftItems = baseItems.slice(0, mid);
   const rightItems = baseItems.slice(mid);
 
   const renderItem = (item: NavItem) => (
@@ -94,7 +94,10 @@ export function MobileBottomNav({ activeTab, onTabChange, isDeveloper: isDev, ha
   return (
     <nav className="mt5-bottom-nav" role="navigation" aria-label="Main navigation">
       <div className="mt5-nav-side">{leftItems.map(renderItem)}</div>
-      <div className="mt5-nav-center">{renderItem(storeItem)}</div>
+      <div className={`mt5-nav-center${showPlanToggle ? ' has-plan' : ''}`}>
+        {showPlanToggle && renderItem(planItem)}
+        {renderItem(storeItem)}
+      </div>
       <div className="mt5-nav-side">{rightItems.map(renderItem)}</div>
     </nav>
   );

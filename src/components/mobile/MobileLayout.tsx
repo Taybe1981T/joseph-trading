@@ -61,7 +61,7 @@ import type { PaymentSession } from '../../services/paymentSession';
 import { getLivePrices, calcPnl, isMarketOpen, getTradeStore } from '../../services/paperTradingService';
 import { pollMirrorEvents, listenMirrorEvents, broadcastMirrorEvent, clearEventFor } from '../../services/tradeMirror';
 import { publishSharedSignals, applySignalTombstones } from '../../services/sharedSignals';
-import { startDevSettingsSync, DEV_SETTINGS_EVENT } from '../../services/devSettingsSync';
+import { startDevSettingsSync, startClientEntrySettingsMirror, DEV_SETTINGS_EVENT } from '../../services/devSettingsSync';
 import { rememberBuyerEmail, setCurrentUserEmail } from '../../lib/clientScope';
 import { stackedPlanExpiry } from '../../lib/planPeriod';
 
@@ -526,6 +526,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   const planActive = !!mobileSub && mobileSubscriptionActive(mobileSub);
   const isPlanClient = !isDev && planActive && planPaid;
   const canUseAnalysis = isDev || isPlanClient;
+  // While a client is actually USING their plan, inherit the developer's entry
+  // settings live. Read-only: the client never writes the shared developer doc.
+  useEffect(() => {
+    if (!isPlanClient) return;
+    return startClientEntrySettingsMirror();
+  }, [isPlanClient]);
   // Developer signals are visible to EVERYONE on mobile: a free/guest client
   // sees the developer's published signals (read-only), a paid client sees their
   // own analysis. The developer always sees them.

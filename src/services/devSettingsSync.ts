@@ -1,5 +1,6 @@
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+import { applySharedValues } from '../lib/sharedSettingsApply';
 
 /**
  * Developer settings — ONE account, two devices.
@@ -48,6 +49,14 @@ export const DEV_SYNC_KEYS: string[] = [
   'finalyze_hidden_symbols',
   'finalyze_custom_tv_symbols',
 ];
+
+/**
+ * Entry/analysis logic that a subscribed client inherits from the developer
+ * while actually using the paid plan. `auto_settings` stays per-device (the
+ * radar ON/OFF and cadence belong to the client), and identity/payment keys
+ * are never copied.
+ */
+export const CLIENT_ENTRY_SYNC_KEYS: readonly string[] = ['strategy_settings'];
 
 const POLL_MS = 900;
 const DEVICE_ID_KEY = 'finalyze_device_id';
@@ -232,6 +241,35 @@ export function startDevSettingsSync(opts: DevSettingsSyncOptions): () => void {
   return () => {
     stopped = true;
     clearInterval(timer);
+    try { unsubscribe?.(); } catch {}
+  };
+}
+
+/**
+ * READ-ONLY mirror for a subscribed client. The desktop developer's entry
+ * settings (strategy_settings) drive the same analysis logic on the client's
+ * phone while their plan is active. This function NEVER writes to Firestore,
+ * so a client can only receive values, never change the shared developer doc.
+ */
+export function startClientEntrySettingsMirror(): () => void {
+  let stopped = false;
+  let unsubscribe: (() => void) | null = null;
+  try {
+    unsubscribe = onSnapshot(
+      doc(db, 'shared_settings', DEV_SYNC_DOC),
+      (snap) => {
+        if (stopped || !snap.exists()) return;
+        const data: any = snap.data() || {};
+        const changed = applySharedValues(data.values, CLIENT_ENTRY_SYNC_KEYS, localStorage);
+        if (changed.length > 0) emitApplied(changed);
+      },
+      (err) => console.warn('[client-settings] listener unavailable:', err),
+    );
+  } catch (e) {
+    console.warn('[client-settings] could not start listener:', e);
+  }
+  return () => {
+    stopped = true;
     try { unsubscribe?.(); } catch {}
   };
 }
