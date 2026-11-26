@@ -14,7 +14,12 @@ import { getStatus, subscribe } from '../services/rateLimitTracker';
 import { isExchangeOpen, StockExchangeKey } from '../lib/marketHours';
 import { isDeveloperEmail } from '../lib/clientIds';
 import { consumeSymbolAnalyses } from '../services/manualQuota';
-import { normalizeSymbolInput, registerCustomSymbol, readCustomTvMap } from '../lib/customSymbols';
+import { beginManualAnalysis, endManualAnalysis, isManualAbortError, stopManualAnalysis } from '../services/manualAnalysisControl';
+import {
+  normalizeSymbolInput, registerCustomSymbol,
+  readCustomSymbols, writeCustomSymbols, readHiddenSymbols, writeHiddenSymbols,
+  customSymbolsForCategory,
+} from '../lib/customSymbols';
 
 interface AnalysisFormProps {
   user: User | null;
@@ -22,6 +27,7 @@ interface AnalysisFormProps {
   onProgress: (current: string, total: number, index: number, failed?: number) => void;
   onResult: (res: AnalysisResult[]) => void;
   onError: (msg?: string, allFailed?: boolean) => void;
+  onCancel?: () => void;
   lang: Language;
   settings: StrategySettings;
   hasActivePlan: boolean;
@@ -47,35 +53,24 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   Clock: <Clock size={18} />,
 };
 
-export default function AnalysisForm({ user, onBegin, onProgress, onResult, onError, lang, settings, hasActivePlan, onUpgrade, autoStartToken = 0, onAutoStartConsumed }: AnalysisFormProps) {
+export default function AnalysisForm({ user, onBegin, onProgress, onResult, onError, onCancel, lang, settings, hasActivePlan, onUpgrade, autoStartToken = 0, onAutoStartConsumed }: AnalysisFormProps) {
   const t = translations[lang];
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
   const [analyzingIndex, setAnalyzingIndex] = useState<number | null>(null);
   const [formErrors, setFormErrors] = useState<string[]>([]);
-  const abortRef = useRef<AbortController | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [dropdownSearch, setDropdownSearch] = useState("");
   const [showAllSymbols, setShowAllSymbols] = useState(false);
   const [showUpgradeOverlay, setShowUpgradeOverlay] = useState(false);
-  const [hiddenSymbols, setHiddenSymbols] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('finalyze_hidden_symbols');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
-  const [customSymbols, setCustomSymbols] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem('finalyze_custom_symbols');
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
+  const [hiddenSymbols, setHiddenSymbols] = useState<string[]>(() => readHiddenSymbols());
+  const [customSymbols, setCustomSymbols] = useState<string[]>(() => readCustomSymbols());
 
   useEffect(() => {
-    localStorage.setItem('finalyze_hidden_symbols', JSON.stringify(hiddenSymbols));
+    writeHiddenSymbols(hiddenSymbols);
   }, [hiddenSymbols]);
 
   useEffect(() => {
-    localStorage.setItem('finalyze_custom_symbols', JSON.stringify(customSymbols));
+    writeCustomSymbols(customSymbols);
   }, [customSymbols]);
 
   const [rateLimitActive, setRateLimitActive] = useState(false);
@@ -134,11 +129,11 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
       return;
     }
     const allGroupsSymbols = SYMBOL_GROUPS[selectedType]?.flatMap(g => g.symbols) || [];
-    const customForType = customSymbols.filter(s => 
-      (ALL_SYMBOLS_DB[selectedType] || []).includes(s) &&
-      !allGroupsSymbols.includes(s)
-    );
-    const all = [...allGroupsSymbols, ...customForType].filter(s => !hiddenSymbols.includes(s));
+    // Same rule on desktop and phone: every symbol THIS account added to this
+    // category is selectable, not only symbols that already exist in the curated DB.
+    const customForType = customSymbolsForCategory(selectedType).filter(s => !allGroupsSymbols.includes(s));
+    let all = [...new Set([...allGroupsSymbols, ...customForType])].filter(s => !hiddenSymbols.includes(s));
+    if (selectedType === MarketType.CRYPTO) all = all.slice(0, CRYPTO_SCAN_LIMIT);
     
     const areAllSelected = all.length > 0 && all.every(s => selectedSymbols.includes(s));
     
@@ -266,10 +261,12 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
 
     console.log("[Form] Beginning analysis for:", targets);
     onBegin();
+    setAnalyzingIndex(0);
     const results: AnalysisResult[] = [];
     const failedSymbols: { symbol: string; error: string }[] = [];
-    const ac = new AbortController();
-    abortRef.current = ac;
+    // ONE controller shared by the form, the results page and the generic
+    // loading view. Any Stop button can cancel this run on desktop or mobile.
+    const signal = beginManualAnalysis();
 
     try {
       // Batch analysis: ONE AI call for ALL symbols — eliminates rate limiting
@@ -283,8 +280,10 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
         })),
         settings,
         lang,
-        (current, total, index, failed) => onProgress(current, total, index, failed)
+        (current, total, index, failed) => onProgress(current, total, index, failed),
+        signal,
       );
+      const stopped = batchResult.aborted === true || signal.aborted;
 
       for (const r of batchResult.results) {
         r.userId = user?.uid || 'anonymous';
@@ -329,6 +328,13 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
         onResult(results);
       }
 
+      // A deliberate Stop keeps whatever completed before it and never reports
+      // a failure or wipes the existing results page.
+      if (stopped) {
+        onCancel?.();
+        return;
+      }
+
       if (failedSymbols.length > 0) {
         const failedList = failedSymbols.map(f => `${f.symbol}`).join(', ');
         const sampleErrors = [...new Set(failedSymbols.map(f => f.error))].slice(0, 3).join('; ');
@@ -341,13 +347,18 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
         onError(lang === 'ar' ? 'فشل التحليل لجميع الرموز' : 'Analysis failed for all symbols', true);
       }
     } catch (error: any) {
+      if (isManualAbortError(error) || signal.aborted) {
+        onCancel?.();
+        return;
+      }
       console.error("[Global Form Error]:", error);
       onError(error.message || "Unknown error occurred.", true);
       setFormErrors([error.message || "Unknown error occurred."]);
+    } finally {
+      endManualAnalysis();
+      setAnalyzingIndex(null);
+      setSelectedSymbols([]);
     }
-    abortRef.current = null;
-    setAnalyzingIndex(null);
-    setSelectedSymbols([]);
   };
 
   // Auto-start analysis when "Auto Analysis" icon is pressed (client paid plan):
@@ -360,11 +371,9 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
     let syms = selectedSymbols;
     if (syms.length === 0) {
       const allGroupsSymbols = SYMBOL_GROUPS[type]?.flatMap(g => g.symbols) || [];
-      const customForType = customSymbols.filter(s =>
-        (ALL_SYMBOLS_DB[type] || []).includes(s) &&
-        !allGroupsSymbols.includes(s)
-      );
+      const customForType = customSymbolsForCategory(type).filter(s => !allGroupsSymbols.includes(s));
       syms = [...new Set([...allGroupsSymbols, ...customForType])].filter(s => !hiddenSymbols.includes(s));
+      if (type === MarketType.CRYPTO) syms = syms.slice(0, CRYPTO_SCAN_LIMIT);
       setSelectedSymbols(syms);
     }
     const data: FormValues = {
@@ -650,16 +659,9 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
                 // Append custom symbols to the last group of the category (only for active plan)
                 if (index === arr.length - 1 && hasActivePlan) {
                   const allGroupsSymbols = SYMBOL_GROUPS[selectedType]?.flatMap(g => g.symbols) || [];
-                  const allDbSymbols = new Set(Object.values(ALL_SYMBOLS_DB).flat());
-                  const tvMap = readCustomTvMap();
-                  const customForType = customSymbols.filter(s => {
-                    if (hiddenSymbols.includes(s) || allGroupsSymbols.includes(s)) return false;
-                    if ((ALL_SYMBOLS_DB[selectedType] || []).includes(s)) return true;
-                    // Truly new symbol: show it in the category it was added to.
-                    if (allDbSymbols.has(s)) return false;
-                    const cat = tvMap[s.toUpperCase()]?.category;
-                    return !cat || cat === selectedType;
-                  });
+                  const customForType = customSymbolsForCategory(selectedType).filter(s =>
+                    !hiddenSymbols.includes(s) && !allGroupsSymbols.includes(s)
+                  );
                   groupSymbols = [...groupSymbols, ...customForType];
                 }
 
@@ -871,13 +873,6 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
               <div className="flex items-center justify-center gap-4 w-full">
                 <div className="w-6 h-6 border-4 border-brand-bg border-t-transparent rounded-full animate-spin" />
                 <span>{t.analyzing}</span>
-                <button
-                  type="button"
-                  onClick={() => abortRef.current?.abort()}
-                  className="px-5 py-2 rounded-xl bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs font-black uppercase tracking-widest transition-all ml-4"
-                >
-                  {lang === 'ar' ? 'إلغاء' : 'Cancel'}
-                </button>
               </div>
             ) : (
               <>
@@ -886,6 +881,15 @@ export default function AnalysisForm({ user, onBegin, onProgress, onResult, onEr
               </>
             )}
           </motion.button>
+          {analyzingIndex !== null && (
+            <button
+              type="button"
+              onClick={() => stopManualAnalysis()}
+              className="mt-4 w-full h-14 rounded-2xl border-2 border-red-500/60 bg-red-500/15 text-red-400 font-black text-lg hover:bg-red-500/25 transition-all"
+            >
+              {lang === 'ar' ? 'إيقاف التحليل' : 'Stop Analysis'}
+            </button>
+          )}
         </div>
 
         {/* Upgrade Overlay */}

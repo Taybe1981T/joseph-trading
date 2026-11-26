@@ -29,7 +29,7 @@ import {
 } from '../../lib/mobileMode';
 import { fetchUserGrants, activateClientPlan, revokeClientPlanGrants, toMillis as grantTimeMillis } from '../../services/paymentRequests';
 import { MobileAnalysis } from './MobileAnalysis';
-import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar, getMobileRadarProgress, subscribeMobileRadar, isMobileRadarPersisted, readMobileRadarResume, mobileSignalsStorageKey } from '../../services/mobileAnalysisEngine';
+import { readMobileAuto, isMobileRadarOn, startMobileRadar, stopMobileRadar, getMobileRadarProgress, subscribeMobileRadar, isMobileRadarPersisted, readMobileRadarResume, mobileSignalsStorageKey, publishMobileShared } from '../../services/mobileAnalysisEngine';
 import { MobileManualSheet } from './MobileManualSheet';
 import { MobileClientMonitor } from './MobileClientMonitor';
 import TransactionsPage from '../TransactionsPage';
@@ -60,7 +60,7 @@ import { fetchStoreBots } from '../../services/storeService';
 import type { PaymentSession } from '../../services/paymentSession';
 import { getLivePrices, calcPnl, isMarketOpen, getTradeStore } from '../../services/paperTradingService';
 import { pollMirrorEvents, listenMirrorEvents, broadcastMirrorEvent, clearEventFor } from '../../services/tradeMirror';
-import { publishSharedSignals, applySignalTombstones } from '../../services/sharedSignals';
+import { publishSharedSignals, applySignalTombstones, readSharedSignalFeed } from '../../services/sharedSignals';
 import { startDevSettingsSync, startClientEntrySettingsMirror, DEV_SETTINGS_EVENT } from '../../services/devSettingsSync';
 import { rememberBuyerEmail, setCurrentUserEmail } from '../../lib/clientScope';
 import { stackedPlanExpiry } from '../../lib/planPeriod';
@@ -903,34 +903,16 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
 
     const pollFirestore = async () => {
       try {
-        const snap = await getDocs(collection(db, 'shared_results'));
-        if (snap.empty) {
-          setFullSignals((prev) => (prev.length ? [] : prev));
-          return;
-        }
-        let latestData: any = null;
-        let latestTs = 0;
-        snap.forEach(d => {
-          const dta = d.data();
-          let ts = 0;
-          if (dta.timestamp) {
-            if (typeof dta.timestamp === 'string') ts = new Date(dta.timestamp).getTime();
-            else if (typeof dta.timestamp === 'object' && (dta.timestamp as any).toMillis) ts = (dta.timestamp as any).toMillis();
-            else if (typeof dta.timestamp === 'number') ts = dta.timestamp;
-          }
-          if (ts >= latestTs) { latestTs = ts; latestData = dta; }
-        });
-        if (!latestData || !Array.isArray(latestData.results)) {
-          setFullSignals((prev) => (prev.length ? [] : prev));
-          return;
-        }
+        // Same canonical document as desktop. Scanning the collection allowed a
+        // stray document with a newer timestamp to win and hide every category.
+        const feed = await readSharedSignalFeed();
         // The developer feed is authoritative for these accounts: replace (not
         // merge) so removed developer signals also disappear here. De-dupe by
         // symbol+timeframe: several desktop publishers write shared_results, and
         // a duplicate entry used to render as two identical cards on the phone.
         // Tombstones/`clearedAt` also apply, so a stale re-publish from another
         // developer device cannot resurrect a deleted signal.
-        const alive = applySignalTombstones(latestData.results, latestData);
+        const alive = applySignalTombstones(feed.results, feed);
         const firestoreSignals = topPerCategory(
           attachCategories(dedupeSignals(alive
             .filter((s: any) => s && s.signal !== 'neutral' && s.signal !== 'no_entry' && !s.isSideways)
@@ -1392,6 +1374,12 @@ export function MobileLayout({ children }: { children?: React.ReactNode }) {
   }, [canViewSignals]);
 
   const runManual = (results: any[]) => {
+    // Desktop parity: a developer's manual run updates the SAME shared feed the
+    // desktop and every other device read. A paid client's run stays private.
+    if (isDev && signedInEmail && Array.isArray(results) && results.length > 0) {
+      const visible = topPerCategory(attachCategories(dedupeSignals(results)), 3);
+      if (visible.length > 0) void publishMobileShared(visible as any, signedInEmail);
+    }
     loadAll();
     const first = results && results[0];
     const sym = first ? String(first.symbol || '') : '';

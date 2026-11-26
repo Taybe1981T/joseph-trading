@@ -848,21 +848,28 @@ export async function analyzeMarketBatch(
   paramsList: { symbol: string; type: MarketType; timeframe: string; tradingStyle: TradingStyle }[],
   settings: StrategySettings,
   lang: string,
-  onProgress?: (current: string, total: number, index: number, failed?: number) => void
-): Promise<{ results: AnalysisResult[]; errors: { symbol: string; error: string }[] }> {
+  onProgress?: (current: string, total: number, index: number, failed?: number) => void,
+  signal?: AbortSignal,
+): Promise<{ results: AnalysisResult[]; errors: { symbol: string; error: string }[]; aborted?: boolean }> {
   const results: AnalysisResult[] = [];
   const errors: { symbol: string; error: string }[] = [];
   const total = paramsList.length;
   const BATCH_SIZE = 3;
+  const stopped = () => signal?.aborted === true;
 
   async function analyzeOne(p: { symbol: string; type: MarketType; timeframe: string; tradingStyle: TradingStyle }, idx: number): Promise<void> {
     let lastError: any = null;
     for (let attempt = 0; attempt < 2; attempt++) {
+      if (stopped()) return;
       try {
         if (attempt > 0) await new Promise(r => setTimeout(r, 3000));
+        if (stopped()) return;
         await waitIfRateLimited();
+        if (stopped()) return;
         const t0 = Date.now();
         const result = await analyzeMarket({ symbol: p.symbol, type: p.type, timeframe: p.timeframe, tradingStyle: p.tradingStyle, settings, lang });
+        // Keep a result that was already completed before Stop: the user should
+        // not lose paid work just because another symbol was cancelled.
         console.log(`[Batch] ${p.symbol} → ${result.signal} (${result.confidence}%) [${Date.now() - t0}ms]`);
         results.push(result);
         lastError = null;
@@ -872,6 +879,7 @@ export async function analyzeMarketBatch(
         console.warn(`[Batch] Attempt ${attempt + 1} FAILED ${p.symbol}:`, e.message);
       }
     }
+    if (stopped()) return;
     if (lastError) {
       console.error(`[Batch] GIVING UP ${p.symbol} after 2 attempts:`, lastError.message);
       errors.push({ symbol: p.symbol, error: lastError.message || 'Analysis failed' });
@@ -879,18 +887,20 @@ export async function analyzeMarketBatch(
   }
 
   for (let i = 0; i < total; i += BATCH_SIZE) {
+    if (stopped()) break;
     const batch = paramsList.slice(i, i + BATCH_SIZE);
     if (onProgress) onProgress(batch[0].symbol, total, i, errors.length);
     await Promise.all(batch.map((p, j) => analyzeOne(p, i + j)));
+    if (stopped()) break;
     if (i + BATCH_SIZE < total) await new Promise(r => setTimeout(r, 800));
   }
 
-  console.log(`[Batch] DONE: ${results.length} results, ${errors.length} errors out of ${total} symbols`);
+  console.log(`[Batch] DONE: ${results.length} results, ${errors.length} errors out of ${total} symbols${stopped() ? ' (stopped)' : ''}`);
   if (errors.length > 0) {
     console.error(`[Batch] Failed symbols:`, errors.map(e => `${e.symbol}: ${e.error}`).join(' | '));
   }
 
-  return { results, errors };
+  return { results, errors, aborted: stopped() };
 }
 
 function synthFromMetrics(metrics: any, symbol: string): any {

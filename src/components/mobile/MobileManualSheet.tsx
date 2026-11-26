@@ -2,11 +2,16 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Play, Search, Loader2, CheckCircle2, XCircle, Plus, Trash2, Zap, Clock } from 'lucide-react';
 import { AnalysisResult, MarketType, TradingStyle } from '../../types';
 import { MobileProgress, runMobileManual, readMobileAuto, getMobileSymbolGroups, getMobileAllSymbols, addMobileCustomSymbol, unhideMobileSymbol, detectMobileType } from '../../services/mobileAnalysisEngine';
-import { TIMEFRAMES, TRADING_STYLES, FREE_SYMBOLS, ALL_SYMBOLS_DB } from '../../constants';
+import { TIMEFRAMES, TRADING_STYLES, FREE_SYMBOLS, CRYPTO_SCAN_LIMIT } from '../../constants';
 import { Language } from '../../lib/i18n';
 import { mobileT, isMobilePlanClient, useMobileMode } from '../../lib/mobileMode';
 import { consumeSymbolAnalyses } from '../../services/manualQuota';
-import { normalizeSymbolInput, registerCustomSymbol, removeCustomTvEntry } from '../../lib/customSymbols';
+import { beginManualAnalysis, endManualAnalysis, stopManualAnalysis } from '../../services/manualAnalysisControl';
+import {
+  normalizeSymbolInput, registerCustomSymbol, removeCustomTvEntry,
+  readCustomSymbols, writeCustomSymbols, readHiddenSymbols, writeHiddenSymbols,
+  clearHiddenSymbols, customSymbolsForCategory,
+} from '../../lib/customSymbols';
 
 interface Props { lang: Language; onClose: () => void; onDone: (r: AnalysisResult[]) => void; }
 
@@ -39,6 +44,7 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const [prog, setProg] = useState<MobileProgress | null>(null);
   const [results, setResults] = useState<AnalysisResult[]>([]);
   const [failed, setFailed] = useState<string[]>([]);
+  const [cancelled, setCancelled] = useState(false);
   const [quotaMsg, setQuotaMsg] = useState<string | null>(null);
   const [customInput, setCustomInput] = useState('');
   const [hiddenTick, setHiddenTick] = useState(0);
@@ -62,22 +68,17 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const allCategorySymbols = useMemo(() => {
     const g = groups.find((x) => x.id === selectedType);
     const groupSyms = g ? g.symbols : [];
-    const allKnown = new Set<string>();
-    for (const v of Object.values(ALL_SYMBOLS_DB as any)) for (const s of (v as string[])) allKnown.add(s);
-    for (const s of groupSyms) allKnown.add(s);
-    try {
-      const custom: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');
-      const extra = custom.filter(s => !allKnown.has(s));
-      return [...groupSyms, ...extra];
-    } catch { return groupSyms; }
+    // Desktop parity: the same full selectable list (curated groups + THIS
+    // account's custom symbols mapped to this category), never another account's.
+    const extra = customSymbolsForCategory(selectedType).filter(s => !groupSyms.includes(s));
+    const all = [...new Set([...groupSyms, ...extra])];
+    return selectedType === 'crypto' ? all.slice(0, CRYPTO_SCAN_LIMIT) : all;
   }, [groups, selectedType]);
 
-  const hidden: string[] = useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('finalyze_hidden_symbols') || '[]'); } catch { return []; }
-  }, [hiddenTick]);
+  const hidden: string[] = useMemo(() => readHiddenSymbols(), [hiddenTick]);
 
   const restoreHidden = () => {
-    try { localStorage.removeItem('finalyze_hidden_symbols'); } catch {}
+    clearHiddenSymbols();
     setHiddenTick(t => t + 1);
     setGroups(getMobileSymbolGroups());
   };
@@ -152,17 +153,15 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
   const removeSymbol = (sym: string) => {
     setSelectedSymbols(prev => prev.filter(s => s !== sym));
     try { removeCustomTvEntry(sym); } catch {}
-    try {
-      const custom: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');
-      if (custom.includes(sym)) {
-        localStorage.setItem('finalyze_custom_symbols', JSON.stringify(custom.filter(s => s !== sym)));
-        setGroups(getMobileSymbolGroups());
-      } else {
-        const hid: string[] = JSON.parse(localStorage.getItem('finalyze_hidden_symbols') || '[]');
-        if (!hid.includes(sym)) localStorage.setItem('finalyze_hidden_symbols', JSON.stringify([...hid, sym]));
-        setGroups(getMobileSymbolGroups());
-      }
-    } catch {}
+    const custom = readCustomSymbols();
+    if (custom.includes(sym)) {
+      writeCustomSymbols(custom.filter(s => s !== sym));
+    } else {
+      const hid = readHiddenSymbols();
+      if (!hid.includes(sym)) writeHiddenSymbols([...hid, sym]);
+    }
+    setGroups(getMobileSymbolGroups());
+    setHiddenTick((t) => t + 1);
   };
 
   const clearAll = () => { if (paid) setSelectedSymbols([]); };
@@ -176,6 +175,7 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
     const allSyms = [...new Set(selectedSymbols)];
     if (busy || allSyms.length === 0) return;
     setQuotaMsg(null);
+    setCancelled(false);
     let targets = allSyms;
     // Paid-client analysis quota (desktop parity): 5 analyses per symbol per
     // UTC day, shared with automatic analysis.
@@ -187,11 +187,20 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
       targets = q.allowed;
     }
     setBusy(true); setProg(null); setResults([]); setFailed([]);
+    // The same controller is used by the desktop results page, so one Stop
+    // implementation serves both platforms.
+    const signal = beginManualAnalysis();
     try {
-      const r = await runMobileManual(targets, uid(), (p) => setProg(p), { timeframe: tf, tradingStyle: style });
+      const r = await runMobileManual(targets, uid(), (p) => setProg(p), {
+        timeframe: tf, tradingStyle: style, signal,
+      });
       setResults(r.results); setFailed(r.failed);
+      if (r.aborted || signal.aborted) setCancelled(true);
       if (r.results.length > 0) onDone(r.results);
-    } finally { setBusy(false); setProg(null); }
+    } finally {
+      endManualAnalysis();
+      setBusy(false); setProg(null);
+    }
   };
 
   const pct = prog && prog.total > 0 ? Math.round((prog.index / prog.total) * 100) : 0;
@@ -320,6 +329,19 @@ export function MobileManualSheet({ lang, onClose, onDone }: Props) {
           {busy ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={16} />}
           {busy ? mobileT(lang, 'Analyzing...', 'جارٍ التحليل...') : mobileT(lang, 'Analyze', 'حلّل')}
         </button>
+        {busy && (
+          <button
+            onClick={() => stopManualAnalysis()}
+            style={{ width: '100%', marginTop: 8, padding: '12px', borderRadius: 12, border: '2px solid rgba(255,80,80,0.6)', background: 'rgba(255,80,80,0.15)', color: '#ff8888', fontSize: 14, fontWeight: 900, cursor: 'pointer' }}
+          >
+            {mobileT(lang, 'Stop Analysis', 'إيقاف التحليل')}
+          </button>
+        )}
+        {cancelled && !busy && (
+          <div style={{ marginTop: 8, textAlign: 'center', fontSize: 12, fontWeight: 800, color: '#F59E0B' }}>
+            {mobileT(lang, 'Analysis stopped. Completed signals were kept.', 'تم إيقاف التحليل. تم الاحتفاظ بالإشارات المكتملة.')}
+          </div>
+        )}
         {prog && (
           <div style={{ marginTop: 12, background: '#0a0a0a', border: '1px solid #2a2a2a', borderRadius: 10, padding: '10px 12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 700 }}>

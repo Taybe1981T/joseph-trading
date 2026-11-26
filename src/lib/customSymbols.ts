@@ -1,5 +1,8 @@
 import { MarketType } from '../types';
 import { TOP_CRYPTO_100 } from '../data/topCrypto100';
+import { ALL_SYMBOLS_DB, SYMBOL_CATEGORIES } from '../constants';
+import { clientScopeKey, currentUserEmail } from './clientScope';
+import { isDeveloperEmail } from './clientIds';
 
 /** Curated app crypto symbols are already USD-quoted (BTCUSD = BINANCE:BTCUSDT). */
 const APP_CRYPTO_SYMBOLS = new Set<string>(TOP_CRYPTO_100.map((c) => c.symbol));
@@ -28,6 +31,103 @@ const APP_CRYPTO_SYMBOLS = new Set<string>(TOP_CRYPTO_100.map((c) => c.symbol));
 export const CUSTOM_TV_KEY = 'finalyze_custom_tv_symbols';
 export const CUSTOM_SYMBOLS_KEY = 'finalyze_custom_symbols';
 export const HIDDEN_SYMBOLS_KEY = 'finalyze_hidden_symbols';
+
+/**
+ * Symbol libraries are PER ACCOUNT. A developer keeps the classic global keys
+ * (so the two developer devices keep syncing them); every client gets an
+ * email-scoped copy, so a symbol added by one paid client can never appear in
+ * another account or in the developer's list.
+ */
+export function customSymbolScopeEmail(email?: string | null): string {
+  try {
+    const direct = email || currentUserEmail();
+    if (direct) return String(direct).toLowerCase().trim();
+    const raw = JSON.parse(localStorage.getItem('finalyze_user') || '{}');
+    return String(raw?.email || '').toLowerCase().trim();
+  } catch {
+    return '';
+  }
+}
+
+export function customStorageKeys(email?: string | null): { symbols: string; hidden: string; tv: string } {
+  const e = customSymbolScopeEmail(email);
+  let devSession = false;
+  try { devSession = localStorage.getItem('finalyze_developer_session') === 'true'; } catch {}
+  if (devSession || isDeveloperEmail(e)) {
+    return { symbols: CUSTOM_SYMBOLS_KEY, hidden: HIDDEN_SYMBOLS_KEY, tv: CUSTOM_TV_KEY };
+  }
+  // Guests get their own bucket too — never inherit the developer's library
+  // from the classic global keys.
+  return {
+    symbols: clientScopeKey(e, 'custom_symbols'),
+    hidden: clientScopeKey(e, 'hidden_symbols'),
+    tv: clientScopeKey(e, 'custom_tv_symbols'),
+  };
+}
+
+/** Read this account's custom symbol list (never another account's). */
+export function readCustomSymbols(email?: string | null): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(customStorageKeys(email).symbols) || '[]');
+    return Array.isArray(raw) ? raw.map((s) => String(s).toUpperCase().trim()).filter(Boolean) : [];
+  } catch { return []; }
+}
+
+export function writeCustomSymbols(list: string[], email?: string | null): void {
+  try {
+    localStorage.setItem(
+      customStorageKeys(email).symbols,
+      JSON.stringify([...new Set(list.map((s) => String(s).toUpperCase().trim()).filter(Boolean))]),
+    );
+  } catch {}
+}
+
+/** Read this account's hidden symbol list. */
+export function readHiddenSymbols(email?: string | null): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(customStorageKeys(email).hidden) || '[]');
+    return Array.isArray(raw) ? raw.map((s) => String(s).toUpperCase().trim()).filter(Boolean) : [];
+  } catch { return []; }
+}
+
+export function writeHiddenSymbols(list: string[], email?: string | null): void {
+  try {
+    localStorage.setItem(
+      customStorageKeys(email).hidden,
+      JSON.stringify([...new Set(list.map((s) => String(s).toUpperCase().trim()).filter(Boolean))]),
+    );
+  } catch {}
+}
+
+/** Restore every hidden symbol for THIS account only. */
+export function clearHiddenSymbols(email?: string | null): void {
+  try { localStorage.removeItem(customStorageKeys(email).hidden); } catch {}
+}
+
+/** Shared category detector (desktop + mobile + radar all use one rule). */
+export function detectSymbolCategory(symbol: string): MarketType {
+  const s = String(symbol || '').toUpperCase().replace(/[-_=]/g, '');
+  for (const [cat, syms] of Object.entries(SYMBOL_CATEGORIES)) {
+    if ((syms as string[]).includes(s)) return cat as MarketType;
+  }
+  if (/XAU|XAG|XPT|XCU|XPD|XAL|GOLD|SILVER/.test(s)) return MarketType.METALS;
+  if (/BTC|ETH|BNB|SOL|XRP|DOGE|ADA|DOT|AVAX|MATIC|LINK|UNI|SHIB|LTC|ATOM/.test(s)) return MarketType.CRYPTO;
+  if (/EUR|GBP|JPY|CHF|CAD|AUD|NZD|USD/.test(s)) return MarketType.FOREX;
+  return MarketType.STOCKS;
+}
+
+/** Custom symbols added by THIS account to one category (trained list included). */
+export function customSymbolsForCategory(category: string | MarketType, email?: string | null): string[] {
+  const cat = String(category).toLowerCase();
+  const tv = readCustomTvMap(email);
+  const curated = new Set<string>((ALL_SYMBOLS_DB as any)[cat] || []);
+  return readCustomSymbols(email).filter((s) => {
+    const mapped = tv[s.toUpperCase()]?.category;
+    if (mapped) return String(mapped).toLowerCase() === cat;
+    if (curated.has(s)) return true;
+    return String(detectSymbolCategory(s)).toLowerCase() === cat;
+  });
+}
 
 export interface CustomTvEntry {
   /** Full TradingView symbol, e.g. BINANCE:BTCUSDT or NASDAQ:TSLA. */
@@ -149,9 +249,9 @@ export function normalizeSymbolInput(raw: string, category: MarketType): Normali
   return { symbol: clean, category, custom: /[.\-=^]/.test(clean) };
 }
 
-export function readCustomTvMap(): Record<string, CustomTvEntry> {
+export function readCustomTvMap(email?: string | null): Record<string, CustomTvEntry> {
   try {
-    const raw = JSON.parse(localStorage.getItem(CUSTOM_TV_KEY) || '{}');
+    const raw = JSON.parse(localStorage.getItem(customStorageKeys(email).tv) || '{}');
     if (!raw || typeof raw !== 'object') return {};
     const out: Record<string, CustomTvEntry> = {};
     for (const [key, value] of Object.entries(raw as Record<string, any>)) {
@@ -170,60 +270,56 @@ export function readCustomTvMap(): Record<string, CustomTvEntry> {
   }
 }
 
-function writeCustomTvMap(map: Record<string, CustomTvEntry>) {
-  try { localStorage.setItem(CUSTOM_TV_KEY, JSON.stringify(map)); } catch {}
+function writeCustomTvMap(map: Record<string, CustomTvEntry>, email?: string | null) {
+  try { localStorage.setItem(customStorageKeys(email).tv, JSON.stringify(map)); } catch {}
 }
 
 /** Persists the explicit chart mapping for a custom symbol. */
-export function saveCustomTvEntry(symbol: string, entry: Omit<CustomTvEntry, 'at'> & { at?: number }) {
+export function saveCustomTvEntry(symbol: string, entry: Omit<CustomTvEntry, 'at'> & { at?: number }, email?: string | null) {
   const key = String(symbol || '').toUpperCase().trim();
   if (!key) return;
-  const map = readCustomTvMap();
+  const map = readCustomTvMap(email);
   map[key] = { ...entry, at: entry.at || Date.now() };
-  writeCustomTvMap(map);
+  writeCustomTvMap(map, email);
 }
 
-export function removeCustomTvEntry(symbol: string) {
+export function removeCustomTvEntry(symbol: string, email?: string | null) {
   const key = String(symbol || '').toUpperCase().trim();
   if (!key) return;
-  const map = readCustomTvMap();
+  const map = readCustomTvMap(email);
   if (map[key]) {
     delete map[key];
-    writeCustomTvMap(map);
+    writeCustomTvMap(map, email);
   }
 }
 
 /** Explicit TV symbol for an app symbol, when one was registered. */
-export function getCustomTvSymbol(symbol: string): string | undefined {
+export function getCustomTvSymbol(symbol: string, email?: string | null): string | undefined {
   const key = String(symbol || '').toUpperCase().trim();
   if (!key) return undefined;
-  return readCustomTvMap()[key]?.tv;
+  return readCustomTvMap(email)[key]?.tv;
 }
 
 /** Binance pair registered for an app symbol (e.g. BTCUSD → BTCUSDT). */
-export function getCustomCryptoPair(symbol: string): string | undefined {
+export function getCustomCryptoPair(symbol: string, email?: string | null): string | undefined {
   const key = String(symbol || '').toUpperCase().trim();
   if (!key) return undefined;
-  return readCustomTvMap()[key]?.pair;
+  return readCustomTvMap(email)[key]?.pair;
 }
 
 /** Adds a symbol to the persisted custom list (and un-hides it). */
-export function addCustomSymbolToList(symbol: string) {
+export function addCustomSymbolToList(symbol: string, email?: string | null) {
   const s = String(symbol || '').trim().toUpperCase();
   if (!s) return;
-  try {
-    const list: string[] = JSON.parse(localStorage.getItem(CUSTOM_SYMBOLS_KEY) || '[]');
-    if (!list.includes(s)) localStorage.setItem(CUSTOM_SYMBOLS_KEY, JSON.stringify([...list, s]));
-    const hidden: string[] = JSON.parse(localStorage.getItem(HIDDEN_SYMBOLS_KEY) || '[]');
-    if (hidden.includes(s)) localStorage.setItem(HIDDEN_SYMBOLS_KEY, JSON.stringify(hidden.filter((x) => x !== s)));
-  } catch {}
+  writeCustomSymbols([...readCustomSymbols(email), s], email);
+  writeHiddenSymbols(readHiddenSymbols(email).filter((x) => x !== s), email);
 }
 
 /**
  * Normalize + persist + register: the one helper used by the desktop and mobile
  * add-symbol UIs. Returns the clean app symbol (or null when invalid).
  */
-export function registerCustomSymbol(raw: string, category: MarketType): NormalizedSymbol | null {
+export function registerCustomSymbol(raw: string, category: MarketType, email?: string | null): NormalizedSymbol | null {
   const normalized = normalizeSymbolInput(raw, category);
   if (!normalized) return null;
   if (normalized.tv || normalized.pair) {
@@ -231,8 +327,8 @@ export function registerCustomSymbol(raw: string, category: MarketType): Normali
       tv: normalized.tv || '',
       pair: normalized.pair,
       category,
-    });
+    }, email);
   }
-  addCustomSymbolToList(normalized.symbol);
+  addCustomSymbolToList(normalized.symbol, email);
   return normalized;
 }

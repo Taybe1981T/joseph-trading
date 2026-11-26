@@ -5,6 +5,7 @@ import { AnalysisResult } from '../../types';
 import { Language } from '../../lib/i18n';
 import { MobileLotCalc } from './MobileLotCalc';
 import { getMobileSymbolGroups, addMobileCustomSymbol, removeMobileCustomSymbol } from '../../services/mobileAnalysisEngine';
+import { readCustomSymbols } from '../../lib/customSymbols';
 import {
   isMobileAutoTradeOn,
   setMobileAutoTrade,
@@ -60,9 +61,7 @@ export function MobileNewTrade({ quotes, defaultSymbol, lang, balance, signalFor
   const [autoTrade, setAutoTrade] = useState<boolean>(() => isMobileAutoTradeOn());
   // Custom symbol management (add/delete) - available for both developer and client
   const [newSymbol, setNewSymbol] = useState('');
-  const [customSymbols, setCustomSymbols] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]'); } catch { return []; }
-  });
+  const [customSymbols, setCustomSymbols] = useState<string[]>(() => readCustomSymbols());
   // Keep the selected symbol inside the chosen category (desktop parity: category → symbols).
   // NOTE: declared BEFORE filteredSymbols — reading it earlier threw
   // "Cannot access 'catSymbols' before initialization" and the whole Trading

@@ -1,16 +1,20 @@
 import { analyzeMarketBatch } from './geminiService';
 import { MarketType, TradingStyle, StrategySettings, AutoAnalysisSettings, AnalysisResult } from '../types';
-import { DEFAULT_STRATEGY_SETTINGS, SYMBOL_CATEGORIES, SYMBOL_GROUPS, ALL_SYMBOLS_DB, TIMEFRAMES, TRADING_STYLES, CRYPTO_SCAN_LIMIT, mergeStrategySettings } from '../constants';
+import { DEFAULT_STRATEGY_SETTINGS, SYMBOL_GROUPS, ALL_SYMBOLS_DB, TIMEFRAMES, TRADING_STYLES, CRYPTO_SCAN_LIMIT, mergeStrategySettings } from '../constants';
 import { getOpenStockExchanges, exchangeLabel } from '../lib/marketHours';
 import { applyRetraceAllCategoriesMigration } from '../lib/retraceMigration';
 import { topPerCategory } from '../lib/signalFeed';
 import { waitIfRateLimited } from './rateLimitTracker';
-import { collection, addDoc, serverTimestamp, doc, setDoc } from 'firebase/firestore';
+import { publishSharedSignals } from './sharedSignals';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Language } from '../lib/i18n';
 import { isDeveloperEmail } from '../lib/clientIds';
 import { consumeSymbolAnalyses } from './manualQuota';
-import { registerCustomSymbol, readCustomTvMap } from '../lib/customSymbols';
+import {
+  registerCustomSymbol, readCustomTvMap, readCustomSymbols, writeCustomSymbols,
+  readHiddenSymbols, writeHiddenSymbols, clearHiddenSymbols, detectSymbolCategory,
+} from '../lib/customSymbols';
 import { initAudio, playStart, playCompletion, playCategoryChange } from '../lib/audioEngine';
 
 export interface MobileProgress {
@@ -71,8 +75,8 @@ export { CRYPTO_SCAN_LIMIT };
  */
 export function getMobileSymbolGroups(): { id: string; label: string; symbols: string[] }[] {
   try {
-    const hidden: string[] = JSON.parse(localStorage.getItem('finalyze_hidden_symbols') || '[]');
-    const custom: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');
+    const hidden: string[] = readHiddenSymbols();
+    const custom: string[] = readCustomSymbols();
     const cats = [
       { id: 'forex', label: 'Forex' },
       { id: 'crypto', label: 'Crypto' },
@@ -118,7 +122,7 @@ export function getMobileSymbolGroups(): { id: string; label: string; symbols: s
 /** All known symbols (visible + hidden + custom) — mirrors desktop ALL_SYMBOLS_DB (record). */
 export function getMobileAllSymbols(): string[] {
   try {
-    const custom: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');
+    const custom: string[] = readCustomSymbols();
     const base = Object.values(ALL_SYMBOLS_DB as any).flat() as string[];
     const set = new Set<string>(base);
     for (const s of custom) set.add(s);
@@ -142,39 +146,30 @@ export function addMobileCustomSymbol(sym: string, category?: MarketType): strin
     s = s.toUpperCase().replace(/[^A-Z0-9.\-=:^]/g, '');
   }
   if (!s) return getMobileAllSymbols();
-  try {
-    const raw: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');
-    if (!raw.includes(s)) {
-      const next = [...raw, s];
-      localStorage.setItem('finalyze_custom_symbols', JSON.stringify(next));
-    }
-  } catch {}
+  writeCustomSymbols([...readCustomSymbols(), s]);
   return getMobileAllSymbols();
 }
 
-/** Hide a symbol (desktop: delete icon) — persists to finalyze_hidden_symbols. */
+/** Hide a symbol (desktop: delete icon) — persists to THIS account only. */
 export function hideMobileSymbol(sym: string): void {
-  try {
-    const raw: string[] = JSON.parse(localStorage.getItem('finalyze_hidden_symbols') || '[]');
-    if (!raw.includes(sym)) localStorage.setItem('finalyze_hidden_symbols', JSON.stringify([...raw, sym]));
-  } catch {}
+  const raw = readHiddenSymbols();
+  if (!raw.includes(sym)) writeHiddenSymbols([...raw, sym]);
 }
 
 /** Unhide a symbol previously hidden. */
 export function unhideMobileSymbol(sym: string): void {
-  try {
-    const raw: string[] = JSON.parse(localStorage.getItem('finalyze_hidden_symbols') || '[]');
-    localStorage.setItem('finalyze_hidden_symbols', JSON.stringify(raw.filter((s) => s !== sym)));
-  } catch {}
+  writeHiddenSymbols(readHiddenSymbols().filter((s) => s !== sym));
 }
 
 /** Remove a custom symbol entirely (desktop: delete in custom section). */
 export function removeMobileCustomSymbol(sym: string): void {
-  try {
-    const raw: string[] = JSON.parse(localStorage.getItem('finalyze_custom_symbols') || '[]');
-    localStorage.setItem('finalyze_custom_symbols', JSON.stringify(raw.filter((s) => s !== sym)));
-  } catch {}
+  writeCustomSymbols(readCustomSymbols().filter((s) => s !== sym));
   unhideMobileSymbol(sym);
+}
+
+/** Restore every hidden symbol for THIS account. */
+export function restoreAllHiddenSymbols(): void {
+  clearHiddenSymbols();
 }
 
 export function readMobileStrategy(): StrategySettings {
@@ -201,14 +196,7 @@ export function readMobileLang(): Language {
 }
 
 export function detectMobileType(symbol: string): MarketType {
-  const s = symbol.toUpperCase().replace(/[-_=]/g, '');
-  for (const [cat, syms] of Object.entries(SYMBOL_CATEGORIES)) {
-    if ((syms as string[]).includes(s)) return cat as MarketType;
-  }
-  if (/XAU|XAG|XPT|XCU|XPD|XAL|GOLD|SILVER/.test(s)) return MarketType.METALS;
-  if (/BTC|ETH|BNB|SOL|XRP|DOGE|ADA|DOT|AVAX|MATIC|LINK|UNI|SHIB|LTC|ATOM/.test(s)) return MarketType.CRYPTO;
-  if (/EUR|GBP|JPY|CHF|CAD|AUD|NZD|USD/.test(s)) return MarketType.FOREX;
-  return MarketType.STOCKS;
+  return detectSymbolCategory(symbol);
 }
 
 export async function persistMobileResults(results: AnalysisResult[], uid: string) {
@@ -247,7 +235,10 @@ export function mergeMobileTopSignals(all: AnalysisResult[], showAll: boolean): 
   return 0;
 }
 
-export async function runMobileManual(symbols: string[], uid: string, onProgress?: (p: MobileProgress) => void, opts?: { timeframe?: string; tradingStyle?: TradingStyle }): Promise<{ results: AnalysisResult[]; failed: string[] }> {
+export async function runMobileManual(
+  symbols: string[], uid: string, onProgress?: (p: MobileProgress) => void,
+  opts?: { timeframe?: string; tradingStyle?: TradingStyle; signal?: AbortSignal },
+): Promise<{ results: AnalysisResult[]; failed: string[]; aborted?: boolean }> {
   const auto = readMobileAuto();
   const timeframe = opts?.timeframe || auto.timeframe || '1d';
   const tradingStyle = opts?.tradingStyle || auto.tradingStyle || TradingStyle.DAY_TRADING;
@@ -255,11 +246,14 @@ export async function runMobileManual(symbols: string[], uid: string, onProgress
   try { playStart(Math.max(0, Math.min(1, Number((auto as any).volume ?? 0.5)))); } catch {}
   const strategy = readMobileStrategy();
   const lang = readMobileLang();
-  const list = (symbols || []).map((s) => String(s || '').toUpperCase().trim()).filter(Boolean).slice(0, 10);
-  const { results, errors } = await analyzeMarketBatch(
+  // No hard 10-symbol cap: desktop manual analysis runs every selected symbol.
+  const list = [...new Set((symbols || []).map((s) => String(s || '').toUpperCase().trim()).filter(Boolean))];
+  if (opts?.signal?.aborted) return { results: [], failed: [], aborted: true };
+  const { results, errors, aborted } = await analyzeMarketBatch(
     list.map((sym) => ({ symbol: sym, type: detectMobileType(sym), timeframe, tradingStyle })),
     strategy, lang,
-    (cur, tot, idx, failed) => onProgress?.({ current: cur, total: tot, index: idx, failed: failed || 0 })
+    (cur, tot, idx, failed) => onProgress?.({ current: cur, total: tot, index: idx, failed: failed || 0 }),
+    opts?.signal,
   );
   const failed: string[] = errors.map((e) => `${e.symbol}: ${e.error}`);
   for (const r of results) r.userId = uid || 'anonymous';
@@ -273,7 +267,7 @@ export async function runMobileManual(symbols: string[], uid: string, onProgress
     } catch {}
     mergeMobileTopSignals(results, false);
   }
-  return { results, failed };
+  return { results, failed, aborted: !!aborted };
 }
 
 export async function publishMobileShared(topTen: AnalysisResult[], email: string) {
@@ -281,16 +275,11 @@ export async function publishMobileShared(topTen: AnalysisResult[], email: strin
   // client runs their own radar, but publishing here would overwrite the
   // signals every free client sees.
   if (!isDeveloperEmail(email)) return;
+  // Same document both apps actually read. The old `shared_signals` write was
+  // invisible to the shared_results poll, so a developer-phone radar never
+  // refreshed the signals shown on desktop or on free mobile accounts.
   try {
-    await setDoc(doc(db, 'shared_signals', 'latest'), {
-      updatedAt: serverTimestamp(), developerEmail: email || '',
-      signals: (topTen || []).slice(0, 10).map((s) => ({
-        symbol: s.symbol, signal: s.signal, confidence: s.confidence,
-        entryPrice: s.entryPrice ?? null, stopLoss: s.stopLoss ?? null,
-        takeProfit: s.takeProfit ?? null, summary: (s.summary || '').slice(0, 300),
-        timestamp: Date.now(),
-      })),
-    });
+    await publishSharedSignals(topTen || [], { developerEmail: email || '' });
   } catch {}
   try {
     const { publishMirrorEventsFor } = await import('./tradeMirror');

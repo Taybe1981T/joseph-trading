@@ -28,6 +28,8 @@ import { Language, translations } from './lib/i18n';
 import { analyzeMarket } from './services/geminiService';
 import { waitIfRateLimited } from './services/rateLimitTracker';
 import { consumeSymbolAnalyses } from './services/manualQuota';
+import { stopManualAnalysis } from './services/manualAnalysisControl';
+import { readCustomSymbols, readHiddenSymbols } from './lib/customSymbols';
 import ApiKeyModal from './components/ApiKeyModal';
 import SubscriptionModal from './components/SubscriptionModal';
 import PaymentModal from './components/PaymentModal';
@@ -501,28 +503,11 @@ const isDeveloperSession = () => {
     let cancelled = false;
     const loadFromFirestore = async () => {
       try {
-        const snap = await getDocs(collection(db, 'shared_results'));
+        // ONE canonical feed document for desktop, phone and guests. Scanning
+        // the whole collection let an old/stray document win and blank the UI.
+        const feed = await readSharedSignalFeed();
         if (cancelled) return;
-        if (snap.empty) { setTopSignals([]); return; }
-        let latestData: any = null;
-        let latestTs = 0;
-        snap.forEach(d => {
-          const dta = d.data();
-          let ts = 0;
-          if (dta.timestamp) {
-            if (typeof dta.timestamp === 'string') ts = new Date(dta.timestamp).getTime();
-            else if (typeof dta.timestamp === 'object' && (dta.timestamp as any).toMillis) ts = (dta.timestamp as any).toMillis();
-            else if (dta.timestamp instanceof Date) ts = dta.timestamp.getTime();
-            else if (typeof dta.timestamp === 'number') ts = dta.timestamp;
-          }
-          if (ts >= latestTs) { latestTs = ts; latestData = dta; }
-        });
-        if (!latestData) { setTopSignals([]); return; }
-        const results = latestData.results;
-        if (!results || !Array.isArray(results) || results.length === 0) { setTopSignals([]); return; }
-        // Apply the developer's deletion tombstones / clear marker: a symbol the
-        // developer deleted stays gone even if an older device re-publishes it.
-        const alive = applySignalTombstones(results, latestData);
+        const alive = applySignalTombstones(feed.results, feed);
         const filtered = alive.filter((r: any) => r && r.signal !== 'neutral' && r.signal !== 'no_entry' && !r.isSideways);
         setTopSignals(topPerCategory(attachCategories(filtered), 3));
       } catch {
@@ -1071,6 +1056,37 @@ const isDeveloperSession = () => {
     } catch { setTopSignals([]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, user?.email, isPlanClient]);
+
+  // RESTORE developer signals from the shared feed. A new build / a transient
+  // guest state could leave the local developer list empty; before this fix that
+  // empty state was immediately published back, wiping every category on both
+  // desktop and phone. The feed is authoritative whenever local state is empty.
+  useEffect(() => {
+    if (!isDeveloperSession() || !user) return;
+    let cancelled = false;
+    const restore = async () => {
+      try {
+        const feed = await readSharedSignalFeed();
+        if (cancelled || !feed.results.length) return;
+        const alive = applySignalTombstones(feed.results, feed);
+        const visible = topPerCategory(
+          attachCategories(dedupeSignals(alive.filter((r: any) =>
+            r && r.signal !== 'neutral' && r.signal !== 'no_entry' && !r.isSideways))),
+          3,
+        );
+        if (!visible.length) return;
+        setTopSignals((prev) => {
+          if (prev.length) return prev;
+          try { localStorage.setItem(signalsStorageKey(), JSON.stringify(visible)); } catch {}
+          return visible as AnalysisResult[];
+        });
+      } catch { /* retry on the next tick */ }
+    };
+    void restore();
+    const iv = setInterval(restore, 10000);
+    return () => { cancelled = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid, user?.email]);
   const [lastSyncStatus, setLastSyncStatus] = useState<{ ok: boolean; count?: number; error?: string; time: number } | null>(null);
 
   // Web Audio API ΓÇö no unlock needed
@@ -1390,7 +1406,10 @@ const isDeveloperSession = () => {
     // it into their scoped key would leak developer signals into a future paid
     // session. Paid clients get their key cleared instead.
     if (isDeveloperSession()) {
-      try { localStorage.setItem(signalsStorageKey(), JSON.stringify(topSignals)); } catch {}
+      // Keep the last good local snapshot during a transient empty state.
+      if (topSignals.length > 0) {
+        try { localStorage.setItem(signalsStorageKey(), JSON.stringify(topSignals)); } catch {}
+      }
     } else if (isPlanClient) {
       try { localStorage.removeItem(signalsStorageKey()); } catch {}
     }
@@ -1398,7 +1417,9 @@ const isDeveloperSession = () => {
     // Debounced synchronization to Firestore — only the latest state wins.
     // publishSharedSignals merges, so deletion tombstones / clearedAt written by
     // a delete are preserved instead of being wiped by a radar re-publish.
-    if (isDeveloperSession()) {
+    // Never publish an empty local state: a transient empty list used to erase
+    // the shared feed and leave every category blank on desktop and phone.
+    if (isDeveloperSession() && topSignals.length > 0) {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
       syncTimeoutRef.current = setTimeout(() => {
         publishSharedSignals(attachCategories(dedupeSignals(topSignals)), {
@@ -2049,8 +2070,8 @@ const isDeveloperSession = () => {
     let hidden: string[] = [];
     let custom: string[] = [];
     try {
-      hidden = JSON.parse(localStorage.getItem(ownsPaidPlan ? cxnHiddenKey : 'finalyze_hidden_symbols') || '[]');
-      custom = JSON.parse(localStorage.getItem(ownsPaidPlan ? cxnCustomKey : 'finalyze_custom_symbols') || '[]');
+      hidden = readHiddenSymbols();
+      custom = readCustomSymbols();
     } catch {}
 
     const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -2578,6 +2599,17 @@ const isDeveloperSession = () => {
       // leftover localStorage copy must never keep a signed-out visitor looking
       // signed in, which is what made sign-in impossible after a logout.
       if (!liveEmail) {
+        // A developer's cached session is deliberately long-lived: Firebase may
+        // be on an anonymous verification user here, and clearing `user` used to
+        // flip the desktop into guest mode and blank every signal category.
+        if (isDeveloperEmail(cachedEmail)) {
+          if (cachedRaw) {
+            try { setUser((prev) => prev || JSON.parse(cachedRaw) as User); } catch {}
+          }
+          setHasApiKey(true);
+          setLoading(false);
+          return;
+        }
         if (cachedEmail) {
           localStorage.removeItem('finalyze_auth_user');
           localStorage.removeItem('finalyze_auth_timestamp');
@@ -3918,6 +3950,10 @@ const started = planGrants
                     setProgress(null);
                     try { playAudio(allFailed ? 'fail' : 'completion'); } catch {}
                   }}
+                  onCancel={() => {
+                    setIsAnalyzing(false);
+                    setProgress(null);
+                  }}
                 />
                 <ConnectionStatus lang={lang} />
               </div>
@@ -3941,6 +3977,13 @@ const started = planGrants
                         </div>
                       )}
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => { stopManualAnalysis(); setIsAnalyzing(false); setProgress(null); }}
+                      className="px-8 py-3 rounded-2xl border-2 border-red-500/60 bg-red-500/15 text-red-400 font-black text-lg hover:bg-red-500/25 transition-all"
+                    >
+                      {lang === 'ar' ? 'إيقاف التحليل' : 'Stop Analysis'}
+                    </button>
                   </div>
                 ) : analysisResults ? (
                   (() => {
@@ -4100,6 +4143,13 @@ const started = planGrants
                 </div>
               )}
             </div>
+            <button
+              type="button"
+              onClick={() => { stopManualAnalysis(); setIsAnalyzing(false); setProgress(null); }}
+              className="px-8 py-3 rounded-2xl border-2 border-red-500/60 bg-red-500/15 text-red-400 font-black text-lg hover:bg-red-500/25 transition-all"
+            >
+              {lang === 'ar' ? 'إيقاف التحليل' : 'Stop Analysis'}
+            </button>
           </div>
         )}
 
