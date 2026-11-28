@@ -8,7 +8,7 @@
  * than a thin one. The base is therefore tiered by liquidity:
  *
  *   • high   → 0.01 base units (×1)     : BTC, ETH, BNB … deep liquidity
- *   • medium → 0.1  base units (×10)    : SOL, BCH, AVAX, LINK … large caps
+ *   • medium → 10   base units (×1000)  : SOL, AAVE, TIA … large/mid caps
  *   • low    → 10   base units (×1000)  : XRP, DOGE, SHIB, MANA … cheap / thin
  *
  * A few symbols carry explicit lot-only overrides: LTC-style established coins
@@ -40,7 +40,7 @@ export const CRYPTO_TIER_FACTORS: Record<CryptoTier, number> = {
 
 /** Lot multiplier vs the high-tier base (units per $1,000 of balance). */
 export const CRYPTO_TIER_LOT_MULTIPLIERS: Record<CryptoTier, number> = {
-  high: 1, medium: 10, low: 1000,
+  high: 1, medium: 1000, low: 1000,
 };
 
 /** Editable per-tier lot bases (units per $1,000) from the developer panel. */
@@ -109,7 +109,7 @@ export function cryptoLotMultiplier(symbol: string): number {
 
 /**
  * Base units per $1,000 of balance for a crypto symbol.
- * Default tiers yield 0.01 / 0.1 / 10; explicit overrides yield 1 (LTC-style)
+ * Default tiers yield 0.01 / 10 / 10; explicit overrides yield 1 (LTC-style)
  * or 10 (AXS/SEI-style) with the default high-tier base of 0.01.
  */
 export function cryptoBaseQty(symbol: string, highTierBase = 0.01): number {

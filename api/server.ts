@@ -4,6 +4,7 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { isForexMarketClosedUTC } from "../src/lib/forexClock";
 
 const FALLBACK_PRICES = {
   bitcoin: { usd: 67000 }, ethereum: { usd: 3200 }, litecoin: { usd: 85 },
@@ -815,6 +816,22 @@ const QUOTE_BUDGET_MS = 4000;
 // upstream source is slow/unreachable we answer from lastKnownQuote (never empty).
 const _lastKnownQuote = new Map<string, { price: number; ts: number }>();
 
+// Forex must not drift over the weekly break. While the market is open we keep
+// the last traded quote; once it closes that price is pinned with its ORIGINAL
+// timestamp and served verbatim. This stops the 1 Hz quote hub from oscillating
+// between Twelve Data / Yahoo / ECB values on Saturday. If a serverless instance
+// starts fresh during the weekend, the first resolved quote seeds the pin.
+const _forexWeekendClose = new Map<string, { price: number; ts: number }>();
+
+function forexFrozenQuote(symbol: string): { price: number; ts: number } | null {
+  if (!symbolContext(symbol).isForex || !isForexMarketClosedUTC()) return null;
+  return _forexWeekendClose.get(symbol) || null;
+}
+
+function rememberForexQuote(symbol: string, price: number): void {
+  if (price > 0) _forexWeekendClose.set(symbol, { price, ts: Date.now() });
+}
+
 // ── Quote cache + in-flight coalescing ──
 // The mobile UI polls /api/quote ~1×/s per symbol and the desktop watchlist
 // polls ~8 symbols at once. Without a cache every poll re-hits Yahoo (2 hosts),
@@ -864,12 +881,20 @@ function storeQuote(symbol: string, price: number): { price: number; ts: number 
   const entry = { price, ts: Date.now() };
   _quoteCache.set(symbol, entry);
   _lastKnownQuote.set(symbol, entry);
+  // Track the last live forex price so Friday's close can be pinned. During the
+  // weekend the frozen entry (with its original ts) is served before caching.
+  if (symbolContext(symbol).isForex && !isForexMarketClosedUTC()) rememberForexQuote(symbol, price);
   return entry;
 }
 app.get("/api/quote", async (req, res) => {
   try {
     const symbol = (req.query.symbol as string || '').toUpperCase().replace(/ /g, '');
     if (!symbol) return res.status(400).json({ error: "Symbol is required" });
+
+    // Weekend forex: serve the pinned Friday close with its original timestamp.
+    // No cache refresh, no upstream provider rotation, no price drift.
+    const frozen = forexFrozenQuote(symbol);
+    if (frozen) return res.json({ symbol, price: frozen.price, ts: frozen.ts });
 
     const ctx = symbolContext(symbol);
 
@@ -916,6 +941,23 @@ app.get("/api/quote", async (req, res) => {
     return res.status(500).json({ error: 'Quote server error' });
   }
 });
+
+/** Provider chain for a forex symbol, without any weekend pinning logic. */
+async function resolveForexQuoteLive(
+  symbol: string,
+  uniqueAttempts: string[],
+): Promise<number | null> {
+  // Twelve Data /price costs 1 credit per call. We cache each symbol for 5s
+  // and cap at 7 calls/min so the free-tier quota is never exhausted.
+  const td = await fetchTwelveDataPrice(symbol);
+  if (td) return td;
+  for (const attempt of uniqueAttempts) {
+    const y = await fetchYahooQuote(attempt);
+    if (typeof y === 'number' && y > 0) return y;
+  }
+  const frf = await fetchFrfQuote(symbol);
+  return typeof frf === 'number' && frf > 0 ? frf : null;
+}
 
 // Resolve a live price from the upstream providers for one symbol. Returns
 // null when nothing fresh could be fetched (the caller then falls back to the
@@ -968,17 +1010,17 @@ async function resolveQuoteUpstream(
   // ── 2) FOREX: real-time via Twelve Data (live tick, rate-limited 7/min),
   //    then Yahoo (free but can return region-frozen stale rates for AUD/GBP),
   //    then open.er-api/ECB (daily rates, always available but static). ──
-  // Twelve Data /price costs 1 credit per call. We cache each symbol for 5s
-  // and cap at 7 calls/min so the free-tier quota is never exhausted.
+  // On a fresh weekend instance the first resolved quote seeds the pin; all
+  // later polls are served from `_forexWeekendClose` before reaching here.
   if (isForex) {
-    const td = await fetchTwelveDataPrice(symbol);
-    if (td) return td;
-    for (const attempt of uniqueAttempts) {
-      const y = await fetchYahooQuote(attempt);
-      if (typeof y === 'number' && y > 0) return y;
+    const pinned = forexFrozenQuote(symbol);
+    if (pinned) return pinned.price;
+    const price = await resolveForexQuoteLive(symbol, uniqueAttempts);
+    if (price != null && price > 0) {
+      rememberForexQuote(symbol, price);
+      return price;
     }
-    const frf = await fetchFrfQuote(symbol);
-    if (typeof frf === 'number' && frf > 0) return frf;
+    return null;
   }
 
   // ── 3) METALS / INDEX / STOCKS: Twelve Data first (real-time spot for metals),
@@ -1012,6 +1054,8 @@ app.get("/api/quotes", async (req, res) => {
 
     const out: Record<string, { price: number; ts: number } | null> = {};
     await Promise.all(symbols.map(async (symbol) => {
+      const frozen = forexFrozenQuote(symbol);
+      if (frozen) { out[symbol] = frozen; return; }
       const hit = cachedQuote(symbol);
       if (hit) { out[symbol] = hit; return; }
       const pending = _quoteInflight.get(symbol);

@@ -3,7 +3,8 @@ import { collection, doc, getDoc, setDoc, addDoc, updateDoc, query, where, getDo
 import { User } from 'firebase/auth';
 import { SYMBOL_CATEGORIES } from '../constants';
 import { isExchangeOpen } from '../lib/marketHours';
-import { STOCK_CONTRACT_SIZE, currencyToUsdFactor, forexPnlUSD } from '../lib/positionMath';
+import { isForexMarketClosedUTC } from '../lib/forexClock';
+import { STOCK_CONTRACT_SIZE, currencyToUsdFactor, detectInstrumentType, forexPnlUSD } from '../lib/positionMath';
 import { cryptoBaseQty } from '../lib/cryptoTiers';
 
 export interface PaperTrade {
@@ -73,10 +74,7 @@ export function isMarketOpen(category: string, symbol?: string, now: Date = new 
   const hour = u.getUTCHours() + u.getUTCMinutes() / 60 + u.getUTCSeconds() / 3600;
 
   if (category === 'forex' || category === 'metals') {
-    if (day === 6) return false;               // Saturday closed
-    if (day === 5 && hour >= 21) return false; // Friday closes 21:00 UTC
-    if (day === 0) return hour >= 21;          // Sunday opens 21:00 UTC
-    return true;                               // Monday-Thursday
+    return !isForexMarketClosedUTC(now);
   }
 
   // stocks & indices: US market session (approx ET = UTC-5)
@@ -91,7 +89,7 @@ export function isMarketOpen(category: string, symbol?: string, now: Date = new 
 // $3,000 balance trades 3× the base, a $7,000 balance 7×, etc.
 export function baseQtyPerCategory(category: string): number {
   switch (category) {
-    case 'crypto': return 0.01;  // high-liquidity base per $1,000 (medium ×10, weak ×1000)
+    case 'crypto': return 0.01;  // high-liquidity base per $1,000 (medium ×1000, weak ×1000)
     case 'forex': return 0.01;   // 0.01 lots per $1,000 (1 lot = 100,000 units)
     case 'metals': return 0.01;  // 0.01 lots per $1,000 (1 lot = 100 oz)
     case 'stocks': return 0.01;  // 0.01 lots per $1,000 (1 lot = 100 shares)
@@ -106,7 +104,7 @@ export function balanceThousands(balance: number): number {
   return Math.max(1, Math.floor(b / 1000));
 }
 
-// Base lot for a specific symbol: crypto is tiered per coin (BTC 0.01 · SOL 0.1 ·
+// Base lot for a specific symbol: crypto is tiered per coin (BTC 0.01 · mid-cap 10 ·
 // LTC 1 · DOGE/AXS 10 per $1,000), other categories use their single base.
 // `cryptoTierBase` lets the developer's fixed-values panel drive the high tier.
 export function baseQtyForSymbol(category: string, symbol?: string, cryptoTierBase = 0.01): number {
@@ -176,6 +174,22 @@ const PRICE_TTL = 1500;
 // fires its own /api/quote request; with it they share a single round trip.
 const _priceInflight = new Map<string, Promise<number | null>>();
 
+// Weekend forex quotes must not drift. The server pins them too, but the browser
+// also pins on its side so a provider flip between TD/Yahoo/ECB can never make a
+// "closed" price twitch on screen — even across serverless instances.
+const _forexFrozenPrices = new Map<string, number>();
+
+function isClosedForexSymbol(symbol: string): boolean {
+  const type = detectInstrumentType(symbol);
+  return (type === 'forex' || type === 'forex_jpy') && isForexMarketClosedUTC();
+}
+
+function pinForexPrice(symbol: string, price: number): number {
+  _forexFrozenPrices.set(symbol, price);
+  _priceCache.set(symbol, { price, ts: Date.now() });
+  return price;
+}
+
 async function fetchServerLastPrice(symbol: string): Promise<number | null> {
   try {
     // Use the lightweight /api/quote endpoint (real-time spot price) rather than
@@ -233,6 +247,14 @@ export async function getLivePrice(symbol: string): Promise<number | null> {
   const cached = _priceCache.get(symbol);
   if (cached && Date.now() - cached.ts < PRICE_TTL) return cached.price;
 
+  // Once forex is closed, the first price we know becomes the permanent close.
+  // Re-polling must never replace it, even if another provider answers.
+  if (isClosedForexSymbol(symbol)) {
+    const pinned = _forexFrozenPrices.get(symbol);
+    if (pinned != null) return pinned;
+    if (cached && cached.price > 0) return pinForexPrice(symbol, cached.price);
+  }
+
   // Coalesce concurrent requests for the same symbol into one network call.
   const pending = _priceInflight.get(symbol);
   if (pending) return pending;
@@ -244,7 +266,8 @@ export async function getLivePrice(symbol: string): Promise<number | null> {
   // CORS proxies (corsproxy.io/allorigins often fail with 403).
   const request = fetchServerLastPrice(symbol)
     .then((price) => {
-      if (price != null) {
+      if (price != null && price > 0) {
+        if (isClosedForexSymbol(symbol)) return pinForexPrice(symbol, price);
         _priceCache.set(symbol, { price, ts: Date.now() });
       }
       return price;
@@ -354,15 +377,21 @@ async function hubTick() {
   _hubInFlight = (async () => {
     try {
       const prices = await fetchBatchPrices(symbols, { force: true });
+      const changed = new Map<string, number>();
       for (const [sym, price] of prices) {
+        const previous = _hubPrices.get(sym);
         _hubPrices.set(sym, price);
+        // A pinned weekend close is re-published every tick; do not re-render
+        // charts/P&L when the number did not actually change.
+        if (previous === price) continue;
+        changed.set(sym, price);
         const set = _hubListeners.get(sym);
         if (!set) continue;
         for (const l of set) { try { l(sym, price); } catch {} }
       }
-      // Batch listeners get everything in a single callback.
-      if (_hubBatchListeners.size && prices.size) {
-        for (const l of _hubBatchListeners) { try { l(prices); } catch {} }
+      // Batch listeners get everything that changed in a single callback.
+      if (_hubBatchListeners.size && changed.size) {
+        for (const l of _hubBatchListeners) { try { l(changed); } catch {} }
       }
     } catch {}
   })();
@@ -404,6 +433,16 @@ async function fetchBatchPrices(symbols: string[], opts?: { force?: boolean }): 
   const force = opts?.force === true;
   const need: string[] = [];
   for (const sym of symbols) {
+    // A closed forex symbol is served from its pinned close forever. The hub
+    // passes force=true, but forcing a re-poll is exactly what made the price
+    // twitch on Saturday when providers disagreed.
+    if (isClosedForexSymbol(sym)) {
+      const pinned = _forexFrozenPrices.get(sym) ?? (_priceCache.get(sym)?.price ?? null);
+      if (pinned != null && pinned > 0) {
+        out.set(sym, pinForexPrice(sym, pinned));
+        continue;
+      }
+    }
     const c = _priceCache.get(sym);
     if (!force && c && Date.now() - c.ts < PRICE_TTL) out.set(sym, c.price);
     else need.push(sym);
@@ -421,8 +460,8 @@ async function fetchBatchPrices(symbols: string[], opts?: { force?: boolean }): 
       for (const sym of chunkSymbols) {
         const p = Number(quotes[sym]?.price);
         if (typeof p === 'number' && isFinite(p) && p > 0) {
-          out.set(sym, p);
-          _priceCache.set(sym, { price: p, ts: Date.now() });
+          out.set(sym, isClosedForexSymbol(sym) ? pinForexPrice(sym, p) : p);
+          if (!isClosedForexSymbol(sym)) _priceCache.set(sym, { price: p, ts: Date.now() });
         }
       }
       return true;

@@ -336,8 +336,8 @@ export default function TradingValuesPanel({ lang }: Props) {
           </button>
           <span className="text-base md:text-[20px] text-slate-500 self-center font-bold">
             {isAr
-              ? 'الافتراضي: لوت الفئة الأساسي · وقف/هدف 60$/120$ · كريبتو: قوي 0.01 و50$/100$ · متوسط 0.1 و30$/60$ · ضعيف 10 و10$/20$ لكل 1000$ · ترينلغ 5$/2$'
-              : 'Defaults: category base lot · SL/TP $60/$120 · crypto: high 0.01 & $50/$100 · medium 0.1 & $30/$60 · weak 10 & $10/$20 per $1,000 · trailing $5/$2'}
+              ? 'الافتراضي: لوت الفئة الأساسي · وقف/هدف 60$/120$ · كريبتو: قوي 0.01 و50$/100$ · متوسط 10 و30$/60$ · ضعيف 10 و10$/20$ لكل 1000$ · ترينلغ 5$/2$'
+              : 'Defaults: category base lot · SL/TP $60/$120 · crypto: high 0.01 & $50/$100 · medium 10 & $30/$60 · weak 10 & $10/$20 per $1,000 · trailing $5/$2'}
           </span>
         </div>
       </div>

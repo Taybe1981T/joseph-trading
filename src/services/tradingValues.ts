@@ -68,10 +68,14 @@ export interface TradingValuesConfig {
   enabled: boolean;
   categories: Record<TradingCategory, CategoryTradingValues>;
   updatedAt: number;
+  /** Bumped when a stored tier base must be upgraded to new defaults. */
+  lotSchemaVersion?: number;
 }
 
 export const TRADING_VALUES_DOC = 'trading_values';
 export const TRADING_VALUES_STORAGE_KEY = 'finalyze_trading_values_v1';
+const LOT_SCHEMA_VERSION = 2;
+const LEGACY_MEDIUM_LOT = 0.1;
 
 // "Current defaults" = the values the platform uses today at a $10,000
 // account: category base lot, calcRiskUSD($10k) = $60 SL / $120 TP and the
@@ -141,7 +145,7 @@ export function defaultTradingValues(): TradingValuesConfig {
   for (const cat of TRADING_CATEGORIES) categories[cat] = defaultCategoryTradingValues(cat);
   // Enabled by default: a fresh install (no shared document yet) starts with
   // the developer's fixed values active. The developer can switch it OFF.
-  return { enabled: true, categories, updatedAt: 0 };
+  return { enabled: true, categories, updatedAt: 0, lotSchemaVersion: LOT_SCHEMA_VERSION };
 }
 
 function positiveNumber(value: unknown, fallback: number): number {
@@ -201,8 +205,16 @@ export function normalizeTradingValues(raw: any): TradingValuesConfig {
       const dt = defTiers[key];
       const rt = hasTiers && rawTiers[key] && typeof rawTiers[key] === 'object' ? rawTiers[key] : null;
       if (rt) {
+        const storedLot = positiveNumber(rt.lotSize, dt.lotSize);
+        // One-time upgrade: medium liquidity used to be 0.1 units per $1,000.
+        // Old saved documents would otherwise keep trading that tiny size even
+        // after the tier default was raised to 10.
+        const staleMediumLot =
+          key === 'medium' &&
+          Number(raw?.lotSchemaVersion || 0) < LOT_SCHEMA_VERSION &&
+          Math.abs(storedLot - LEGACY_MEDIUM_LOT) < 1e-9;
         tiers[key] = {
-          lotSize: positiveNumber(rt.lotSize, dt.lotSize),
+          lotSize: staleMediumLot ? dt.lotSize : storedLot,
           stopLossUSD: cryptoDollarBudget(rt.stopLossUSD, dt.stopLossUSD),
           takeProfitUSD: cryptoDollarBudget(rt.takeProfitUSD, dt.takeProfitUSD),
           trailingActivationUSD: positiveNumber(rt.trailingActivationUSD, dt.trailingActivationUSD),
@@ -229,6 +241,7 @@ export function normalizeTradingValues(raw: any): TradingValuesConfig {
     enabled: raw?.enabled === true,
     categories: cats,
     updatedAt: Number(raw?.updatedAt) || 0,
+    lotSchemaVersion: LOT_SCHEMA_VERSION,
   };
 }
 
@@ -453,7 +466,7 @@ export function cryptoPctLevels(
 
 /**
  * Lot size for a trade.
- * - crypto: ALWAYS the tiered, balance-scaled lot (BTC 0.01 / SOL 0.1 / DOGE 10
+ * - crypto: ALWAYS the tiered, balance-scaled lot (BTC 0.01 / mid-cap 10 / DOGE 10
  *   per $1,000 by default); each tier's lot is independently editable.
  * - other categories: the developer's fixed lot when the system is ON,
  *   otherwise the balance-scaled lot.
