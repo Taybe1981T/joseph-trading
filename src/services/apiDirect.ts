@@ -1,5 +1,6 @@
 import { getClientOwnKeyForAnalysis } from '../lib/clientScope';
 import { getCustomCryptoPair } from '../lib/customSymbols';
+import { AnalysisSymbolNotFoundError, isEuropeanStockSymbol, resolveAnalysisSymbol } from '../lib/analysisSymbolAliases';
 
 // Remove outlier candles whose range (high-low) exceeds median*5.
 // This is a frontend safety-net: even if the API returns stale Twelve Data
@@ -88,7 +89,9 @@ function aggregateHourlyTo4h(data: any): any {
   }
 }
 
-const BINANCE_BASE = 'https://api.binance.com/api/v3';const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
+const BINANCE_BASE = 'https://api.binance.com/api/v3';
+const BINANCE_FALLBACK_BASE = 'https://data-api.binance.vision/api/v3';
+const COINGECKO_BASE = 'https://api.coingecko.com/api/v3';
 const ALTERNATIVE_BASE = 'https://api.alternative.me';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
@@ -194,6 +197,40 @@ function toYahooFormat(klines: any[][], symbol: string): any {
       }]
     }
   };
+}
+
+/**
+ * Crypto OHLC straight from Binance. The old path always went browser → our
+ * Vercel function → Binance, so every one of the ~8 timeframe fetches per symbol
+ * cost a serverless invocation. On weekends (crypto is the only open category)
+ * that made the radar crawl. Binance sends CORS headers, so the browser can read
+ * the same klines directly; the server remains as a fallback for blocked regions.
+ */
+async function fetchBinanceOhlcDirect(symbol: string, timeframe: string): Promise<any> {
+  const pair = findCryptoPair(symbol);
+  if (!pair) return null;
+  const interval = TIMEFRAME_MAP[timeframe] || '1d';
+  const limit = LIMIT_MAP[timeframe] || 100;
+  const path = `/klines?symbol=${encodeURIComponent(pair)}&interval=${interval}&limit=${limit}`;
+
+  const ac = new AbortController();
+  const timeout = setTimeout(() => ac.abort(), 9000);
+  try {
+    const firstGood = await Promise.any(
+      [BINANCE_BASE, BINANCE_FALLBACK_BASE].map(async (base) => {
+        const r = await fetch(`${base}${path}`, { signal: ac.signal });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const klines = await r.json();
+        if (!Array.isArray(klines) || klines.length < 10) throw new Error('Too few klines');
+        return klines;
+      })
+    );
+    return toYahooFormat(firstGood, symbol);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function fetchFearGreedDirect(): Promise<{ value: number; classification: string }> {
@@ -358,25 +395,33 @@ function yahooRange(timeframe: string): string {
 }
 
 async function fetchYahooFinance(symbol: string, timeframe: string): Promise<any> {
-  const yahooSymbol = symbolToYahooForex(symbol);
+  // Data-only alias: the caller keeps `symbol` for display/signal identity.
+  const dataSymbol = resolveAnalysisSymbol(symbol);
+  const yahooSymbol = symbolToYahooForex(dataSymbol);
   if (!yahooSymbol) throw new Error('Cannot convert symbol to Yahoo format');
 
   const interval = yahooInterval(timeframe);
   const range = yahooRange(timeframe);
+  const euFast = isEuropeanStockSymbol(dataSymbol);
 
-  // Try multiple symbol formats like the old server did
-  const base = symbol.toUpperCase().replace(/ /g, '').replace(/^[A-Z0-9._-]{2,20}:/, '').replace('USD', '').replace('-USD', '').replace('=X', '');
-  const attempts = [
-    yahooSymbol,                    // EURGBP=X
-    `${base}-USD`,                  // EURGBP-USD (crypto fallback)
-    `${base}=X`,                    // EURGBP=X again (different base)
-  ].filter((v, i, a) => a.indexOf(v) === i); // deduplicate
-
-  const ranges = [range, '1mo']; // fallback to shorter range
-  const intervals = [interval, '1d']; // fallback to daily
+  // Try multiple symbol formats like the old server did. EU tickers now use a
+  // single correct format: no `-USD` / `=X` detours after a definite 404.
+  const base = dataSymbol.toUpperCase().replace(/ /g, '').replace(/^[A-Z0-9._-]{2,20}:/, '').replace('USD', '').replace('-USD', '').replace('=X', '');
+  const attempts = euFast
+    ? [yahooSymbol]
+    : [
+        yahooSymbol,                // EURGBP=X
+        `${base}-USD`,              // EURGBP-USD (crypto fallback)
+        `${base}=X`,                // EURGBP=X again (different base)
+      ].filter((v, i, a) => a.indexOf(v) === i);
+  // EU stocks get one short proxy pass instead of the long 2-interval × 3-format
+  // × 3-proxy matrix that could stall a batch for minutes.
+  const intervals = euFast ? [interval] : [interval, '1d'];
+  const proxyTimeout = euFast ? 3000 : 6000;
+  let notFound = false;
 
   for (const r of [range]) {
-    for (const it of [interval, '1d']) {
+    for (const it of intervals) {
       for (const attempt of attempts) {
         try {
           const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(attempt)}?interval=${it}&range=${r}`;
@@ -386,14 +431,17 @@ async function fetchYahooFinance(symbol: string, timeframe: string): Promise<any
           const shuffled = [...CORS_PROXIES].sort(() => Math.random() - 0.5);
           for (const proxy of shuffled) {
             const ac = new AbortController();
-            const timer = setTimeout(() => ac.abort(), 6000);
+            const timer = setTimeout(() => ac.abort(), proxyTimeout);
             try {
-              resp = await fetch(`${proxy}${encodeURIComponent(url)}`, { signal: ac.signal });
+              const fetched = await fetch(`${proxy}${encodeURIComponent(url)}`, { signal: ac.signal });
               clearTimeout(timer);
-              if (resp.ok) break;
+              resp = fetched;
+              if (fetched.ok) break;
+              if (fetched.status === 404) { notFound = true; break; }
               resp = null;
             } catch { clearTimeout(timer); resp = null; }
           }
+          if (notFound) break;
           if (!resp || !resp.ok) continue;
           const data = await resp.json();
           const result = data?.chart?.result?.[0];
@@ -428,10 +476,15 @@ async function fetchYahooFinance(symbol: string, timeframe: string): Promise<any
           // succeeded, these are DAILY candles and must never be bucketed into
           // fake 4h bars (the retrace filter would count multi-day candles).
           return timeframe === '4h' && it === '1h' ? aggregateHourlyTo4h(out) : out;
-        } catch {}
+        } catch (e: any) {
+          if (e instanceof AnalysisSymbolNotFoundError) throw e;
+        }
       }
+      if (notFound) break;
     }
+    if (notFound) break;
   }
+  if (notFound) throw new AnalysisSymbolNotFoundError(symbol);
   throw new Error('No Yahoo data found');
 }
 
@@ -442,14 +495,35 @@ export async function fetchMarketDataDirect(symbol: string, timeframe: string): 
 
   const binancePair = findCryptoPair(symbol);
   const isCrypto = !!binancePair;
+  const euFast = isEuropeanStockSymbol(resolveAnalysisSymbol(symbol));
 
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // Crypto is 24/7: skip the serverless round-trip entirely when Binance is
+  // reachable. This is the same OHLC data, just one hop instead of two.
+  if (isCrypto) {
+    const direct = await fetchBinanceOhlcDirect(symbol, timeframe);
+    if (direct) {
+      const clean = sanitizeCandles(direct);
+      _dataCache.set(cacheKey, { data: clean, ts: Date.now() });
+      return clean;
+    }
+  }
+
+  const serverAttempts = euFast ? 1 : 2;
+  const serverTimeout = euFast ? 8000 : 20000;
+
+  for (let attempt = 0; attempt < serverAttempts; attempt++) {
     // 1. Try server (Binance via server for crypto, Yahoo for forex/stocks/metals)
     try {
       const ac = new AbortController();
-      const timeout = setTimeout(() => ac.abort(), 20000);
+      const timeout = setTimeout(() => ac.abort(), serverTimeout);
       const r = await fetch(`/api/market-data?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`, { signal: ac.signal });
       clearTimeout(timeout);
+      if (r.status === 404) {
+        const body = await r.json().catch(() => ({}));
+        // Definitive provider 404: do NOT retry the same bad ticker through
+        // another attempt/proxy, and do NOT let the caller retry the analysis.
+        if (body?.error === 'Symbol not found') throw new AnalysisSymbolNotFoundError(symbol);
+      }
       if (r.ok) {
         const d = await r.json();
         const hasData = d?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.length > 0;
@@ -467,10 +541,11 @@ export async function fetchMarketDataDirect(symbol: string, timeframe: string): 
         console.warn(`[FetchData] ${symbol} server responded ${r.status} ${r.statusText}`);
       }
     } catch (e: any) {
+      if (e instanceof AnalysisSymbolNotFoundError) throw e;
       console.warn(`[FetchData] ${symbol} attempt ${attempt + 1} error:`, e.message);
     }
 
-    if (attempt < 1) await new Promise(r => setTimeout(r, 1000));
+    if (attempt < serverAttempts - 1) await new Promise(r => setTimeout(r, 1000));
   }
 
   // Fallback: try Yahoo Finance directly via CORS proxy
@@ -481,7 +556,9 @@ export async function fetchMarketDataDirect(symbol: string, timeframe: string): 
       _dataCache.set(cacheKey, { data: clean, ts: Date.now() });
       return clean;
     }
-  } catch {}
+  } catch (e: any) {
+    if (e instanceof AnalysisSymbolNotFoundError) throw e;
+  }
 
   throw new Error('Market data currently unavailable from the source.');
 }

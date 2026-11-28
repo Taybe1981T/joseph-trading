@@ -4,7 +4,32 @@ import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { isForexMarketClosedUTC } from "../src/lib/forexClock";
+
+// These two tiny helpers are intentionally INLINED instead of imported from
+// src/. Vercel builds api/server.ts as a standalone serverless function; a
+// relative import that leaves api/ can break the bundle with
+// FUNCTION_INVOCATION_FAILED even when the local build succeeds.
+function isForexMarketClosedUTC(now: Date = new Date()): boolean {
+  const day = now.getUTCDay();
+  const hour = now.getUTCHours() + now.getUTCMinutes() / 60 + now.getUTCSeconds() / 3600;
+  if (day === 6) return true;
+  if (day === 5 && hour >= 21) return true;
+  if (day === 0 && hour < 21) return true;
+  return false;
+}
+
+const ANALYSIS_SYMBOL_ALIASES: Record<string, string> = {
+  'ROG.SW': 'ROP.SW',
+  'LVMH.PA': 'MC.PA',
+  'SBAB': 'SBB-B.ST',
+};
+function resolveAnalysisSymbol(symbol: string): string {
+  const key = String(symbol || '').trim().toUpperCase();
+  return ANALYSIS_SYMBOL_ALIASES[key] || key;
+}
+function isEuropeanStockSymbol(symbol: string): boolean {
+  return /\.(AS|PA|SW|DE|L|CO|MI|ST|HE)$/i.test(String(symbol || '').trim());
+}
 
 const FALLBACK_PRICES = {
   bitcoin: { usd: 67000 }, ethereum: { usd: 3200 }, litecoin: { usd: 85 },
@@ -277,7 +302,18 @@ app.get("/api/crypto-prices", async (_req, res) => {
 
 // Helper: Yahoo Finance Fetch
 const YAHOO_HOSTS = ['query1.finance.yahoo.com', 'query2.finance.yahoo.com'];
-const fetchMarketData = async (sym: string, rangeStr: string, intervalStr: string, retries: number = 3, cacheBust: string = '') => {
+// A 404 is definitive ("this ticker does not exist"), unlike 429/500 which may
+// clear on a retry. Without this marker a bad EU symbol was retried across both
+// hosts and four times each, making a single stock look frozen for minutes.
+const YAHOO_NOT_FOUND = Symbol('YAHOO_NOT_FOUND');
+const fetchMarketData = async (
+  sym: string,
+  rangeStr: string,
+  intervalStr: string,
+  retries: number = 3,
+  cacheBust: string = '',
+  timeoutMs: number = 20000,
+) => {
   for (const host of YAHOO_HOSTS) {
     try {
       // Try with ETF alternatives first for index symbols
@@ -291,7 +327,7 @@ const fetchMarketData = async (sym: string, rangeStr: string, intervalStr: strin
       // Try several times on the same host to ride out transient rate-limits / cold-start delays.
       for (let attempt = 0; attempt <= retries; attempt++) {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 20000);
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
         try {
           const response = await fetch(url, {
             signal: controller.signal,
@@ -303,6 +339,7 @@ const fetchMarketData = async (sym: string, rangeStr: string, intervalStr: strin
             }
           });
           clearTimeout(timeout);
+          if (response.status === 404) return YAHOO_NOT_FOUND;
           if (response.ok) {
             const data = await response.json();
             if (data.chart?.result?.[0]) {
@@ -1124,6 +1161,12 @@ app.get("/api/market-data", async (req, res) => {
     if (!symbol) return res.status(400).json({ error: "Symbol is required" });
 
     const rawSymbol = symbol.toUpperCase().replace(/ /g, '');
+    // Data-only aliases: the chart/UI keeps the symbol the user chose, but the
+    // OHLC provider must receive a ticker it actually knows (ROG.SW → ROP.SW).
+    const dataSymbol = resolveAnalysisSymbol(rawSymbol);
+    const euFast = isEuropeanStockSymbol(dataSymbol);
+    const yahooRetries = euFast ? 0 : 3;      // one short call per host instead of four
+    const yahooTimeout = euFast ? 8000 : 20000;
     const customMappings: Record<string, string> = {
       'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F', 'XPTUSD': 'PL=F', 'XPDUSD': 'PA=F',
       'XCUUSD': 'HG=F', 'XALUSD': 'ALI=F',
@@ -1138,7 +1181,13 @@ app.get("/api/market-data", async (req, res) => {
 
     const isIndexCfd = !!indexCfds[rawSymbol];
     const isMetal = !!customMappings[rawSymbol] && !isIndexCfd;
-    let yahooSymbol = isIndexCfd ? indexCfds[rawSymbol] : isMetal ? customMappings[rawSymbol] : rawSymbol;
+    let yahooSymbol = isIndexCfd ? indexCfds[rawSymbol] : isMetal ? customMappings[rawSymbol] : dataSymbol;
+
+    // Never leak the internal provider ticker back into a signal/chart payload.
+    const keepRequestedSymbol = (data: any) => {
+      if (data?.chart?.result?.[0]?.meta) data.chart.result[0].meta.symbol = rawSymbol;
+      return data;
+    };
 
     let interval = '1d';
     let range = '14d';
@@ -1190,6 +1239,7 @@ app.get("/api/market-data", async (req, res) => {
 
       const yahooFor = dailyUp ? attemptsYahooFor(rawSymbol) : [];
       if (primary === 'yahoo') {
+        let hardMiss = false;
         for (const attempt of yahooFor) {
           const cacheBust = dailyUp ? `&_cb=${Date.now()}` : '';
           // Daily forex: Yahoo's native 1d Open is unreliable (often ≈ the prior
@@ -1204,7 +1254,8 @@ app.get("/api/market-data", async (req, res) => {
             // daily series. This restores a full multi-month/year price history
             // instead of the previous ~60-90 day blip.
             for (const range of ['2y', '1y', '6mo', '3mo', '1mo']) {
-              const hourly = await fetchMarketData(attempt, range, '1h', 3, cacheBust);
+              const hourly = await fetchMarketData(attempt, range, '1h', yahooRetries, cacheBust, yahooTimeout);
+              if (hourly === YAHOO_NOT_FOUND) { hardMiss = true; break; }
               if (!hourly) continue;
               const daily = aggregateHourlyToDaily(hourly);
               // Accept only if aggregation produced a real daily series
@@ -1218,23 +1269,26 @@ app.get("/api/market-data", async (req, res) => {
                 if (barCount >= 30) break;
               }
             }
+            if (hardMiss) break;
             // Last resort: fall back to Yahoo's native 1d (may show doji bodies,
             // but better an imperfect chart than an empty one).
             if (!dailyCand) {
-              dailyCand = await fetchMarketData(attempt, '6mo', '1d', 3, cacheBust);
+              dailyCand = await fetchMarketData(attempt, '6mo', '1d', yahooRetries, cacheBust, yahooTimeout);
+              if (dailyCand === YAHOO_NOT_FOUND) { hardMiss = true; break; }
             }
             if (dailyCand) {
-              return res.json(sanitizeCandles(dailyCand));
+              return res.json(keepRequestedSymbol(sanitizeCandles(dailyCand)));
             }
             continue; // try the next Yahoo attempt
           }
-          const cand = await fetchMarketData(attempt, timeframe === '1w' ? '2y' : '5y', timeframe === '1w' ? '1wk' : '1mo', 3, cacheBust);
+          const cand = await fetchMarketData(attempt, timeframe === '1w' ? '2y' : '5y', timeframe === '1w' ? '1wk' : '1mo', yahooRetries, cacheBust, yahooTimeout);
+          if (cand === YAHOO_NOT_FOUND) { hardMiss = true; break; }
           if (cand) {
             console.log(`[Yahoo] ${rawSymbol} ${timeframe} OK`);
-            const sanitized = sanitizeCandles(cand);
-            return res.json(sanitized);
+            return res.json(keepRequestedSymbol(sanitizeCandles(cand)));
           }
         }
+        if (hardMiss) return res.status(404).json({ error: 'Symbol not found' });
         // Daily+: NO Twelve Data fallback — Yahoo is the only trusted source.
         // Twelve Data daily candles carry outlier spikes that corrupt charts.
         // If Yahoo failed above, fall through to the generic path (which retries Yahoo).
@@ -1265,20 +1319,22 @@ app.get("/api/market-data", async (req, res) => {
       }
     }
 
-    let finalData = null;
+    let finalData: any = null;
+    let hardMiss = false;
     for (const attempt of attempts) {
-      finalData = await fetchMarketData(attempt, range, interval);
+      finalData = await fetchMarketData(attempt, range, interval, yahooRetries, '', yahooTimeout);
+      if (finalData === YAHOO_NOT_FOUND) { hardMiss = true; finalData = null; break; }
       if (finalData) break;
     }
 
-    if (!finalData) return res.status(404).json({ error: "No data found" });
+    if (!finalData) return res.status(404).json({ error: hardMiss ? "Symbol not found" : "No data found" });
 
     const hasQuotes = finalData?.chart?.result?.[0]?.indicators?.quote?.[0]?.close?.length > 0;
     if (!hasQuotes) return res.status(404).json({ error: "No data found" });
     // The generic path fetched 1h bars for 4h — return real 4h candles so the
     // retrace filter and the chart count the same bars (crypto is native 4h).
     const payload = timeframe === '4h' && !isCrypto ? aggregateHourlyTo4h(finalData) : finalData;
-    res.json(sanitizeCandles(payload));
+    res.json(keepRequestedSymbol(sanitizeCandles(payload)));
   } catch (error: any) {
     res.status(500).json({ error: "Server Error" });
   }

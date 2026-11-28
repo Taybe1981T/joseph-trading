@@ -83,6 +83,7 @@ import { isGoogleOrMicrosoftEmail, AuthProviderId } from './lib/authPolicy';
 import { readProfileAsset } from './lib/profileAssets';
 import { rememberSavedEmail } from './lib/savedAccounts';
 import { dedupeSignals, topPerCategory, getSymbolCategory, attachCategories } from './lib/signalFeed';
+import { AnalysisSymbolNotFoundError } from './lib/analysisSymbolAliases';
 
 
 export type PageType = 'main' | 'settings' | 'apiKey' | 'plans' | 'radar' | 'paymentSettings' | 'clientMonitor' | 'profile' | 'about' | 'suggestions' | 'ads' | 'siteStats' | 'trade' | 'manualAnalysis' | 'manualResults' | 'store' | 'storeSettings' | 'transactions' | 'prices' | 'myPlan';
@@ -2189,8 +2190,10 @@ const isDeveloperSession = () => {
             }
           } catch (e: any) {
             lastError = e;
+            const isMissing = e instanceof AnalysisSymbolNotFoundError;
             const isTimeout = e?.message === 'timeout';
             const isRateLimit = e?.message?.includes('429') || e?.message?.includes('rate');
+            if (isMissing) break; // confirmed bad ticker: no retry, no long wait
             if (isRateLimit) {
               await new Promise(r => setTimeout(r, 15000));
               continue;
@@ -2208,7 +2211,7 @@ const isDeveloperSession = () => {
           analyzedCount++;
           setRadarProgress({ current: sym, total: syms.length, index: analyzedCount - jobStartAnalyzed, failed: scanFailed, category: cat, exchange: exchangeLbl });
           saveProgress(jobIdx, syms[si + 1] || null);
-          await new Promise(r => setTimeout(r, 3000));
+          if (!(lastError instanceof AnalysisSymbolNotFoundError)) await new Promise(r => setTimeout(r, 3000));
         } else {
           analyzedCount++;
           saveProgress(jobIdx, syms[si + 1] || null);

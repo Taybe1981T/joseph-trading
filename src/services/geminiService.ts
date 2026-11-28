@@ -1,6 +1,7 @@
 import { MarketType, AnalysisResult, TradingStyle, SignalType, StrategySettings } from "../types";
 import { DEFAULT_STRATEGY_SETTINGS, gateProfileFor, resolveGoldenWindow } from "../constants";
 import { resolveEntryMode } from "../lib/entryMode";
+import { AnalysisSymbolNotFoundError } from "../lib/analysisSymbolAliases";
 import { fetchMarketContext } from "./marketContextService";
 import { onRateLimited, waitIfRateLimited } from "./rateLimitTracker";
 import { fetchMarketDataDirect } from './apiDirect';
@@ -535,7 +536,10 @@ async function fetchAndPrepareSymbolData(
     const currentIndex = TF_PROGRESSION.indexOf(timeframe);
     const microTF = currentIndex > 0 ? TF_PROGRESSION[currentIndex - 1] : TF_PROGRESSION[0];
 
-    const rawData = await fetchMarketDataDirect(symbol, timeframe).catch(() => ({ chart: { result: [{ indicators: { quote: [{}] } }] } }));
+    const rawData = await fetchMarketDataDirect(symbol, timeframe).catch((e: any) => {
+      if (e instanceof AnalysisSymbolNotFoundError) throw e;
+      return { chart: { result: [{ indicators: { quote: [{}] } }] } };
+    });
     const quotes = rawData.chart?.result?.[0]?.indicators?.quote?.[0];
     if (!quotes || !quotes.close) return { error: 'Market data currently unavailable from the source.' };
 
@@ -562,7 +566,10 @@ async function fetchAndPrepareSymbolData(
     let microOpens: number[] = [];
     let microVolumes: number[] = [];
     try {
-      const microData = await fetchMarketDataDirect(symbol, microTF).catch(() => ({ chart: { result: [{ indicators: { quote: [{}] } }] } }));
+      const microData = await fetchMarketDataDirect(symbol, microTF).catch((e: any) => {
+        if (e instanceof AnalysisSymbolNotFoundError) throw e;
+        return { chart: { result: [{ indicators: { quote: [{}] } }] } };
+      });
       const microQuotes = microData.chart?.result?.[0]?.indicators?.quote?.[0];
       if (microQuotes && microQuotes.close) {
         microCloses = microQuotes.close.filter((c: any) => c != null);
@@ -876,6 +883,7 @@ export async function analyzeMarketBatch(
         break;
       } catch (e: any) {
         lastError = e;
+        if (e instanceof AnalysisSymbolNotFoundError) break; // definite 404: no 3s retry
         console.warn(`[Batch] Attempt ${attempt + 1} FAILED ${p.symbol}:`, e.message);
       }
     }
@@ -1024,6 +1032,15 @@ export async function analyzeMarket(params: {
     }
   }
 
+  // A provider-confirmed bad ticker must abort this symbol immediately. Only
+  // transport failures may fall back to the empty-candle placeholder and be
+  // retried; a 404 would otherwise be re-fetched for minutes and look "hung".
+  const dataFallback = (stage: string) => (e: any) => {
+    if (e instanceof AnalysisSymbolNotFoundError) throw e;
+    console.warn(`[Engine] ${symbol} ${stage} fetch fail:`, e.message);
+    return { chart: { result: [{ indicators: { quote: [{}] } }] } };
+  };
+
   try {
     const TF_PROGRESSION = ['1m', '5m', '15m', '1h', '4h', '1d', '1w', '1M', '1Y'];
     const currentIndex = TF_PROGRESSION.indexOf(timeframe);
@@ -1036,10 +1053,10 @@ export async function analyzeMarket(params: {
     console.log(`[Engine] Fetching data for ${symbol} (${timeframe}, micro=${microTF}, macro=${macro1})`);
     const fetchT0 = Date.now();
     const [rawData, microDataRaw, ctxResult, macroDataRaw] = await Promise.all([
-      fetchMarketDataDirect(symbol, timeframe).catch((e) => { console.warn(`[Engine] ${symbol} main fetch fail:`, e.message); return { chart: { result: [{ indicators: { quote: [{}] } }] } }; }),
-      fetchMarketDataDirect(symbol, microTF).catch((e) => { console.warn(`[Engine] ${symbol} micro fetch fail:`, e.message); return { chart: { result: [{ indicators: { quote: [{}] } }] } }; }),
+      fetchMarketDataDirect(symbol, timeframe).catch(dataFallback('main')),
+      fetchMarketDataDirect(symbol, microTF).catch(dataFallback('micro')),
       fetchMarketContext(symbol).catch((e) => { console.warn(`[Engine] ${symbol} ctx fail:`, e.message); return { fearGreed: null, news: [], econEvents: [] }; }),
-      fetchMarketDataDirect(symbol, macro1).catch((e) => { console.warn(`[Engine] ${symbol} macro fetch fail:`, e.message); return { chart: { result: [{ indicators: { quote: [{}] } }] } }; }),
+      fetchMarketDataDirect(symbol, macro1).catch(dataFallback('macro')),
     ]);
 
     // Fetch daily/weekly/monthly data for Candle Match Filter
@@ -1048,9 +1065,9 @@ export async function analyzeMarket(params: {
     let candleMatchData: { daily: any; weekly: any; monthly: any } | null = null;
     if (settings?.useCandleMatch || settings?.candleDirectionFilter !== false) {
       const [dailyRaw, weeklyRaw, monthlyRaw] = await Promise.all([
-        fetchMarketDataDirect(symbol, '1d').catch((e) => { console.warn(`[Engine] ${symbol} daily fetch fail:`, e.message); return { chart: { result: [{ indicators: { quote: [{}] } }] } }; }),
-        fetchMarketDataDirect(symbol, '1w').catch((e) => { console.warn(`[Engine] ${symbol} weekly fetch fail:`, e.message); return { chart: { result: [{ indicators: { quote: [{}] } }] } }; }),
-        fetchMarketDataDirect(symbol, '1M').catch((e) => { console.warn(`[Engine] ${symbol} monthly fetch fail:`, e.message); return { chart: { result: [{ indicators: { quote: [{}] } }] } }; }),
+        fetchMarketDataDirect(symbol, '1d').catch(dataFallback('daily')),
+        fetchMarketDataDirect(symbol, '1w').catch(dataFallback('weekly')),
+        fetchMarketDataDirect(symbol, '1M').catch(dataFallback('monthly')),
       ]);
       candleMatchData = { daily: dailyRaw, weekly: weeklyRaw, monthly: monthlyRaw };
     }
