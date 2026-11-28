@@ -1109,10 +1109,11 @@ export async function analyzeMarket(params: {
         skipLast: retraceSkipForming,
         strictMode: retraceCfg.strictMode,
         skipTrailingAligned: true,
+        mode: retraceCfg.mode,
       };
       retracePreviewBuy = countRetraceCandles(retraceCandles, 'buy', retraceCfg.candles, countOpts);
       retracePreviewSell = countRetraceCandles(retraceCandles, 'sell', retraceCfg.candles, countOpts);
-      console.log(`[Engine] ${symbol} retrace data (${retraceCfg.timeframe}): ${retraceCandles.length} candles | buy ${retracePreviewBuy.found}/${retracePreviewBuy.required}, sell ${retracePreviewSell.found}/${retracePreviewSell.required}`);
+      console.log(`[Engine] ${symbol} retrace data (${retraceCfg.timeframe}, ${retraceCfg.mode}): ${retraceCandles.length} candles | buy ${retracePreviewBuy.found}/${retracePreviewBuy.required} (barrier ${retracePreviewBuy.barrierStopped}), sell ${retracePreviewSell.found}/${retracePreviewSell.required} (barrier ${retracePreviewSell.barrierStopped})`);
     }
 
     console.log(`[Engine] ${symbol} data fetched in ${Date.now() - fetchT0}ms`);
@@ -2398,9 +2399,9 @@ Return ONLY valid JSON:
       if (retraceConfirmed) {
         detailedReasons.push({
           check: 'Retrace Filter',
-          value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji: ${count.dojiSkipped}, neutral: ${count.neutralSkipped}) | ${absorbNote}`,
+          value: `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (${retraceCfg.mode}, doji: ${count.dojiSkipped}, neutral: ${count.neutralSkipped}) | ${absorbNote}`,
           status: 'positive',
-          impact: `Retrace confirmed on ${tfLabel} — ${candleNote}; absorption is informational only`,
+          impact: `Retrace confirmed on ${tfLabel} (${retraceCfg.mode}) — ${candleNote}; absorption is informational only`,
         });
         detailedReasons.push({
           check: 'Retrace Confirmation',
@@ -2425,10 +2426,12 @@ Return ONLY valid JSON:
         detailedReasons.push({
           check: 'Retrace Filter',
           value: retraceCandles
-            ? `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (doji ignored: ${count.dojiSkipped})`
+            ? `${count.found}/${count.required} ${candleWordEn} candles on ${tfLabel} (${retraceCfg.mode}${count.barrierStopped ? ', failed — waiting for a new retrace' : ''}, doji ignored: ${count.dojiSkipped})`
             : `no candle data on ${tfLabel}`,
           status: 'negative',
-          impact: `BLOCKED: needs ${count.required} ${candleWordEn}${isAr ? ` (${candleWord})` : ''} consecutive candles on ${tfLabel} before entry — signal hidden`,
+          impact: retraceCfg.mode === 'windowed'
+            ? `BLOCKED: needs ${count.required} ${candleWordEn}${isAr ? ` (${candleWord})` : ''} inside one corrective window on ${tfLabel} — a two-candle opposite move invalidates the run; signal hidden`
+            : `BLOCKED: needs ${count.required} ${candleWordEn}${isAr ? ` (${candleWord})` : ''} consecutive candles on ${tfLabel} before entry — signal hidden`,
         });
         finalSignal = SignalType.NEUTRAL;
         finalConfidence = Math.min(finalConfidence, 30);
@@ -2502,6 +2505,7 @@ Return ONLY valid JSON:
       volumeQualityMaxThreshold: volMaxThreshold,
       volumeAbsorbed: volumeQuality.absorbed,
       retraceFilterEnabled: retraceCfg.enabled,
+      retraceMode: retraceCfg.mode,
       retraceTimeframe: retraceCfg.timeframe,
       retraceCandlesRequired: retraceCfg.enabled ? retraceCfg.candles : undefined,
       retraceCandlesFound: retraceCfg.enabled ? retraceFound : undefined,

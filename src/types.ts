@@ -63,6 +63,7 @@ export interface AnalysisResult {
   volumeAbsorbed?: boolean;
   // ── Retrace (pullback) final-confirmation filter output ──
   retraceFilterEnabled?: boolean;
+  retraceMode?: RetraceMode;
   retraceTimeframe?: string;
   retraceCandlesRequired?: number;
   retraceCandlesFound?: number;
@@ -78,6 +79,10 @@ export interface UserPreference {
   watchlist: string[];
   theme: 'light' | 'dark';
 }
+
+/** Retrace counting mode. 'consecutive' is the existing/default rule;
+ *  'windowed' allows one short bounce between opposite candles. */
+export type RetraceMode = 'consecutive' | 'windowed';
 
 export interface StrategySettings {
   momentumThreshold: number;
@@ -158,6 +163,15 @@ export interface StrategySettings {
   retraceStrictModeCrypto?: boolean;
   retraceStrictModeStocks?: boolean;
   retraceStrictModeMetals?: boolean;
+  // Mode switch for each category. 'consecutive' (default) = the existing rule:
+  // only unbroken opposite candles count. 'windowed' = one small with-trade
+  // bounce may sit between opposite candles as long as the next opposite
+  // candle closes beyond it; two with-trade candles invalidate the run and
+  // no older candles are used. Missing/invalid values resolve to 'consecutive'.
+  retraceModeForex?: RetraceMode;
+  retraceModeCrypto?: RetraceMode;
+  retraceModeStocks?: RetraceMode;
+  retraceModeMetals?: RetraceMode;
   // ── Golden confidence window (surface only the best-timed entries) ──
   goldenRangeEnabled?: boolean;        // when true, only signals inside [goldenConfMin..goldenConfMax] are shown
   goldenConfMin?: number;              // legacy global fallback (default 70) — below → neutral

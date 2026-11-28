@@ -586,8 +586,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
         <div className="bg-white/5 border border-white/5 rounded-2xl p-5 md:p-6 space-y-4">
           <p className="text-sm md:text-[17px] text-brand-text/55 leading-relaxed">
             {isAr
-              ? 'يعمل كآخر بوابة بعد استيفاء كل الشروط: يعدّ الشموع المعاكسة لاتجاه الصفقة على الفريم المحدد؛ عند تحقّق العدد تُسمح الإشارة، وتظهر «إشارة جيدة» خضراء عند أول إغلاق لشمعة مع اتجاه الصفقة بعد العدّاد مهما كان نوع الشمعة. اتجاه الشمعة الحالية وقراءة امتصاص السيولة مجرد ملاحظتين لا تمنعان الإشارة (بيانات 15م للفوركس كثيراً ما تكون بدون فتائل موثوقة). غياب العدد المطلوب فقط ← إخفاء. الدوجي لا يُحتسب ولا يقطع التسلسل. الفوركس مفعّل افتراضيًا (3 شموع)، وبقية الفئات معطّلة افتراضيًا.'
-              : 'Runs as the very last gate after every other condition: it counts candles moving AGAINST the trade on the chosen timeframe; when the count is reached the signal is allowed, and a green "good signal" appears on the first subsequent candle that CLOSES with the trade — any candle type is accepted. The current candle direction and the liquidity-absorption read are diagnostic notes only and never block (15m FX feeds often lack reliable wicks). Only a missing count hides the signal. Doji candles are never counted or break the run. Forex is ON by default (3 candles); all other categories are OFF by default.'}
+              ? 'يعمل كآخر بوابة بعد استيفاء كل الشروط: يعدّ الشموع المعاكسة لاتجاه الصفقة على الفريم المحدد؛ عند تحقّق العدد تُسمح الإشارة، وتظهر «إشارة جيدة» خضراء عند أول إغلاق لشمعة مع اتجاه الصفقة بعد العدّاد مهما كان نوع الشمعة. اتجاه الشمعة الحالية وقراءة امتصاص السيولة مجرد ملاحظتين لا تمنعان الإشارة (بيانات 15م للفوركس كثيراً ما تكون بدون فتائل موثوقة). غياب العدد المطلوب فقط ← إخفاء. الدوجي لا يُحتسب ولا يقطع التسلسل. لكل فئة سويتش مستقل بين النمط المتتالي (الافتراضي) والنافذة المرنة؛ التبديل لا يغيّر العدد ولا الفريم ولا باقي الشروط.'
+              : 'Runs as the very last gate after every other condition: it counts candles moving AGAINST the trade on the chosen timeframe; when the count is reached the signal is allowed, and a green "good signal" appears on the first subsequent candle that CLOSES with the trade — any candle type is accepted. The current candle direction and the liquidity-absorption read are diagnostic notes only and never block (15m FX feeds often lack reliable wicks). Only a missing count hides the signal. Doji candles are never counted or break the run. Each category has its own switch: consecutive (default) or windowed; switching never changes the count, timeframe or any other condition.'}
           </p>
           <div className="bg-black/30 rounded-xl p-3 text-xs md:text-sm text-amber-300/80 leading-relaxed">
             {isAr
@@ -633,6 +633,42 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                     }`} />
                   </div>
                 </button>
+
+                {(() => {
+                  const modeKey = `retraceMode${row.suffix}` as keyof StrategySettings;
+                  const windowed = (settings as any)[modeKey] === 'windowed';
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => handleChange(modeKey, windowed ? 'consecutive' : 'windowed')}
+                      className={`w-full flex items-center justify-between p-3 rounded-xl border-2 transition-all text-right gap-4 ${
+                        windowed
+                          ? 'bg-amber-400/10 border-amber-400/40 text-amber-300'
+                          : 'bg-white/5 border-white/5 text-brand-muted'
+                      }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm md:text-base font-black leading-tight">
+                          {isAr
+                            ? (windowed ? 'نمط العد: نافذة مرنة' : 'نمط العد: متتالي (افتراضي)')
+                            : (windowed ? 'Count mode: windowed' : 'Count mode: consecutive (default)')}
+                        </div>
+                        <div className="text-xs opacity-70 mt-1">
+                          {isAr
+                            ? 'السويتش يبدّل بين النظامين: متتالي = شموع معاكسة متتالية فقط؛ نافذة = يسمح بارتداد صغير واحد بينها، وشمعتان مع الاتجاه تُبطل التراجع ويُنتظر تراجع جديد.'
+                            : 'Switch between the two rules: consecutive = unbroken opposite candles; windowed = one small bounce allowed between them, two with-trade candles invalidate the run and a new retrace is awaited.'}
+                        </div>
+                      </div>
+                      <div className={`w-12 h-7 rounded-full transition-colors flex items-center px-1 shrink-0 ${
+                        windowed ? 'bg-amber-400' : 'bg-white/20'
+                      }`}>
+                        <div className={`w-5 h-5 bg-white rounded-full transition-transform shadow ${
+                          windowed ? 'translate-x-5' : 'translate-x-0'
+                        }`} />
+                      </div>
+                    </button>
+                  );
+                })()}
 
                 <NumberInput
                   label={isAr ? 'عدد شموع التراجع المطلوبة' : 'Required Retrace Candles'}

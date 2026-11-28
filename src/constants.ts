@@ -161,6 +161,12 @@ export const DEFAULT_STRATEGY_SETTINGS: StrategySettings = {
   retraceStrictModeCrypto: CATEGORY_GATE_PROFILES.crypto.retraceStrict,
   retraceStrictModeStocks: CATEGORY_GATE_PROFILES.stocks.retraceStrict,
   retraceStrictModeMetals: CATEGORY_GATE_PROFILES.metals.retraceStrict,
+  // Existing counting mode stays the default for every category. The windowed
+  // alternative is opt-in per category through the Retrace settings switch.
+  retraceModeForex: 'consecutive',
+  retraceModeCrypto: 'consecutive',
+  retraceModeStocks: 'consecutive',
+  retraceModeMetals: 'consecutive',
   // ── Golden confidence window (surface only the best-timed entries) ──
   goldenRangeEnabled: true, // only show signals whose confidence is inside the golden window
   goldenConfMin: 70,        // legacy global fallback (below this → neutral)

@@ -1,4 +1,4 @@
-import { MarketType, StrategySettings } from '../types';
+import { MarketType, RetraceMode, StrategySettings } from '../types';
 
 /**
  * Retrace (pullback) final-confirmation filter.
@@ -40,6 +40,8 @@ export interface RetraceConfig {
   candles: number;
   timeframe: string;
   strictMode: boolean;
+  /** Which counter-candle counting rule this category uses. */
+  mode: RetraceMode;
 }
 
 export interface RetraceCandle {
@@ -67,6 +69,14 @@ export const MAX_RETRACE_CANDLES = 10;
  * allowance. 0 = no confirmation tolerated; 2 = the current default.
  */
 export const MAX_POST_RETRACE_ALIGNED_CANDLES = 2;
+
+/**
+ * Windowed-mode-only guard: how many single with-trade bounces may appear
+ * inside one corrective window. Two consecutive with-trade candles always fail
+ * the run outright; this limit stops an alternating series from being stitched
+ * into an endless "pullback".
+ */
+export const MAX_WINDOWED_PAUSE_CANDLES = 2;
 
 /** Timeframes offered in the settings UI (any other stored value falls back to 1d). */
 export const RETRACE_TIMEFRAMES = ['15m', '30m', '1h', '4h', '1d', '1w', '1M'] as const;
@@ -119,7 +129,11 @@ export function resolveRetraceConfig(
   // works and turning the whole filter OFF elsewhere restores the old behaviour.
   const strictMode = raw[`retraceStrictMode${suffix}`] === true;
 
-  return { category, enabled, candles, timeframe, strictMode };
+  // Opt-in only: anything other than an explicit 'windowed' keeps the existing
+  // consecutive rule. Old installs (no key at all) therefore behave unchanged.
+  const mode: RetraceMode = raw[`retraceMode${suffix}`] === 'windowed' ? 'windowed' : 'consecutive';
+
+  return { category, enabled, candles, timeframe, strictMode, mode };
 }
 
 /** Extract a clean OHLC(+timestamp) series from any market-data response. */
@@ -260,10 +274,24 @@ export interface RetraceCountResult {
   scanned: number;
   lastCandleSkipped: boolean;
   strictMode: boolean;
+  /** Which counting rule produced this result. */
+  mode: RetraceMode;
+  /** True when a two-candle move WITH the trade (or an unresolved bounce)
+   *  stopped the scan. The caller must NOT use older candles from before that
+   *  barrier — the correction has failed and a new one has to form. */
+  barrierStopped: boolean;
   /** Chronological positions of the counted retrace candles, newest first.
    *  Used by the liquidity-absorption confirmation that replaced the old
    *  "signal candle must align" hard gate. */
   indices: number[];
+}
+
+export interface RetraceCountOptions {
+  skipLast?: boolean;
+  strictMode?: boolean;
+  skipTrailingAligned?: boolean;
+  /** Defaults to 'consecutive' so every existing caller keeps its behaviour. */
+  mode?: RetraceMode;
 }
 
 /**
@@ -273,11 +301,11 @@ export interface RetraceCountResult {
  * do not break the run). The first candle that moves WITH the trade
  * direction stops the count.
  */
-export function countRetraceCandles(
+export function countConsecutiveRetraceCandles(
   candles: RetraceCandle[] | null | undefined,
   side: RetraceSide,
   required: number,
-  opts?: { skipLast?: boolean; strictMode?: boolean; skipTrailingAligned?: boolean },
+  opts?: RetraceCountOptions,
 ): RetraceCountResult {
   const req = Math.max(MIN_RETRACE_CANDLES, Math.round(Number(required) || DEFAULT_RETRACE_CANDLES));
   const list = candles || [];
@@ -361,6 +389,130 @@ export function countRetraceCandles(
     scanned,
     lastCandleSkipped: skipLast && list.length > 0,
     strictMode: strict,
+    mode: 'consecutive',
+    barrierStopped: false,
+    indices,
+  };
+}
+
+/**
+ * Single entry point used by the engine. Existing callers pass no `mode` and
+ * therefore keep the exact consecutive behaviour they had before.
+ */
+export function countRetraceCandles(
+  candles: RetraceCandle[] | null | undefined,
+  side: RetraceSide,
+  required: number,
+  opts?: RetraceCountOptions,
+): RetraceCountResult {
+  return opts?.mode === 'windowed'
+    ? countWindowedRetraceCandles(candles, side, required, opts)
+    : countConsecutiveRetraceCandles(candles, side, required, opts);
+}
+
+/**
+ * WINDOWED retrace counting.
+ *
+ * Scans backwards from the newest CLOSED candle and counts opposite candles
+ * even when a single short with-trade bounce sits between them. That bounce is
+ * accepted only when the next (newer) opposite candle closed BEYOND it:
+ *
+ *   BUY  bearish → bullish → bearish(close < bullish close) → bearish = 3
+ *   SELL bullish → bearish → bullish(close > bearish close) → bullish = 3
+ *
+ * A doji / strict-neutral candle stays transparent (never counted, never
+ * breaks the run). Two consecutive with-trade candles mean the correction has
+ * failed: scanning STOPS immediately and no older candles are used — a new
+ * retrace must form going forward. The same hard stop applies when a single
+ * bounce was not reclaimed or when the window exceeds the pause allowance.
+ */
+export function countWindowedRetraceCandles(
+  candles: RetraceCandle[] | null | undefined,
+  side: RetraceSide,
+  required: number,
+  opts?: RetraceCountOptions,
+): RetraceCountResult {
+  const req = Math.max(MIN_RETRACE_CANDLES, Math.round(Number(required) || DEFAULT_RETRACE_CANDLES));
+  const list = candles || [];
+  const skipLast = opts?.skipLast !== false;
+  const strict = opts?.strictMode !== false;
+  let i = list.length - 1;
+  if (skipLast && i >= 0) i -= 1;
+
+  const wanted: 'bullish' | 'bearish' = side === 'buy' ? 'bearish' : 'bullish';
+  const withTrade: 'bullish' | 'bearish' = side === 'buy' ? 'bullish' : 'bearish';
+  let found = 0;
+  let dojiSkipped = 0;
+  let neutralSkipped = 0;
+  let scanned = 0;
+  let pausesUsed = 0;
+  let lastDirectionWasWithTrade = false;
+  let barrierStopped = false;
+  const indices: number[] = []; // newest counted candle first
+
+  for (; i >= 0; i--) {
+    const c = list[i];
+    scanned++;
+    const next = list[i + 1]; // newer candle (chronological)
+    if (isNeutralRetraceCandle(c, next, strict)) {
+      if (isDojiCandle(c)) dojiSkipped++;
+      else neutralSkipped++;
+      continue;
+    }
+    const dir = c.close > c.open ? 'bullish' : c.close < c.open ? 'bearish' : 'doji';
+    if (dir === 'doji') {
+      dojiSkipped++;
+      continue;
+    }
+
+    if (dir === withTrade) {
+      // Two with-trade candles in a row (and more than the allowed number of
+      // separate bounces) end the search. Never reach behind this barrier into
+      // an older retrace — that move is already over. Dojis are transparent,
+      // so a doji between them does NOT reset this consecutive check.
+      if (lastDirectionWasWithTrade || pausesUsed >= MAX_WINDOWED_PAUSE_CANDLES) {
+        barrierStopped = true;
+        break;
+      }
+      const newerRetrace = indices.length ? list[indices[0]] : null;
+      // A with-trade candle at the newest edge is the ordinary "good signal"
+      // confirmation and is allowed once. A bounce INSIDE the corrective run
+      // is only allowed when the newer opposite candle closed past it.
+      if (newerRetrace) {
+        const reclaimed = side === 'buy'
+          ? newerRetrace.close < c.close
+          : newerRetrace.close > c.close;
+        if (!reclaimed) {
+          barrierStopped = true;
+          break;
+        }
+      }
+      pausesUsed++;
+      lastDirectionWasWithTrade = true;
+      continue;
+    }
+    lastDirectionWasWithTrade = false;
+
+    if (dir !== wanted) {
+      barrierStopped = true;
+      break;
+    }
+    indices.push(i);
+    found++;
+    if (found >= req) break;
+  }
+
+  return {
+    found,
+    required: req,
+    confirmed: found >= req,
+    dojiSkipped,
+    neutralSkipped,
+    scanned,
+    lastCandleSkipped: skipLast && list.length > 0,
+    strictMode: strict,
+    mode: 'windowed',
+    barrierStopped,
     indices,
   };
 }

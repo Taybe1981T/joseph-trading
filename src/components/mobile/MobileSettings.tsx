@@ -335,8 +335,8 @@ export function MobileSettings({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <div style={{ fontSize: 12, color: '#aaa', lineHeight: 1.7 }}>
                   {isAr
-                    ? 'آخر بوابة بعد استيفاء كل الشروط: تعدّ الشموع المعاكسة للاتجاه على الفريم المحدد؛ عند تحقّق العدد تُسمح الإشارة، وتظهر «إشارة جيدة» عند أول إغلاق لشمعة مع اتجاه الصفقة بعد العدّاد مهما كان نوع الشمعة. اتجاه الشمعة الحالية والامتصاص ملاحظتان فقط لا تمنعان. غياب العدد المطلوب فقط ← إخفاء. الدوجي لا يُحتسب. الفوركس مفعّل افتراضيًا (3 شموع).'
-                    : 'Final gate: counts candles against the trade on the chosen timeframe; when the count is reached the signal is allowed, and a green "good signal" appears on the first subsequent candle that closes with the trade (any candle type). Current candle direction and absorption are diagnostic notes only. Only a missing count hides the signal. Doji is never counted. Forex is ON by default (3 candles).'}
+                    ? 'آخر بوابة بعد استيفاء كل الشروط: تعدّ الشموع المعاكسة للاتجاه على الفريم المحدد؛ عند تحقّق العدد تُسمح الإشارة، وتظهر «إشارة جيدة» عند أول إغلاق لشمعة مع اتجاه الصفقة بعد العدّاد مهما كان نوع الشمعة. اتجاه الشمعة الحالية والامتصاص ملاحظتان فقط لا تمنعان. غياب العدد المطلوب فقط ← إخفاء. الدوجي لا يُحتسب. لكل فئة سويتش بين النمط المتتالي (الافتراضي) والنافذة المرنة دون تغيير العدد أو الفريم.'
+                    : 'Final gate: counts candles against the trade on the chosen timeframe; when the count is reached the signal is allowed, and a green "good signal" appears on the first subsequent candle that closes with the trade (any candle type). Current candle direction and absorption are diagnostic notes only. Only a missing count hides the signal. Doji is never counted. Each category has a switch between consecutive (default) and windowed mode; count and timeframe stay unchanged.'}
                 </div>
 
                 {retraceRows.map((row) => {
@@ -374,6 +374,40 @@ export function MobileSettings({
                           <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', transform: `translateX(${enabled ? 20 : 0}px)`, transition: 'transform .15s' }} />
                         </span>
                       </button>
+
+                      {(() => {
+                        const modeKey = `retraceMode${row.suffix}` as keyof StrategySettings;
+                        const windowed = (strategy as any)[modeKey] === 'windowed';
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => updateStrategy(modeKey, windowed ? 'consecutive' : 'windowed')}
+                            style={{
+                              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              gap: 10, padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+                              background: windowed ? 'rgba(245,158,11,0.12)' : '#151515',
+                              border: `2px solid ${windowed ? 'rgba(245,158,11,0.5)' : '#2a2a2a'}`,
+                              color: windowed ? '#fbbf24' : '#bbb', textAlign: 'right',
+                            }}
+                          >
+                            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <span style={{ fontSize: 14, fontWeight: 900 }}>
+                                {isAr
+                                  ? (windowed ? 'نمط العد: نافذة مرنة' : 'نمط العد: متتالي (افتراضي)')
+                                  : (windowed ? 'Count mode: windowed' : 'Count mode: consecutive (default)')}
+                              </span>
+                              <span style={{ fontSize: 11, opacity: 0.75 }}>
+                                {isAr
+                                  ? 'يسمح بارتداد صغير واحد بين الشموع المعاكسة؛ شمعتان مع الاتجاه تُبطل التراجع ويُنتظر تراجع جديد.'
+                                  : 'One small bounce may sit between opposite candles; two with-trade candles invalidate the run and a new retrace is awaited.'}
+                              </span>
+                            </span>
+                            <span style={{ width: 44, height: 24, borderRadius: 99, background: windowed ? '#f59e0b' : '#3a3a3a', display: 'flex', alignItems: 'center', padding: 2, flexShrink: 0 }}>
+                              <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', transform: `translateX(${windowed ? 20 : 0}px)`, transition: 'transform .15s' }} />
+                            </span>
+                          </button>
+                        );
+                      })()}
 
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
                         <span style={{ fontSize: 13, fontWeight: 700, color: '#ddd' }}>
