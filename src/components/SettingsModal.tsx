@@ -699,45 +699,13 @@ export default function SettingsModal({ isOpen, onClose, settings, onSettingsCha
                   </select>
                 </div>
 
-                {row.suffix === 'Forex' ? (
+                {row.suffix === 'Forex' && (
                   <div className="w-full p-3 rounded-xl border-2 border-emerald-400/20 bg-emerald-400/5 text-xs md:text-sm text-emerald-300/80 leading-relaxed">
                     {isAr
                       ? 'الوضع المخفّف مطبَّق تلقائياً لكل الفئات مثل الفوركس: تُحسب كل شمعة عاكسة بجسم أكبر من 10% من مداها، والدوجي فقط يُتجاهل.'
                       : 'Lenient mode now applies to every category like forex: every opposite candle with a body larger than 10% of its range counts; only doji is skipped.'}
                   </div>
-                ) : (() => {
-                  const strictKey = `retraceStrictMode${row.suffix}` as keyof StrategySettings;
-                  const strict = (settings as any)[strictKey] !== false;
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => handleChange(strictKey, !strict)}
-                      className={`w-full flex items-center justify-between p-3 rounded-xl border-2 transition-all text-right gap-4 ${
-                        strict
-                          ? 'bg-emerald-400/10 border-emerald-400/40 text-emerald-300'
-                          : 'bg-white/5 border-white/5 text-brand-muted'
-                      }`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm md:text-base font-black leading-tight">
-                          {isAr ? 'وضع صارم (Strict)' : 'Strict mode'}
-                        </div>
-                        <div className="text-xs opacity-70 mt-1">
-                          {isAr
-                            ? 'اختياري — مطفأ افتراضياً مثل الفوركس: تجاهل Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star'
-                            : 'Optional — OFF by default like forex: skip Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star'}
-                        </div>
-                      </div>
-                      <div className={`w-12 h-7 rounded-full transition-colors flex items-center px-1 shrink-0 ${
-                        strict ? 'bg-emerald-400' : 'bg-white/20'
-                      }`}>
-                        <div className={`w-5 h-5 bg-white rounded-full transition-transform shadow ${
-                          strict ? 'translate-x-5' : 'translate-x-0'
-                        }`} />
-                      </div>
-                    </button>
-                  );
-                })()}
+                )}
 
               </div>
             );

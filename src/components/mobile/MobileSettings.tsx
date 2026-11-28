@@ -449,39 +449,13 @@ export function MobileSettings({
                         </select>
                       </div>
 
-                      {row.suffix === 'Forex' ? (
+                      {row.suffix === 'Forex' && (
                         <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(16,185,129,0.25)', background: 'rgba(16,185,129,0.06)', color: '#10b981', fontSize: 11, lineHeight: 1.7 }}>
                           {isAr
                             ? 'الوضع المخفّف مطبَّق تلقائياً لكل الفئات مثل الفوركس: تُحسب كل شمعة عاكسة بجسم أكبر من 10% من مداها، والدوجي فقط يُتجاهل.'
                             : 'Lenient mode now applies to every category like forex: every opposite candle with a body larger than 10% of its range counts; only doji is skipped.'}
                         </div>
-                      ) : (() => {
-                        const strictKey = `retraceStrictMode${row.suffix}` as keyof StrategySettings;
-                        const strict = (strategy as any)[strictKey] !== false;
-                        return (
-                          <button
-                            type="button"
-                            onClick={() => updateStrategy(strictKey, !strict)}
-                            style={{
-                              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                              gap: 10, padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
-                              background: strict ? 'rgba(16,185,129,0.12)' : '#151515',
-                              border: `2px solid ${strict ? 'rgba(16,185,129,0.5)' : '#2a2a2a'}`,
-                              color: strict ? '#10b981' : '#bbb', textAlign: 'right',
-                            }}
-                          >
-                            <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                              <span style={{ fontSize: 14, fontWeight: 900 }}>{isAr ? 'وضع صارم (Strict)' : 'Strict mode'}</span>
-                              <span style={{ fontSize: 11, opacity: 0.75 }}>
-                                {isAr ? 'اختياري — مطفأ افتراضياً مثل الفوركس: تجاهل Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star' : 'Optional — OFF by default like forex: skip Spinning Top / High-wave / Inside Bar / Hammer / Shooting Star'}
-                              </span>
-                            </span>
-                            <span style={{ width: 44, height: 24, borderRadius: 99, background: strict ? '#10b981' : '#3a3a3a', display: 'flex', alignItems: 'center', padding: 2, flexShrink: 0 }}>
-                              <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#fff', transform: `translateX(${strict ? 20 : 0}px)`, transition: 'transform .15s' }} />
-                            </span>
-                          </button>
-                        );
-                      })()}
+                      )}
 
                     </div>
                   );

@@ -55,11 +55,12 @@ check('legacy settings now match forex logic', summary(legacy as StrategySetting
 ]);
 check('migration does not reapply', applyRetraceAllCategoriesMigration(legacy, storage), false);
 
-// Manual OFF / manual Strict ON after migration must be respected forever.
+// Manual OFF is still respected. Strict mode is hidden and always OFF, even
+// when an old save still carries `true`.
 const manual: any = { ...legacy, retraceFilterEnabledCrypto: false, retraceStrictModeStocks: true };
 check('manual choices survive migration flag', applyRetraceAllCategoriesMigration(manual, storage), false);
 check('manual disable respected', resolveRetraceConfig(manual as StrategySettings, 'crypto').enabled, false);
-check('manual strict respected', resolveRetraceConfig(manual as StrategySettings, 'stocks').strictMode, true);
+check('hidden strict stays off', resolveRetraceConfig(manual as StrategySettings, 'stocks').strictMode, false);
 
 console.log(ok ? '\nPASS: forex-style retrace for every category' : '\nFAIL: forex-style retrace for every category');
 if (!ok) process.exit(1);

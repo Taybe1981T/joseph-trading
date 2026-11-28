@@ -124,10 +124,11 @@ export function resolveRetraceConfig(
     ? storedTf
     : DEFAULT_RETRACE_TIMEFRAME;
 
-  // Lenient counting is now the default for EVERY category (only doji is
-  // skipped). Strict mode is opt-in per category, so turning it ON here still
-  // works and turning the whole filter OFF elsewhere restores the old behaviour.
-  const strictMode = raw[`retraceStrictMode${suffix}`] === true;
+  // Strict mode is hidden from every settings screen and stays OFF everywhere.
+  // Legacy saves may still contain `true`; it is ignored here so the engine
+  // always uses the lenient rule where only doji is transparent. The low-level
+  // counting helpers keep their `strictMode` option for internal tests only.
+  const strictMode = false;
 
   // Opt-in only: anything other than an explicit 'windowed' keeps the existing
   // consecutive rule. Old installs (no key at all) therefore behave unchanged.

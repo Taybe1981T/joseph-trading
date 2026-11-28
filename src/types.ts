@@ -157,8 +157,9 @@ export interface StrategySettings {
   retraceTimeframeCrypto?: string;
   retraceTimeframeStocks?: string;
   retraceTimeframeMetals?: string;
-  // Strict mode: also skip spinning tops, high-waves, inside bars and reversal
-  // candles (hammer / shooting star). When false, only doji is skipped.
+  // Legacy Strict-mode keys are kept only for old saved settings. The option is
+  // hidden from the UI and resolveRetraceConfig always treats it as OFF, so
+  // only doji is transparent. Do not expose these keys again without approval.
   retraceStrictModeForex?: boolean;
   retraceStrictModeCrypto?: boolean;
   retraceStrictModeStocks?: boolean;
